@@ -1066,6 +1066,88 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('protects the full-ID list and single-action manual approval', async () => {
+    const candidateId = '22222222-2222-4222-8222-222222222222';
+    const requestId = '77777777-7777-4777-8777-777777777777';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        manualPayments: {
+          listCases: async () => [],
+          listSms: async () => [],
+          decide: async () => ({ caseId: candidateId, status: 'rejected' as const }),
+          complete: async () => ({ caseId: candidateId, status: 'manually_credited' as const }),
+          listSubmittedPayments: async (actor, status) => {
+            calls.push(['list', actor, status]);
+            return [];
+          },
+          approveForImmediateCredit: async (actor, candidate, details) => {
+            calls.push(['approve', actor, candidate, details]);
+            return { caseId: candidateId, status: 'manually_credited' as const };
+          },
+        },
+      }),
+    });
+    try {
+      const url = '/v1/owner/submitted-payments?status=pending';
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
+      const listed = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.headers['cache-control']).toContain('no-store');
+      expect(listed.json()).toEqual({ payments: [] });
+      const approvalUrl = `/v1/owner/submitted-payments/${candidateId}/approve`;
+      const payload = {
+        amountMinor: '3300',
+        receiverAccountId: '55555555-5555-4555-8555-555555555555',
+        bankPaymentConfirmed: true,
+        requestId,
+        confirmed: true,
+      };
+      const headers = {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-fetanagent-owner-csrf': 'owner-manual-payment-v1',
+        'x-idempotency-key': requestId,
+      };
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: approvalUrl,
+            payload: { ...payload, playerCreditedConfirmed: true },
+            headers,
+          })
+        ).statusCode,
+      ).toBe(400);
+      const approved = await app.inject({ method: 'POST', url: approvalUrl, payload, headers });
+      expect(approved.statusCode).toBe(200);
+      expect(approved.json()).toEqual({
+        approved: { caseId: candidateId, status: 'manually_credited' },
+      });
+      expect(calls).toEqual([
+        ['list', authUserId, 'pending'],
+        [
+          'approve',
+          authUserId,
+          candidateId,
+          {
+            amountMinor: '3300',
+            receiverAccountId: payload.receiverAccountId,
+            bankPaymentConfirmed: true,
+          },
+        ],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('validates Owner SMS search filters before querying the read-only inbox', async () => {
     const calls: unknown[] = [];
     const app = buildOwnerControlApp(config(false, false, 'staging'), {

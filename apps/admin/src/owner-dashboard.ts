@@ -13,18 +13,18 @@ export const OWNER_CONTROL_GROUPS = [
     title: 'Review and decide',
     controls: [
       {
-        label: 'Review payments',
+        label: 'Submitted payments',
         description:
-          'Approve or reject a payment case. Record a manual credit only after you have credited the Player outside FetanAgent.',
+          'Approve a verified payment, then immediately credit its Player ID in KemerBet.',
         effect: 'Payment decision',
-        view: 'home',
+        view: 'submitted',
         section: 'receiver-sms-old-title',
       },
       {
         label: 'TeleBirr payment alerts',
         description: 'Inspect payments that need a closer look before making a decision.',
         effect: 'Review only',
-        view: 'home',
+        view: 'submitted',
         section: 'telebirr-fast-alert-title',
       },
       {
@@ -32,14 +32,14 @@ export const OWNER_CONTROL_GROUPS = [
         description:
           'See incoming SMS and payment status. Mark a linked case manually credited only after crediting the Player outside FetanAgent.',
         effect: 'Can record manual credit',
-        view: 'payments',
+        view: 'sms',
         section: 'receiver-sms-inbox-title',
       },
       {
         label: 'Transaction history',
         description: 'Search older TeleBirr payments and their recorded outcomes.',
         effect: 'Review only',
-        view: 'payments',
+        view: 'submitted',
         section: 'transactions-title',
       },
       {
@@ -47,7 +47,7 @@ export const OWNER_CONTROL_GROUPS = [
         description:
           'Inspect payments fenced because the receiving wallet changed during an instruction.',
         effect: 'Review only',
-        view: 'payments',
+        view: 'sms',
         section: 'receiver-change-review-title',
       },
       {
@@ -297,7 +297,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <p class="owner-navigation-label">WORKSPACE</p>
             <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
             <button id="owner-nav-controls" type="button">All controls</button>
-            <button id="owner-nav-payments" type="button" data-owner-view="payments">Payments &amp; SMS</button>
+            <button id="owner-nav-sms" type="button" data-owner-view="sms">SMS</button>
+            <button id="owner-nav-submitted" type="button" data-owner-view="submitted">Submitted payments</button>
             <button id="owner-nav-methods" type="button" data-owner-view="methods">Payment methods</button>
             <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
             <button id="owner-nav-system" type="button" data-owner-view="system">System</button>
@@ -337,7 +338,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="transactions-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Search older TeleBirr payments here. Use Payment review on Home to approve a case for manual credit or reject it.</p>
+          <p class="receipt-label">Search older TeleBirr transactions and their recorded outcomes.</p>
           <form id="transactions-filters" class="transactions-filters" autocomplete="off">
             <div>
               <label for="transactions-status-filter">Status</label>
@@ -371,18 +372,17 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         </section>
         <section class="review-section" aria-labelledby="receiver-sms-old-title">
           <div class="panel-heading">
-            <h2 id="receiver-sms-old-title">Payment review <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
+            <h2 id="receiver-sms-old-title">Submitted payments <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
             <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Approve reserves the payment for you. Credit the Player outside FetanAgent, then mark it manually credited here. You can approve without a matching SMS; rejecting a payment requires a reason.</p>
-          <label for="manual-payment-status-filter">Show cases</label>
+          <p class="receipt-label">Automatic credit continues normally. For an emergency manual credit, verify the payment, then click Approve. FetanAgent immediately records the reference as credited and queues the normal customer approval message. Credit the displayed Player ID in KemerBet immediately afterward. If no SMS arrived, first confirm the payment in your bank record.</p>
+          <label for="manual-payment-status-filter">Show payments</label>
           <select id="manual-payment-status-filter">
-            <option value="pending">Pending review</option>
-            <option value="awaiting_manual_credit">Awaiting manual credit</option>
-            <option value="manually_credited">Manually credited</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-          <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load payment cases.</p>
+          <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load submitted payments.</p>
           <div class="request-list" id="receiver-sms-old-list"></div>
           <button class="secondary transactions-more" id="manual-payment-more" type="button" hidden>Show older cases</button>
         </section>
@@ -391,7 +391,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-inbox-title">Received payment SMS</h2>
             <button class="secondary" id="receiver-sms-inbox-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See TeleBirr and CBE Birr payments received by the phone, including those without a customer submission. Complete any linked Player credit before marking a payment manually credited.</p>
+          <p class="receipt-label">See incoming TeleBirr and CBE Birr SMS, including payments without a customer submission. Use Mark manually credited only after resolving the payment outside FetanAgent; the reference is then blocked from automatic credit.</p>
           <form id="receiver-sms-inbox-filters" class="transactions-filters" autocomplete="off">
             <div>
               <label for="receiver-sms-inbox-provider-filter">Provider</label>
@@ -1182,6 +1182,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .request-meta { margin: 0; color: #60757e; font-size: 0.82rem; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
+.submitted-payment-actions { display: grid; gap: 10px; margin-top: 14px; }
+.submitted-payment-actions .manual-completion-form { margin-top: 0; }
+.submitted-payment-actions > button { justify-self: start; }
 .manual-completion-form { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #b8ded6; border-radius: 10px; background: #f0f9f6; }
 .manual-completion-form > label:not(.confirmation-row) { display: grid; gap: 6px; }
 .manual-completion-form button { justify-self: start; }
@@ -1246,12 +1249,17 @@ const ownerViews = {
   home: {
     title: 'Control panel',
     description: 'See what needs attention and choose the exact control you need.',
-    sections: ['owner-controls-title', 'system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
+    sections: ['owner-controls-title', 'system-overview-title'],
   },
-  payments: {
-    title: 'Payments & SMS',
-    description: 'Check received payments, search history, and inspect receiver-change cases.',
-    sections: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
+  sms: {
+    title: 'SMS',
+    description: 'Check signed incoming payment SMS and safely record payments resolved outside FetanAgent.',
+    sections: ['receiver-sms-inbox-title', 'receiver-change-review-title'],
+  },
+  submitted: {
+    title: 'Submitted payments',
+    description: 'Review customer submissions, copy the Player ID, and see pending, approved, and rejected outcomes.',
+    sections: ['receiver-sms-old-title', 'transactions-title', 'telebirr-fast-alert-title'],
   },
   methods: {
     title: 'Payment methods',
@@ -3457,7 +3465,7 @@ function signOut(message = 'Signed out.') {
   receiverSmsOldList.replaceChildren();
   receiverSmsOldBadge.hidden = true;
   receiverSmsOldBadge.textContent = '';
-  receiverSmsOldStatus.textContent = 'Sign in to load older SMS payments.';
+  receiverSmsOldStatus.textContent = 'Sign in to load submitted payments.';
   manualPaymentOffset = 0;
   receiverSmsInboxOffset = 0;
   receiverSmsInboxLoadGeneration += 1;
@@ -5965,7 +5973,7 @@ function renderTransaction(value) {
   if (value.canDecide) {
     const note = document.createElement('p');
     note.className = 'request-meta';
-    note.textContent = 'Available in Payment review for a manual decision.';
+    note.textContent = 'Available in Submitted payments for a manual decision.';
     card.append(note);
   } else if (value.statusDetail === 'held_review') {
     const note = document.createElement('p');
@@ -6039,7 +6047,7 @@ async function loadTransactions(reset) {
 
 function validManualPaymentCase(value) {
   return value && typeof value === 'object' &&
-    ['pending','awaiting_manual_credit','manually_credited','rejected'].includes(value.status) &&
+    ['pending','approved','rejected'].includes(value.status) &&
     ['telebirr','cbe_birr'].includes(value.providerCode) &&
     (value.caseId === null || (typeof value.caseId === 'string' && value.caseId.length === 36)) &&
     (value.candidateId === null || (typeof value.candidateId === 'string' && value.candidateId.length === 36)) &&
@@ -6051,12 +6059,18 @@ function validManualPaymentCase(value) {
         value.referenceMasked.length === 7)) &&
     (value.amountMinor === null ||
       (typeof value.amountMinor === 'string' && Number.isSafeInteger(Number(value.amountMinor)) &&
-        Number(value.amountMinor) >= 2500 && Number(value.amountMinor) <= 2500000)) &&
+        Number(value.amountMinor) >= 1 && Number(value.amountMinor) <= 9999999999)) &&
+    (value.paymentEventId === null || value.amountMinor !== null) &&
     (value.receiverAccountId === null ||
       (typeof value.receiverAccountId === 'string' && value.receiverAccountId.length === 36)) &&
     (value.receiverAccountMasked === null || typeof value.receiverAccountMasked === 'string') &&
-    (value.playerMasked === null || typeof value.playerMasked === 'string') &&
-    (value.submittedAt === null || Number.isFinite(Date.parse(value.submittedAt))) &&
+    typeof value.playerId === 'string' &&
+    /^[^\s\u0000-\u001f\u007f]{1,64}$/.test(value.playerId) &&
+    typeof value.statusDetail === 'string' && value.statusDetail.length <= 160 &&
+    [null,'awaiting_manual_credit','manually_credited','rejected'].includes(value.ownerCaseStatus) &&
+    typeof value.canApprove === 'boolean' && typeof value.canReject === 'boolean' &&
+    (!value.canApprove || (value.status === 'pending' && value.canReject)) &&
+    Number.isFinite(Date.parse(value.submittedAt)) &&
     (value.paymentAt === null || Number.isFinite(Date.parse(value.paymentAt))) &&
     (value.decidedAt === null || Number.isFinite(Date.parse(value.decidedAt))) &&
     (value.completedAt === null || Number.isFinite(Date.parse(value.completedAt))) &&
@@ -6088,22 +6102,17 @@ async function refreshManualReceiverAccounts() {
 
 async function decideManualPaymentCase(value, action) {
   if (!accessToken || receiverSmsOldBusy || value.status !== 'pending' ||
+      action !== 'reject' || !value.canReject ||
       !(value.candidateId || value.legacyCandidateId)) return;
-  let reason = null;
-  if (action === 'reject') {
-    reason = window.prompt('Enter the reason for rejection (10–240 characters). It is kept for the Owner; the customer receives a normal not-credited message.');
-    if (reason === null) return;
-    reason = reason.trim();
-    if (reason.length < 10 || reason.length > 240) {
-      setNotice('Enter a reason of 10–240 characters.');
-      return;
-    }
+  let reason = window.prompt('Enter the reason for rejection (10–240 characters). It is kept for the Owner; the customer receives a normal not-credited message.');
+  if (reason === null) return;
+  reason = reason.trim();
+  if (reason.length < 10 || reason.length > 240) {
+    setNotice('Enter a reason of 10–240 characters.');
+    return;
   }
   const reference = value.referenceMasked || 'this reference';
-  const message = action === 'approve'
-    ? 'Reserve ' + reference + ' for manual credit? No automatic Player credit will start. Credit the selected Player outside FetanAgent before marking it manually credited.'
-    : 'Reject ' + reference + '? The linked customer will receive a not-credited result.';
-  if (!window.confirm(message)) return;
+  if (!window.confirm('Reject ' + reference + '? The linked customer will receive a not-credited result.')) return;
   receiverSmsOldBusy = true;
   const requestId = crypto.randomUUID();
   try {
@@ -6111,13 +6120,11 @@ async function decideManualPaymentCase(value, action) {
       '/v1/owner/manual-payment-cases/' +
         encodeURIComponent(value.candidateId || value.legacyCandidateId) + '/decision', {
         method: 'POST', headers: manualPaymentHeaders(requestId),
-        body: JSON.stringify({ decision: action, reason, requestId, confirmed: true }),
+        body: JSON.stringify({ decision: 'reject', reason, requestId, confirmed: true }),
       });
     if (!response.ok) throw new Error('manual_decision');
-    setNotice(action === 'approve'
-      ? 'Reference reserved. Credit the Player manually, then record completion here.'
-      : 'Rejection recorded. The customer will receive a normal not-credited result.');
-    manualPaymentStatusFilter.value = action === 'approve' ? 'awaiting_manual_credit' : 'rejected';
+    setNotice('Rejection recorded. The customer will receive a normal not-credited result.');
+    manualPaymentStatusFilter.value = 'rejected';
   } catch (error) {
     if (!isSignedOutError(error))
       setNotice('Decision could not be confirmed. Refresh before trying again.');
@@ -6133,6 +6140,108 @@ function parseEtbMinor(raw) {
   const minor = Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2,'0'));
   return Number.isSafeInteger(minor) && minor >= 2500 && minor <= 2500000
     ? String(minor) : null;
+}
+
+async function approveSubmittedPayment(value, form) {
+  if (!accessToken || receiverSmsOldBusy || value.status !== 'pending' ||
+      !value.canApprove || !(value.candidateId || value.legacyCandidateId)) return;
+  const hasSms = value.paymentEventId !== null;
+  let amountMinor = null;
+  let receiverAccountId = null;
+  let bankPaymentConfirmed = false;
+  if (!hasSms) {
+    amountMinor = parseEtbMinor(form.elements.amountEtb.value.trim());
+    receiverAccountId = form.elements.receiverAccountId.value;
+    bankPaymentConfirmed = form.elements.bankPaymentConfirmed.checked;
+    if (amountMinor === null || !receiverAccountId || !bankPaymentConfirmed) {
+      setNotice('Enter the bank-confirmed ETB amount and receiving account before approval.');
+      return;
+    }
+  }
+  receiverSmsOldBusy = true;
+  const requestId = crypto.randomUUID();
+  let nextStep = null;
+  let uncertainStep = null;
+  try {
+    const response = await ownerRequest('/v1/owner/submitted-payments/' +
+      encodeURIComponent(value.candidateId || value.legacyCandidateId) + '/approve', {
+        method: 'POST', headers: manualPaymentHeaders(requestId),
+        body: JSON.stringify({ amountMinor, receiverAccountId, bankPaymentConfirmed,
+          requestId, confirmed: true }),
+      });
+    if (!response.ok) throw new Error('manual_approval');
+    const payload = await response.json();
+    if (payload?.approved?.status !== 'manually_credited') throw new Error('manual_approval');
+    manualPaymentStatusFilter.value = 'approved';
+    const amount = minorEtb(hasSms ? value.amountMinor : amountMinor);
+    nextStep = 'Approved. Customer approval message queued. Credit Player ID ' +
+      value.playerId + ' with ' + amount + ' in KemerBet now.';
+    setNotice(nextStep);
+    receiverSmsOldStatus.textContent = nextStep;
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      manualPaymentStatusFilter.value = 'approved';
+      uncertainStep = 'Approval status is uncertain. Check Approved payments for Player ID ' +
+        value.playerId + '. If it appears, credit the Player in KemerBet now. Otherwise return to Pending and retry.';
+      setNotice(uncertainStep);
+    }
+  } finally {
+    receiverSmsOldBusy = false;
+    if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
+    if (accessToken && manualPaymentStatusFilter.value === 'approved' &&
+        (nextStep !== null || uncertainStep !== null))
+      receiverSmsOldStatus.textContent = nextStep || uncertainStep;
+  }
+}
+
+function manualApprovalForm(value) {
+  const form = document.createElement('form');
+  form.className = 'manual-completion-form';
+  if (value.paymentEventId === null) {
+    const amountLabel = document.createElement('label');
+    amountLabel.textContent = 'Amount confirmed in bank record (ETB)';
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.name = 'amountEtb';
+    amountInput.inputMode = 'decimal';
+    amountInput.placeholder = '25.00';
+    amountLabel.append(amountInput);
+    const receiverLabel = document.createElement('label');
+    receiverLabel.textContent = 'Receiving account shown in bank record';
+    const receiverSelect = document.createElement('select');
+    receiverSelect.name = 'receiverAccountId';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select receiving account';
+    receiverSelect.append(placeholder);
+    for (const receiver of manualReceiverAccounts.filter((item) =>
+      item.providerCode === value.providerCode)) {
+      const option = document.createElement('option');
+      option.value = receiver.receiverRevisionId;
+      option.textContent = receiver.accountHolderName + ' · ' +
+        receiver.accountReferenceMasked + ' · revision ' + receiver.revision;
+      receiverSelect.append(option);
+    }
+    receiverLabel.append(receiverSelect);
+    const bankLabel = document.createElement('label');
+    bankLabel.className = 'confirmation-row';
+    const bankCheck = document.createElement('input');
+    bankCheck.type = 'checkbox';
+    bankCheck.name = 'bankPaymentConfirmed';
+    const bankText = document.createElement('span');
+    bankText.textContent = 'I confirmed this incoming payment in the provider’s bank record.';
+    bankLabel.append(bankCheck,bankText);
+    form.append(amountLabel,receiverLabel,bankLabel);
+  }
+  const button = document.createElement('button');
+  button.type = 'submit';
+  button.textContent = 'Approve';
+  form.append(button);
+  form.addEventListener('submit',(event) => {
+    event.preventDefault();
+    void approveSubmittedPayment(value,form);
+  });
+  return form;
 }
 
 async function completeManualPayment(value, form) {
@@ -6173,7 +6282,7 @@ async function completeManualPayment(value, form) {
         playerCreditedConfirmed: true, requestId }),
     });
     if (!response.ok) throw new Error('manual_completion');
-    if (!directSms) manualPaymentStatusFilter.value = 'manually_credited';
+    if (!directSms) manualPaymentStatusFilter.value = 'approved';
     setNotice(unlinkedSms
       ? 'Received payment marked manually credited. Its reference cannot be reused.'
       : 'Manual credit recorded. The customer will receive Deposit complete.');
@@ -6238,7 +6347,7 @@ function manualCompletionForm(value) {
   creditLabel.append(creditCheck,creditText);
   const button = document.createElement('button');
   button.type = 'submit';
-  button.textContent = 'Manually credited';
+  button.textContent = 'Mark manually credited';
   form.append(creditLabel,button);
   form.addEventListener('submit',(event) => {
     event.preventDefault();
@@ -6255,41 +6364,69 @@ function renderManualPaymentCase(value) {
     ' · ' + (value.referenceMasked || 'reference ending unavailable');
   const facts = document.createElement('dl');
   facts.className = 'transaction-facts';
-  transactionFact(facts,'Status',({ pending: 'Pending review',
-    awaiting_manual_credit: 'Awaiting manual credit',
-    manually_credited: 'Manually credited', rejected: 'Rejected' })[value.status]);
-  if (value.submittedAt) transactionFact(facts,'Submitted',transactionDate(value.submittedAt));
+  transactionFact(facts,'Status',value.status === 'approved' ? 'Approved' :
+    value.status === 'rejected' ? 'Rejected' : 'Pending');
+  transactionFact(facts,'Details',value.statusDetail);
+  transactionFact(facts,'Submitted',transactionDate(value.submittedAt));
   if (value.legacyCandidateId)
     transactionFact(facts,'Proof','Older signed TeleBirr receipt');
   transactionFact(facts,'Payment time',value.paymentAt
     ? transactionDate(value.paymentAt) : 'No matching phone SMS');
   transactionFact(facts,'Amount',value.amountMinor ? minorEtb(value.amountMinor) : 'Not verified');
   transactionFact(facts,'Receiving account',value.receiverAccountMasked || 'Not verified');
-  transactionFact(facts,'Player',value.playerMasked || 'No linked Player');
+  transactionFact(facts,'Player ID',value.playerId);
   if (value.rejectionReason) transactionFact(facts,'Owner reason',value.rejectionReason);
   if (value.decidedAt) transactionFact(facts,'Decision',transactionDate(value.decidedAt));
   if (value.completedAt) transactionFact(facts,'Completed',transactionDate(value.completedAt));
   card.append(title,facts);
-  if (value.status === 'pending') {
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'secondary';
+  copy.textContent = 'Copy Player ID';
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(value.playerId);
+      setNotice('Player ID copied.');
+    } catch {
+      setNotice('Could not copy the Player ID. Select the visible ID to copy it.');
+    }
+  });
+  card.append(copy);
+  if (value.ownerCaseStatus === 'awaiting_manual_credit') {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'This case was approved under the earlier process. Record the completed manual credit below.';
+    card.append(note,manualCompletionForm(value));
+  } else if (value.status === 'pending') {
     const actions = document.createElement('div');
-    actions.className = 'review-actions';
-    for (const action of ['approve','reject']) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = action === 'reject' ? 'danger' : '';
-      button.textContent = action === 'approve' ? 'Approve for manual credit' : 'Reject';
-      button.addEventListener('click',() => void decideManualPaymentCase(value,action));
-      actions.append(button);
+    actions.className = 'submitted-payment-actions';
+    if (value.canApprove) {
+      const guidance = document.createElement('p');
+      guidance.className = 'request-meta';
+      guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
+      actions.append(guidance,manualApprovalForm(value));
     }
+    else {
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.textContent = 'Approve';
+      approve.disabled = true;
+      actions.append(approve);
+    }
+    const reject = document.createElement('button');
+    reject.type = 'button';
+    reject.className = 'danger';
+    reject.textContent = 'Reject';
+    reject.disabled = !value.canReject;
+    if (value.canReject)
+      reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject'));
+    actions.append(reject);
     card.append(actions);
-  } else if (value.status === 'awaiting_manual_credit' || value.status === 'rejected') {
-    if (value.status === 'rejected') {
-      const note = document.createElement('p');
-      note.className = 'request-meta';
-      note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
-      card.append(note);
-    }
-    card.append(manualCompletionForm(value));
+  } else if (value.ownerCaseStatus === 'rejected') {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
+    card.append(note,manualCompletionForm(value));
   }
   return card;
 }
@@ -6302,33 +6439,33 @@ async function loadManualPaymentCases(reset) {
   const offset = reset ? 0 : manualPaymentOffset;
   receiverSmsOldRefresh.disabled = true;
   manualPaymentMore.disabled = true;
-  receiverSmsOldStatus.textContent = 'Loading payment cases…';
+  receiverSmsOldStatus.textContent = 'Loading submitted payments…';
   try {
-    if (status === 'awaiting_manual_credit' || status === 'rejected')
+    if (status === 'pending' || status === 'rejected')
       await refreshManualReceiverAccounts();
-    const response = await ownerRequest('/v1/owner/manual-payment-cases?status=' +
+    const response = await ownerRequest('/v1/owner/submitted-payments?status=' +
       encodeURIComponent(status) + '&limit=25&offset=' + offset, {
         method: 'GET', headers: {},
       });
     if (!response.ok) throw new Error('manual_cases');
     const payload = await response.json();
-    if (!payload || !Array.isArray(payload.cases) || payload.cases.length > 25 ||
-        !payload.cases.every(validManualPaymentCase) ||
-        payload.cases.some((value) => value.status !== status)) throw new Error('manual_cases');
+    if (!payload || !Array.isArray(payload.payments) || payload.payments.length > 25 ||
+        !payload.payments.every(validManualPaymentCase) ||
+        payload.payments.some((value) => value.status !== status)) throw new Error('submitted_payments');
     if (generation !== ownerAuthGeneration || loadGeneration !== receiverSmsOldLoadGeneration ||
         !accessToken || manualPaymentStatusFilter.value !== status) return;
     if (reset) receiverSmsOldList.replaceChildren();
-    for (const value of payload.cases) receiverSmsOldList.append(renderManualPaymentCase(value));
-    manualPaymentOffset = offset + payload.cases.length;
-    manualPaymentMore.hidden = payload.cases.length < 25;
-    receiverSmsOldBadge.hidden = status !== 'pending' || payload.cases.length === 0;
-    receiverSmsOldBadge.textContent = payload.cases.length + ' shown';
-    receiverSmsOldStatus.textContent = payload.cases.length === 0 && reset
-      ? 'No cases in this view.' : 'Showing ' + manualPaymentOffset + ' case(s).';
+    for (const value of payload.payments) receiverSmsOldList.append(renderManualPaymentCase(value));
+    manualPaymentOffset = offset + payload.payments.length;
+    manualPaymentMore.hidden = payload.payments.length < 25;
+    receiverSmsOldBadge.hidden = status !== 'pending' || payload.payments.length === 0;
+    receiverSmsOldBadge.textContent = payload.payments.length + ' shown';
+    receiverSmsOldStatus.textContent = payload.payments.length === 0 && reset
+      ? 'No submitted payments in this view.' : 'Showing ' + manualPaymentOffset + ' submitted payment(s).';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration &&
         !isSignedOutError(error))
-      receiverSmsOldStatus.textContent = 'Payment cases are unavailable. Refresh to try again.';
+      receiverSmsOldStatus.textContent = 'Submitted payments are unavailable. Refresh to try again.';
   } finally {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration) {
       receiverSmsOldRefresh.disabled = false;

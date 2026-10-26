@@ -892,6 +892,85 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
+    it('approves before outside credit and queues the normal customer success message atomically', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        const account = await client.query<{ id: string; player_id: string }>(
+          `select receiver.id, player.player_id from app.receiver_sms_deposit_candidates candidate
+            join app.customer_platform_players player on player.id = candidate.player_account_id
+            join app.receiver_accounts receiver on receiver.provider_id = candidate.payment_provider_id
+            where candidate.id = $1::uuid and receiver.status = 'active'
+              and receiver.retired_at is null`,
+          [candidate],
+        );
+        expect(account.rows).toHaveLength(1);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const pending = await client.query<{
+          player_id: string;
+          payment_status: string;
+          can_approve: boolean;
+        }>(
+          `select player_id,payment_status,can_approve
+            from app.list_owner_submitted_payments($1::uuid,'pending',25,0)
+            where candidate_id = $2::uuid`,
+          [getOwner(), candidate],
+        );
+        expect(pending.rows).toEqual([
+          {
+            player_id: account.rows[0]!.player_id,
+            payment_status: 'pending',
+            can_approve: true,
+          },
+        ]);
+        await client.query('savepoint incomplete_approval');
+        await expect(
+          client.query(
+            `select app.approve_owner_manual_payment_for_immediate_credit(
+            $1::uuid,$2::uuid,3300,$3::uuid,false)`,
+            [getOwner(), candidate, account.rows[0]!.id],
+          ),
+        ).rejects.toThrow('bank confirmation');
+        await client.query('rollback to savepoint incomplete_approval');
+        const approved = await client.query<{ result: { status: string } }>(
+          `select app.approve_owner_manual_payment_for_immediate_credit(
+            $1::uuid,$2::uuid,3300,$3::uuid,true) as result`,
+          [getOwner(), candidate, account.rows[0]!.id],
+        );
+        expect(approved.rows[0]?.result.status).toBe('manually_credited');
+        const listed = await client.query<{ payment_status: string; can_approve: boolean }>(
+          `select payment_status,can_approve
+            from app.list_owner_submitted_payments($1::uuid,'approved',25,0)
+            where candidate_id = $2::uuid`,
+          [getOwner(), candidate],
+        );
+        expect(listed.rows).toEqual([{ payment_status: 'approved', can_approve: false }]);
+        await client.query('reset session authorization');
+        const fences = await client.query<{
+          jobs: string;
+          cases: string;
+          customer_notice: string;
+        }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as jobs,
+            (select count(*)::text from app.owner_manual_payment_cases
+              where candidate_id=$1::uuid and status='manually_credited') as cases,
+            (select count(*)::text from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$1::uuid and notification_stage='manual_final'
+                and outcome_code='credited' and amount_minor=3300
+                and status='pending') as customer_notice`,
+          [candidate],
+        );
+        expect(fences.rows).toEqual([{ jobs: '0', cases: '1', customer_notice: '1' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
     it('records a later manual credit correction while retaining the rejected audit reason', async () => {
       const client = getClient();
       await client.query('begin');

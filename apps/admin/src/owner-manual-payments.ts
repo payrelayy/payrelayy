@@ -30,6 +30,29 @@ export interface OwnerManualCase {
   readonly completedAt: string | null;
 }
 
+export interface OwnerSubmittedPayment {
+  readonly caseId: string | null;
+  readonly candidateId: string | null;
+  readonly legacyCandidateId: string | null;
+  readonly paymentEventId: string | null;
+  readonly providerCode: 'telebirr' | 'cbe_birr';
+  readonly referenceMasked: string | null;
+  readonly submittedAt: string;
+  readonly paymentAt: string | null;
+  readonly amountMinor: string | null;
+  readonly receiverAccountId: string | null;
+  readonly receiverAccountMasked: string | null;
+  readonly playerId: string;
+  readonly status: 'pending' | 'approved' | 'rejected';
+  readonly statusDetail: string;
+  readonly ownerCaseStatus: 'awaiting_manual_credit' | 'manually_credited' | 'rejected' | null;
+  readonly rejectionReason: string | null;
+  readonly decidedAt: string | null;
+  readonly completedAt: string | null;
+  readonly canApprove: boolean;
+  readonly canReject: boolean;
+}
+
 export interface OwnerReceiverSmsInboxItem {
   readonly paymentEventId: string;
   readonly providerCode: 'telebirr' | 'cbe_birr';
@@ -62,6 +85,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const MASKED_REFERENCE = /^\*{3}[A-Z0-9]{4}$/u;
 const MASKED_PLAYER = /^\*{3}[^\s\u0000-\u001f\u007f]{1,4}$/u;
 const MASKED_RECEIVER = /^\*{3,4}[0-9]{4}$/u;
+const PLAYER_ID = /^[^\s\u0000-\u001f\u007f]{1,64}$/u;
 const STATUSES = new Set(['pending', 'awaiting_manual_credit', 'manually_credited', 'rejected']);
 const SMS_STATUSES = new Set([
   'unmatched',
@@ -118,6 +142,13 @@ function amount(value: unknown, optional = false): string | null {
     BigInt(value) > 2500000n ||
     BigInt(value) < 2500n
   )
+    throw new OwnerManualPaymentUnavailableError();
+  return value;
+}
+
+function displayedPaymentAmount(value: unknown, optional = false): string | null {
+  if (optional && value === null) return null;
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/u.test(value) || BigInt(value) > 9999999999n)
     throw new OwnerManualPaymentUnavailableError();
   return value;
 }
@@ -247,6 +278,123 @@ export class PostgresOwnerManualPayments {
           completedAt: date(row.completed_at, true),
         };
       });
+    } catch (error) {
+      translate(error);
+    }
+  }
+
+  async listSubmittedPayments(
+    actor: string,
+    status: OwnerSubmittedPayment['status'],
+    limit = 25,
+    offset = 0,
+  ): Promise<readonly OwnerSubmittedPayment[]> {
+    if (
+      !UUID.test(actor) ||
+      !['pending', 'approved', 'rejected'].includes(status) ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 50 ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > 10000
+    )
+      throw new OwnerManualPaymentRejectedError();
+    try {
+      const result = await this.database.query(
+        `select case_id, candidate_id, legacy_candidate_id, payment_event_id,
+                provider_code, reference_masked, submitted_at, payment_at,
+                amount_minor::text as amount_minor, receiver_account_id,
+                receiver_account_masked, player_id, payment_status, status_detail,
+                owner_case_status, rejection_reason, decided_at, completed_at,
+                can_approve, can_reject
+           from app.list_owner_submitted_payments($1::uuid,$2::text,$3::integer,$4::integer)`,
+        [actor, status, limit, offset],
+      );
+      if (result.rows.length > limit) throw new OwnerManualPaymentUnavailableError();
+      return result.rows.map((raw) => {
+        const row = object(raw);
+        if (
+          row.payment_status !== status ||
+          typeof row.player_id !== 'string' ||
+          !PLAYER_ID.test(row.player_id) ||
+          typeof row.status_detail !== 'string' ||
+          row.status_detail.length > 160 ||
+          (row.owner_case_status !== null &&
+            !['awaiting_manual_credit', 'manually_credited', 'rejected'].includes(
+              String(row.owner_case_status),
+            )) ||
+          typeof row.can_approve !== 'boolean' ||
+          typeof row.can_reject !== 'boolean' ||
+          (row.can_approve && (status !== 'pending' || !row.can_reject)) ||
+          (row.rejection_reason !== null && typeof row.rejection_reason !== 'string')
+        )
+          throw new OwnerManualPaymentUnavailableError();
+        return {
+          caseId: uuid(row.case_id, true),
+          candidateId: uuid(row.candidate_id, true),
+          legacyCandidateId: uuid(row.legacy_candidate_id, true),
+          paymentEventId: uuid(row.payment_event_id, true),
+          providerCode: provider(row.provider_code),
+          referenceMasked: masked(row.reference_masked, MASKED_REFERENCE, true),
+          submittedAt: date(row.submitted_at)!,
+          paymentAt: date(row.payment_at, true),
+          amountMinor: displayedPaymentAmount(row.amount_minor, true),
+          receiverAccountId: uuid(row.receiver_account_id, true),
+          receiverAccountMasked: masked(row.receiver_account_masked, MASKED_RECEIVER, true),
+          playerId: row.player_id,
+          status,
+          statusDetail: row.status_detail,
+          ownerCaseStatus: row.owner_case_status as OwnerSubmittedPayment['ownerCaseStatus'],
+          rejectionReason: row.rejection_reason as string | null,
+          decidedAt: date(row.decided_at, true),
+          completedAt: date(row.completed_at, true),
+          canApprove: row.can_approve,
+          canReject: row.can_reject,
+        };
+      });
+    } catch (error) {
+      translate(error);
+    }
+  }
+
+  async approveForImmediateCredit(
+    actor: string,
+    candidateId: string,
+    request: {
+      readonly amountMinor: string | null;
+      readonly receiverAccountId: string | null;
+      readonly bankPaymentConfirmed: boolean;
+    },
+  ): Promise<{ readonly caseId: string; readonly status: 'manually_credited' }> {
+    if (
+      !UUID.test(actor) ||
+      !UUID.test(candidateId) ||
+      (request.amountMinor !== null &&
+        (!/^[1-9][0-9]*$/u.test(request.amountMinor) ||
+          BigInt(request.amountMinor) < 2500n ||
+          BigInt(request.amountMinor) > 2500000n)) ||
+      (request.receiverAccountId !== null && !UUID.test(request.receiverAccountId)) ||
+      typeof request.bankPaymentConfirmed !== 'boolean'
+    )
+      throw new OwnerManualPaymentRejectedError();
+    try {
+      const result = await this.database.query(
+        `select app.approve_owner_manual_payment_for_immediate_credit(
+          $1::uuid,$2::uuid,$3::bigint,$4::uuid,$5::boolean
+        ) as approved`,
+        [
+          actor,
+          candidateId,
+          request.amountMinor,
+          request.receiverAccountId,
+          request.bankPaymentConfirmed,
+        ],
+      );
+      if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();
+      const row = object(object(result.rows[0]).approved);
+      if (row.status !== 'manually_credited') throw new OwnerManualPaymentUnavailableError();
+      return { caseId: uuid(row.caseId)!, status: 'manually_credited' };
     } catch (error) {
       translate(error);
     }

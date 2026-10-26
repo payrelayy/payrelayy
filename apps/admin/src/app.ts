@@ -2697,6 +2697,105 @@ export function buildOwnerControlApp(
     },
   );
 
+  app.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
+    '/v1/owner/submitted-payments',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => !['status', 'limit', 'offset'].includes(key)))
+          return reply.code(400).send({ error: 'invalid_request' });
+        const status = request.query.status ?? 'pending';
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
+        if (
+          !['pending', 'approved', 'rejected'].includes(status) ||
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset > 10000
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments?.listSubmittedPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const payments = await dependencies.runtime.manualPayments.listSubmittedPayments(
+          actor,
+          status as 'pending' | 'approved' | 'rejected',
+          limit,
+          offset,
+        );
+        return reply.header('Cache-Control', 'no-store').code(200).send({ payments });
+      } catch (error) {
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        request.log.warn('Owner submitted payments are unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { candidateId: string } }>(
+    '/v1/owner/submitted-payments/:candidateId/approve',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, [
+          'amountMinor',
+          'receiverAccountId',
+          'bankPaymentConfirmed',
+          'requestId',
+          'confirmed',
+        ]);
+        if (
+          !body ||
+          !UUID_V4_PATTERN.test(request.params.candidateId) ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          (body.amountMinor !== null &&
+            (typeof body.amountMinor !== 'string' || !/^[1-9][0-9]*$/u.test(body.amountMinor))) ||
+          (body.receiverAccountId !== null &&
+            (typeof body.receiverAccountId !== 'string' ||
+              !UUID_V4_PATTERN.test(body.receiverAccountId))) ||
+          typeof body.bankPaymentConfirmed !== 'boolean' ||
+          body.confirmed !== true ||
+          Object.keys(request.query as object).length !== 0 ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            'owner-manual-payment-v1' ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments?.approveForImmediateCredit)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const approved = await dependencies.runtime.manualPayments.approveForImmediateCredit(
+          actor,
+          request.params.candidateId,
+          {
+            amountMinor: body.amountMinor as string | null,
+            receiverAccountId: body.receiverAccountId as string | null,
+            bankPaymentConfirmed: body.bankPaymentConfirmed as boolean,
+          },
+        );
+        return reply.header('Cache-Control', 'no-store').code(200).send({ approved });
+      } catch (error) {
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerManualPaymentConflictError)
+          return reply.code(409).send({ error: 'payment_not_ready' });
+        request.log.warn('Owner submitted payment approval is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
   app.get<{
     Querystring: {
       limit?: string;

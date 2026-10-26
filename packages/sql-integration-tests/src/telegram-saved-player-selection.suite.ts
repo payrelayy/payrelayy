@@ -72,15 +72,12 @@ async function saveSelection(
 
 export function registerTelegramSavedPlayerSelectionSqlTests(getClient: () => Client): void {
   describe('Telegram saved Player selection', () => {
-    it('allows different Telegram payers to share a Player without creating a payment', async () => {
+    it('keeps an unsigned eligible Player out of the verification reuse path', async () => {
       const client = getClient();
       await client.query('begin');
       try {
         const fixture = await createPilotPrerequisites(client);
         const firstEvent = await recordInbound(client, '89620000001', '89610000001');
-        const secondEvent = await recordInbound(client, '89620000002', '89610000002');
-        const changeEvent = await recordInbound(client, '89620000003', '89610000001');
-
         expect(await readSelection(client, firstEvent)).toEqual([]);
         const beforeMoney = await client.query<{
           readonly intents: string;
@@ -91,20 +88,10 @@ export function registerTelegramSavedPlayerSelectionSqlTests(getClient: () => Cl
               (select count(*)::text from app.deposit_proof_requests) as proofs,
               (select count(*)::text from app.deposit_jobs) as jobs`);
 
-        expect(await saveSelection(client, firstEvent, fixture.playerIds[0]!)).toEqual([
-          { selected_player_id: fixture.playerIds[0], request_replayed: false },
-        ]);
-        expect(await saveSelection(client, secondEvent, fixture.playerIds[0]!)).toEqual([
-          { selected_player_id: fixture.playerIds[0], request_replayed: false },
-        ]);
-        expect(await saveSelection(client, changeEvent, fixture.playerIds[1]!)).toEqual([
-          { selected_player_id: fixture.playerIds[1], request_replayed: false },
-        ]);
-        expect(await readSelection(client, firstEvent)).toEqual([fixture.playerIds[1]]);
-        expect(await readSelection(client, secondEvent)).toEqual([fixture.playerIds[0]]);
-        expect(await saveSelection(client, changeEvent, fixture.playerIds[1]!)).toEqual([
-          { selected_player_id: fixture.playerIds[1], request_replayed: true },
-        ]);
+        await expect(saveSelection(client, firstEvent, fixture.playerIds[0]!)).rejects.toThrow(
+          /no reusable signed verification/iu,
+        );
+        expect(await readSelection(client, firstEvent)).toEqual([]);
 
         const afterMoney = await client.query(`select
               (select count(*)::text from app.deposit_intents) as intents,
@@ -115,16 +102,13 @@ export function registerTelegramSavedPlayerSelectionSqlTests(getClient: () => Cl
         const selections = await client.query<{ readonly count: string }>(
           `select count(*)::text as count from app.telegram_player_selections`,
         );
-        expect(selections.rows).toEqual([{ count: '2' }]);
+        expect(selections.rows).toEqual([{ count: '0' }]);
 
-        await expect(saveSelection(client, firstEvent, fixture.playerIds[1]!)).rejects.toThrow(
-          /already has another action|replay conflicts/iu,
-        );
         const invalidEvent = await recordInbound(client, '89620000004', '89610000001');
         await expect(saveSelection(client, invalidEvent, 'UNKNOWN-PLAYER')).rejects.toThrow(
           /unavailable|not currently eligible/iu,
         );
-        expect(await readSelection(client, invalidEvent)).toEqual([fixture.playerIds[1]]);
+        expect(await readSelection(client, invalidEvent)).toEqual([]);
       } finally {
         await client.query('rollback');
       }

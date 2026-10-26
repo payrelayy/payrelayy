@@ -17,7 +17,6 @@ import {
   buildTelegramCombinedPaymentPrompt,
   toTelegramLocalReceiverNumber,
   TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
-  TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
 } from './telegram-guided-deposit.js';
 
@@ -75,11 +74,7 @@ export function presentTelegramPlayerIdFlowResult(
     case 'menu':
       return {
         kind: 'menu',
-        menu: renderPlayerRegistrationMenu(
-          result.callbackData,
-          result.selectedPlayerId,
-          context.playerValidationEnabled,
-        ),
+        menu: renderPlayerRegistrationMenu(result.callbackData, result.selectedPlayerId),
       };
     case 'player_selection_missing':
       return {
@@ -90,11 +85,8 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'menu',
         menu: {
-          text: `✅ Player ID ${result.playerId} saved.`,
-          buttons: [
-            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA },
-            { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
-          ],
+          text: '✅ Player ID verified. You can deposit now.',
+          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA }],
         },
       };
     case 'awaiting_player_id':

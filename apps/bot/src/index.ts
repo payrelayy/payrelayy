@@ -37,6 +37,7 @@ import {
   isTelegramCbeSmsDepositStartCommand,
   isTelegramGuidedDepositStartCommand,
   isTelegramSavedPlayerChangeCallback,
+  isTelegramSavedPlayerChangeCommand,
   isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
   reduceTelegramAutoReceiverSmsMediaSubmission,
@@ -74,6 +75,10 @@ import {
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
 import { renderTelegramOutcomeActions, type PrivateTelegramMenuButton } from './private-menu.js';
 import {
+  TELEGRAM_PRIVATE_HOME_COMMANDS,
+  TELEGRAM_PRIVATE_SAVED_PLAYER_COMMANDS,
+} from './telegram-command-menu.js';
+import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
   presentTelegramPlayerIdFlowResult,
   telegramDepositHelpText,
@@ -101,6 +106,18 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const outcomeActions = renderTelegramOutcomeActions();
+async function syncPrivateCommands(chatId: number, hasSavedPlayer: boolean): Promise<void> {
+  try {
+    const scope = { type: 'chat' as const, chat_id: chatId };
+    if (hasSavedPlayer) {
+      await bot.api.setMyCommands([...TELEGRAM_PRIVATE_SAVED_PLAYER_COMMANDS], { scope });
+    } else {
+      await bot.api.deleteMyCommands({ scope });
+    }
+  } catch {
+    console.warn('Telegram private command menu could not be updated.');
+  }
+}
 async function availableMenuButtons(
   buttons: readonly PrivateTelegramMenuButton[],
 ): Promise<readonly PrivateTelegramMenuButton[]> {
@@ -253,6 +270,15 @@ async function deliverPlayerAction(
       presentation.menu.text,
       inlineMenu(await availableMenuButtons(presentation.menu.buttons)),
     );
+    if (
+      'privateChatId' in action &&
+      (result.outcome === 'menu' || result.outcome === 'player_selection_saved')
+    ) {
+      void syncPrivateCommands(
+        Number(action.privateChatId),
+        result.outcome === 'player_selection_saved' || result.selectedPlayerId !== null,
+      );
+    }
   } catch {
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     console.warn(
@@ -306,6 +332,10 @@ bot.on('message', async (context) => {
       'reply_to_message' in context.message ? context.message.reply_to_message : undefined;
     if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
       await context.reply(telegramDepositHelpText(config.receiverSmsCandidateEnabled));
+      return;
+    }
+    if (isTelegramSavedPlayerChangeCommand({ ...metadata, command: text })) {
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT);
       return;
     }
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });
@@ -713,18 +743,26 @@ await runTelegramPolling(
         outcomeNotifier = runTelegramDepositOutcomeNotifier(
           {
             request: (action) => deliverTelegramPrivateActionWithRetry(action, playerActions),
-            send: async (chatId, text, showDepositButton) =>
-              bot.api.sendMessage(
+            send: async (chatId, text, showDepositButton) => {
+              const sent = await bot.api.sendMessage(
                 chatId,
                 text,
                 showDepositButton
                   ? { reply_markup: inlineMenu(await availableMenuButtons(outcomeActions)) }
                   : undefined,
-              ),
+              );
+              if (showDepositButton) void syncPrivateCommands(chatId, true);
+              return sent;
+            },
             delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
           },
           outcomeNotifierAbort.signal,
         );
+        void bot.api
+          .setMyCommands([...TELEGRAM_PRIVATE_HOME_COMMANDS], {
+            scope: { type: 'all_private_chats' },
+          })
+          .catch(() => console.warn('Telegram private command menu could not be published.'));
       }
       console.info(
         {

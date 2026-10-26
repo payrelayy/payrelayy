@@ -522,6 +522,59 @@ export function registerTelegramPlayerValidationStateSqlTests(
       }
     });
 
+    it('accepts a newer Player ID after twenty requests without duplicating or crediting', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const before = (
+          await client.query(`select
+            (select count(*)::text from app.deposit_intents) as intents,
+            (select count(*)::text from app.deposit_jobs) as jobs`)
+        ).rows;
+        const eventIds: string[] = [];
+        let newestRequestId = '';
+        for (let index = 0; index < 22; index += 1) {
+          const eventId = await inbound(client, String(89660000800 + index), '89650000800');
+          eventIds.push(eventId);
+          newestRequestId = await requestValidation(client, eventId, String(28300000 + index));
+        }
+        const statuses = await client.query<{
+          total: string;
+          superseded: string;
+          pending: string;
+          processed: string;
+        }>(
+          `select count(*)::text as total,
+                  count(*) filter (where request.status = 'superseded')::text as superseded,
+                  count(*) filter (where request.status = 'pending')::text as pending,
+                  count(*) filter (where inbound_event.processed_at is not null)::text as processed
+             from app.telegram_player_validation_requests request
+             join app.inbound_events inbound_event on inbound_event.id = request.origin_inbound_event_id
+            where request.origin_inbound_event_id = any($1::uuid[])`,
+          [eventIds],
+        );
+        expect(statuses.rows).toEqual([
+          { total: '22', superseded: '21', pending: '1', processed: '22' },
+        ]);
+        expect(
+          await asPlayerActions<{ request_id: string; request_replayed: boolean }>(
+            client,
+            'select * from app.request_telegram_player_validation($1::uuid, $2::text)',
+            [eventIds.at(-1)!, '28300021'],
+          ),
+        ).toEqual([{ request_id: newestRequestId, request_replayed: true }]);
+        expect(
+          (
+            await client.query(`select
+              (select count(*)::text from app.deposit_intents) as intents,
+              (select count(*)::text from app.deposit_jobs) as jobs`)
+          ).rows,
+        ).toEqual(before);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('serializes competing requests for one Telegram identity across database sessions', async () => {
       const observer = getClient();
       await observer.query('begin');

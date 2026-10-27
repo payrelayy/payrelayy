@@ -19,7 +19,8 @@ export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 TeleBirr';
 export const TELEGRAM_GUIDED_CBE_BUTTON_TEXT = '💳 CBE Birr';
 export const TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT = '💰 Deposit';
 
-const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
+const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 100–25,000 ETB in TeleBirr.';
+const PREVIOUS_TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
 const TELEBIRR_PRESENTATION_WINDOW_TEXT =
   'These payment details remain valid for 1 hour. Send the receipt or reference after paying.';
@@ -189,7 +190,7 @@ function renderTelegramCombinedPaymentPrompt(
     throw new Error('The combined payment prompt is unavailable.');
   return [
     '💰 FetanAgent deposit',
-    previousWording ? 'Choose one available method. Send 25–25,000 ETB.' : 'Send 25–25,000 ETB.',
+    previousWording ? 'Choose one available method. Send 100–25,000 ETB.' : 'Send 100–25,000 ETB.',
     ...input.receivers.flatMap((receiver) => [
       '',
       receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
@@ -233,17 +234,19 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
   }));
   if (!playerId) return undefined;
   try {
+    // Customers can still reply to cards issued before the amount change.
+    const replyText = message.text.replace('Send 25–25,000 ETB.', 'Send 100–25,000 ETB.');
     const input = { playerId, receivers };
     const currentPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true);
-    return message.text === currentPrompt ||
-      message.text ===
+    return replyText === currentPrompt ||
+      replyText ===
         currentPrompt.replace(
           PAYMENT_PROOF_INSTRUCTION_TEXT,
           RECENT_PAYMENT_PROOF_INSTRUCTION_TEXT,
         ) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, false, true, false) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, false, false, false) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, true, false, false)
+      replyText === renderTelegramCombinedPaymentPrompt(input, false, true, false) ||
+      replyText === renderTelegramCombinedPaymentPrompt(input, false, false, false) ||
+      replyText === renderTelegramCombinedPaymentPrompt(input, true, false, false)
       ? playerId
       : undefined;
   } catch {
@@ -272,7 +275,7 @@ function renderTelegramTelebirrPaymentPrompt(
 
   return [
     '💰 TeleBirr deposit',
-    'Send 25–25,000 ETB to:',
+    'Send 100–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
@@ -301,7 +304,7 @@ function renderTelegramCbeSmsPaymentPrompt(
     throw new Error('The CBE Birr payment prompt is unavailable.');
   return [
     '💳 CBE Birr deposit',
-    'Send 25–25,000 ETB to:',
+    'Send 100–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
@@ -329,6 +332,7 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     };
+    const replyText = message.text.replace('Send 25–25,000 ETB to:', 'Send 100–25,000 ETB to:');
     return [true, false].some((localNumber) => {
       const currentPrompt = renderTelegramCbeSmsPaymentPrompt(input, localNumber);
       const recentPrompt = currentPrompt.replace(
@@ -348,16 +352,16 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
         'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
       );
       return (
-        message.text === currentPrompt ||
-        message.text === recentPrompt ||
-        message.text ===
+        replyText === currentPrompt ||
+        replyText === recentPrompt ||
+        replyText ===
           recentPrompt.replace(
             '\nAfter paying,',
             '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
           ) ||
-        message.text === precedingPrompt ||
-        message.text === olderPrompt ||
-        message.text === previousPrompt
+        replyText === precedingPrompt ||
+        replyText === olderPrompt ||
+        replyText === previousPrompt
       );
     });
   } catch {
@@ -433,24 +437,30 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     });
-    const previousPilotPrompt = priorPrompt.replace(
+    const previousAmountPrompt = priorPrompt.replace(
       TELEBIRR_AMOUNT_TEXT,
+      PREVIOUS_TELEBIRR_AMOUNT_TEXT,
+    );
+    const previousPilotPrompt = previousAmountPrompt.replace(
+      PREVIOUS_TELEBIRR_AMOUNT_TEXT,
       PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT,
     );
-    const legacyPrompt = priorPrompt.replace(
+    const legacyPrompt = previousAmountPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       LEGACY_TELEBIRR_WINDOW_TEXT,
     );
-    const previousWindowPrompt = priorPrompt.replace(
+    const previousWindowPrompt = previousAmountPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       PREVIOUS_TELEBIRR_WINDOW_TEXT,
     );
-    const previousMediaPrompt = priorPrompt.replace(
+    const previousMediaPrompt = previousAmountPrompt.replace(
       CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
     );
-    return currentPrompts.includes(message.text) ||
+    const replyText = message.text.replace('Send 25–25,000 ETB to:', 'Send 100–25,000 ETB to:');
+    return currentPrompts.includes(replyText) ||
       message.text === priorPrompt ||
+      message.text === previousAmountPrompt ||
       message.text === previousPilotPrompt ||
       message.text === legacyPrompt ||
       message.text === previousWindowPrompt ||

@@ -120,7 +120,7 @@ describe('private Telegram action reducers', () => {
     expect(prompt).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(prompt).not.toContain('2519000000');
     expect(prompt).toContain('Saved Player ID: PLAYER-DEMO-42');
-    expect(prompt).toContain('Send 25–25,000 ETB.');
+    expect(prompt).toContain('Send 100–25,000 ETB.');
     expect(prompt).not.toContain('Choose one available method');
     expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(prompt).toContain('After paying, send your receipt or reference here.');
@@ -164,7 +164,7 @@ describe('private Telegram action reducers', () => {
     const previousPrompt = priorLocalPrompt
       .replace('Number: 900000042', 'Number: 251900000042')
       .replace('Number: 900000043', 'Number: 251900000043')
-      .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
+      .replace('Send 100–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
       .replace(
         '\nAfter paying,',
         '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
@@ -199,7 +199,7 @@ describe('private Telegram action reducers', () => {
     expect(
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
-        text: prompt.replace('Send 25–25,000 ETB.', 'Send any amount.'),
+        text: prompt.replace('Send 100–25,000 ETB.', 'Send any amount.'),
       }),
     ).toBe(false);
     const cbeOnly = buildTelegramCombinedPaymentPrompt({
@@ -226,7 +226,7 @@ describe('private Telegram action reducers', () => {
             'After paying, send your receipt or reference here.',
             'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
           )
-          .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
+          .replace('Send 100–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
           .replace('\nAfter paying,', '\nCheck the receiver name before paying.\nAfter paying,'),
       }),
     ).toBe(true);

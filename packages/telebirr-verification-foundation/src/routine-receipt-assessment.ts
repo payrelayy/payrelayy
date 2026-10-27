@@ -1,7 +1,7 @@
 import { TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE } from './synthetic-official-receipt.js';
 
 /** Policy-only assessment. This never authenticates a device or creates financial authority. */
-export const ROUTINE_TELEBIRR_MINIMUM_AMOUNT_MINOR = 2_500;
+export const ROUTINE_TELEBIRR_MINIMUM_AMOUNT_MINOR = 10_000;
 export const ROUTINE_TELEBIRR_MAXIMUM_AMOUNT_MINOR = 2_500_000;
 const ONE_HOUR_MS = 60 * 60 * 1_000;
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;

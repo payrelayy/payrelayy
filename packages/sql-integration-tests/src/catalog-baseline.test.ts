@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -55,7 +56,10 @@ import { registerTrustedTelebirrActivationEpochSqlTests } from './trusted-telebi
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
-import { registerReceiverSmsPaymentLedgerSqlTests } from './receiver-sms-payment-ledger.suite.js';
+import {
+  registerPostCutoverReceiverSmsRangeSqlTests,
+  registerReceiverSmsPaymentLedgerSqlTests,
+} from './receiver-sms-payment-ledger.suite.js';
 
 type RoleRow = {
   readonly rolbypassrls: boolean;
@@ -160,6 +164,7 @@ const betaAdmissionNoncePurgeProcedure =
   'app.purge_expired_telegram_beta_invite_admission_nonce_reservations(integer)';
 const betaInviteAdmissionMigrationName =
   '20260809195620_private_telegram_beta_invite_admission.sql';
+const depositRangeMigrationName = '20261027021500_auto_deposit_100_etb_manual_review.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -450,7 +455,13 @@ beforeAll(async () => {
 
   await client.connect();
   await applySyntheticSupabaseBootstrap(client);
-  appliedMigrationNames = await applyMigrationsLexically(client, environment.migrationsDirectory);
+  // Historical pilot scenarios assert the prior 25 ETB policy. Exercise the
+  // production cutover after those scenarios have finished.
+  appliedMigrationNames = await applyMigrationsLexically(
+    client,
+    environment.migrationsDirectory,
+    depositRangeMigrationName,
+  );
   await client.query(
     `insert into auth.users (id, email) values ($1::uuid, 'owner@example.invalid')`,
     [ownerAuthUserId],
@@ -618,8 +629,10 @@ describe('disposable SQL migration baseline', () => {
     }
   });
 
-  it('applies every checked-in migration in lexical filename order', async () => {
-    const expectedMigrationNames = await listMigrationsLexically(environment.migrationsDirectory);
+  it('applies historical migrations in lexical filename order', async () => {
+    const expectedMigrationNames = (
+      await listMigrationsLexically(environment.migrationsDirectory)
+    ).filter((name) => name !== depositRangeMigrationName);
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
       from sql_integration.applied_migrations
@@ -10181,3 +10194,82 @@ registerVerificationSettlementSqlTests(
   () => client,
   () => createSqlIntegrationClient(environment),
 );
+
+describe('100 ETB production deposit policy cutover', () => {
+  let postCutoverClient: Client;
+
+  beforeAll(async () => {
+    postCutoverClient = createSqlIntegrationClient(environment, environment.postCutoverHost);
+    await postCutoverClient.connect();
+    await applySyntheticSupabaseBootstrap(postCutoverClient);
+    await applyMigrationsLexically(
+      postCutoverClient,
+      environment.migrationsDirectory,
+      depositRangeMigrationName,
+    );
+    await postCutoverClient.query(
+      `insert into auth.users (id,email) values ($1::uuid,'cutover-owner@example.invalid')`,
+      [ownerAuthUserId],
+    );
+    await postCutoverClient.query(
+      `select app.bootstrap_first_owner($1::uuid,'Cutover Test Owner')`,
+      [ownerAuthUserId],
+    );
+    const agent = await postCutoverClient.query<{ id: string }>(
+      `insert into app.platform_agent_accounts (platform_id,label,credential_ref)
+          select id,'deposit-range-cutover','secret://deposit-range-cutover'
+          from app.platforms where code='kemerbet' returning id`,
+    );
+    await postCutoverClient.query(
+      `select app.save_owner_routine_telebirr_processing($1::uuid,$2::uuid,$3::uuid)`,
+      [ownerAuthUserId, agent.rows[0]!.id, randomUUID()],
+    );
+    const migrationSource = await readFile(
+      join(environment.migrationsDirectory, depositRangeMigrationName),
+      'utf8',
+    );
+    await postCutoverClient.query(migrationSource);
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [depositRangeMigrationName],
+    );
+    await postCutoverClient.query(
+      `insert into app.receiver_accounts (
+        provider_id,version,account_holder_name,account_reference_ciphertext,
+        account_reference_masked,account_reference_fingerprint,
+        protection_profile_version,encryption_key_version,fingerprint_key_version,
+        rotation_request_id,rotation_reason
+      ) select provider.id,1,'Synthetic Range Test Receiver',$1::text,
+        '***7300',repeat('7',64),1,1,1,$2::uuid,'initial_configuration'
+        from app.payment_providers provider where provider.code='telebirr'`,
+      [`receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`, randomUUID()],
+    );
+  });
+
+  afterAll(async () => {
+    await postCutoverClient?.end();
+  });
+
+  it('records the new active Owner policy while preserving the complete migration order', async () => {
+    const policy = await postCutoverClient.query<{
+      minimum_amount_minor: string;
+      maximum_amount_minor: string;
+    }>(
+      `select minimum_amount_minor::text,maximum_amount_minor::text
+        from app.deposit_policy_versions where status='active'`,
+    );
+    expect(policy.rows).toEqual([
+      { minimum_amount_minor: '10000', maximum_amount_minor: '2500000' },
+    ]);
+    const expected = await listMigrationsLexically(environment.migrationsDirectory);
+    const applied = await postCutoverClient.query<{ filename: string }>(
+      'select filename from sql_integration.applied_migrations order by filename',
+    );
+    expect(applied.rows.map((row) => row.filename)).toEqual(expected);
+  });
+
+  registerPostCutoverReceiverSmsRangeSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
+});

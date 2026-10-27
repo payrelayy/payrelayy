@@ -251,7 +251,7 @@ export async function scanRoutineKemerBetHistory(
 ): Promise<RoutineHistoryScan> {
   const authorization = routineHistoryReadAuthorization(playerId, window);
   const untilMs = Date.parse(window.until);
-  if (!Number.isSafeInteger(amountMinor) || amountMinor < 2_500 || amountMinor > 2_500_000)
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 10_000 || amountMinor > 2_500_000)
     throw new Error('The protected history window is invalid.');
 
   const initialResponse = page.waitForResponse((response) => isHistoryResponse(response, 1), {

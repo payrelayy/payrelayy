@@ -136,12 +136,7 @@ function masked(value: unknown, pattern: RegExp, optional = false): string | nul
 
 function amount(value: unknown, optional = false): string | null {
   if (optional && value === null) return null;
-  if (
-    typeof value !== 'string' ||
-    !/^[1-9][0-9]*$/u.test(value) ||
-    BigInt(value) > 2500000n ||
-    BigInt(value) < 2500n
-  )
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/u.test(value) || BigInt(value) > 9999999999n)
     throw new OwnerManualPaymentUnavailableError();
   return value;
 }
@@ -372,8 +367,7 @@ export class PostgresOwnerManualPayments {
       !UUID.test(candidateId) ||
       (request.amountMinor !== null &&
         (!/^[1-9][0-9]*$/u.test(request.amountMinor) ||
-          BigInt(request.amountMinor) < 2500n ||
-          BigInt(request.amountMinor) > 2500000n)) ||
+          BigInt(request.amountMinor) > 9999999999n)) ||
       (request.receiverAccountId !== null && !UUID.test(request.receiverAccountId)) ||
       typeof request.bankPaymentConfirmed !== 'boolean'
     )
@@ -470,10 +464,7 @@ export class PostgresOwnerManualPayments {
           playerMasked: masked(row.player_masked, MASKED_PLAYER, true),
           status: String(row.payment_status),
           caseId: uuid(row.case_id, true),
-          canMarkManuallyCredited:
-            row.can_mark_manually_credited &&
-            BigInt(amountMinor) >= 2500n &&
-            BigInt(amountMinor) <= 2500000n,
+          canMarkManuallyCredited: row.can_mark_manually_credited,
         };
       });
     } catch (error) {
@@ -536,8 +527,7 @@ export class PostgresOwnerManualPayments {
       (request.paymentEventId !== null && !UUID.test(request.paymentEventId)) ||
       (request.amountMinor !== null &&
         (!/^[1-9][0-9]*$/u.test(request.amountMinor) ||
-          BigInt(request.amountMinor) < 2500n ||
-          BigInt(request.amountMinor) > 2500000n)) ||
+          BigInt(request.amountMinor) > 9999999999n)) ||
       (request.receiverAccountId !== null && !UUID.test(request.receiverAccountId)) ||
       typeof request.bankPaymentConfirmed !== 'boolean' ||
       request.playerCreditedConfirmed !== true

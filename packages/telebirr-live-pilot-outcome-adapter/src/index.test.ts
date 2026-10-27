@@ -83,7 +83,7 @@ function foundFacts(
     providerFinalStatus: 'completed',
     canonicalReferencePresent: true,
     referenceMatch: 'matched',
-    amountMinor: 2_500,
+    amountMinor: 10_000,
     currencyCode: 'ETB',
     receiverMatch: 'matched',
     creditedPartyNameDigest: digestTelebirrLivePilotReceiverName(receiverName)!,
@@ -282,9 +282,9 @@ function fixture(facts: TelebirrLivePilotReceiptFacts = foundFacts()): Fixture {
     state: 'available' as const,
     providerCode: 'telebirr' as const,
     checkedAt: assessedAt,
-    policyVersion: 'telebirr_private_pilot_policy_v1',
+    policyVersion: 'telebirr_private_pilot_policy_v2',
     currencyCode: 'ETB' as const,
-    minimumPrincipalAmountMinor: '2500',
+    minimumPrincipalAmountMinor: '10000',
     maximumPrincipalAmountMinor: '2500000',
     automaticFreshnessSeconds: 3600,
     maximumFutureSkewSeconds: 300,
@@ -495,7 +495,7 @@ describe('TeleBirr live-pilot outcome adapter', () => {
       providerCode: 'telebirr',
       disposition: 'settlement_candidate',
       reasonCode: 'exact_proof_match',
-      principalAmountMinor: '2500',
+      principalAmountMinor: '10000',
       currencyCode: 'ETB',
       receiverMatchBasis: 'exact_full_name',
       advisoryOnly: true,
@@ -649,10 +649,10 @@ describe('TeleBirr live-pilot outcome adapter', () => {
   });
 
   it('derives the principal only from the signed observation and never accepts a request amount', () => {
-    const value = fixture(foundFacts({ amountMinor: 2_501 }));
+    const value = fixture(foundFacts({ amountMinor: 10_001 }));
     expect(adapt(value)).toMatchObject({
       disposition: 'settlement_candidate',
-      principalAmountMinor: '2501',
+      principalAmountMinor: '10001',
     });
     expect(
       adaptTelebirrLivePilotOutcome(
@@ -711,6 +711,7 @@ describe('TeleBirr live-pilot outcome adapter', () => {
     [foundFacts({ providerFinalStatus: 'unknown' }), 'receipt_status_unknown'],
     [foundFacts({ receiverMatch: 'unknown', creditedPartyNameDigest: null }), 'source_uncertain'],
     [foundFacts({ amountMinor: null, currencyCode: 'unknown' }), 'source_uncertain'],
+    [foundFacts({ amountMinor: 9_999 }), 'amount_out_of_range'],
     [foundFacts({ amountMinor: 2_500_001 }), 'amount_out_of_range'],
   ] as const)('maps signed uncertainty or policy limits to review', (facts, reasonCode) => {
     expect(adapt(fixture(facts))).toMatchObject({ disposition: 'review_required', reasonCode });

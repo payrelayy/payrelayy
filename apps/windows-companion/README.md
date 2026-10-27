@@ -4,7 +4,7 @@ This is the local, headed-browser replacement for the unreliable DigitalOcean Ke
 preview. It runs in the signed-in Windows desktop session and opens the installed stable Chrome.
 
 The [routine production execution core](../../docs/routine-production-deposit-implementation.md)
-supports receipt-derived 25–25,000 ETB amounts and a sequential automatic queue, but its production
+supports receipt-derived 100–25,000 ETB amounts and a sequential automatic queue, but its production
 database broker and signed routine authorization channel are not wired yet. It is not started by
 this companion's entry point. The existing signed v2 path remains a separate fixed-25-ETB,
 Owner-approved pilot path; this code does not enable routine live processing.

@@ -22,7 +22,7 @@ function response(overrides: Record<string, unknown> = {}) {
           transactionId: 19686411,
           transactionTime: '2026-10-12T18:33:14.257728',
           playerId: '28379330',
-          amount: 29,
+          amount: 129,
           currencyCode: 'ETB',
           state: 1,
           paymentType: 4,
@@ -104,7 +104,7 @@ describe('read-only KemerBet deposit history parser', () => {
           occurredAt: '2026-10-12T18:33:14.257728Z',
           occurredAtMs: Date.parse('2026-10-12T18:33:14.257728Z'),
           playerId: '28379330',
-          amountMinor: 2900,
+          amountMinor: 12900,
           currencyCode: 'ETB',
           approvedDeposit: true,
         },
@@ -145,7 +145,7 @@ describe('read-only KemerBet deposit history parser', () => {
       transactionType: 1,
       notes: 'Manual Deposit',
       playerId: '28379330',
-      amount: 29,
+      amount: 129,
       currencyCode: 'ETB',
     };
     const withdrawal = {
@@ -161,7 +161,7 @@ describe('read-only KemerBet deposit history parser', () => {
     const result = await scanRoutineKemerBetHistory(
       fakeHistoryPage([credit, manualDeposit, withdrawal]),
       '28379330',
-      2900,
+      12900,
       window,
     );
     expect(result).toMatchObject({ outcome: 'exact_match' });
@@ -178,7 +178,7 @@ describe('read-only KemerBet deposit history parser', () => {
 
   it('rejects malformed or rounded money, truncated timestamps, and missing IDs', () => {
     for (const override of [
-      { amount: 29.005 },
+      { amount: 129.005 },
       { amount: -29 },
       { amount: Number.NaN },
       { transactionTime: '2026-10-12 09:33 PM' },
@@ -198,7 +198,7 @@ describe('read-only KemerBet deposit history parser', () => {
   it('accepts exactly one recent approved match from the reviewed History response', async () => {
     const row = response().value.item2[0]!;
     expect(
-      await scanRoutineKemerBetHistory(fakeHistoryPage([row]), '28379330', 2900, window),
+      await scanRoutineKemerBetHistory(fakeHistoryPage([row]), '28379330', 12900, window),
     ).toEqual({
       outcome: 'exact_match',
       observation: {
@@ -206,7 +206,7 @@ describe('read-only KemerBet deposit history parser', () => {
         requestId: '19686411',
         occurredAt: '2026-10-12T18:33:14.257728Z',
         playerId: '28379330',
-        amountMinor: 2900,
+        amountMinor: 12900,
         currencyCode: 'ETB',
         approvedHistoryMatchCount: 1,
       },
@@ -223,7 +223,7 @@ describe('read-only KemerBet deposit history parser', () => {
       playerId: 'another-player',
     };
     expect(
-      await scanRoutineKemerBetHistory(fakeHistoryPage([recent, older]), '28379330', 2900, window),
+      await scanRoutineKemerBetHistory(fakeHistoryPage([recent, older]), '28379330', 12900, window),
     ).toEqual({
       outcome: 'exact_match',
       observation: {
@@ -231,7 +231,7 @@ describe('read-only KemerBet deposit history parser', () => {
         requestId: '19686411',
         occurredAt: '2026-10-12T18:33:14.257728Z',
         playerId: '28379330',
-        amountMinor: 2900,
+        amountMinor: 12900,
         currencyCode: 'ETB',
         approvedHistoryMatchCount: 1,
       },
@@ -244,7 +244,7 @@ describe('read-only KemerBet deposit history parser', () => {
       await scanRoutineKemerBetHistory(
         fakeHistoryPage([row, { ...row, walletTransactionId: 110891903, transactionId: 19686412 }]),
         '28379330',
-        2900,
+        12900,
         window,
       ),
     ).toEqual({ outcome: 'ambiguous' });
@@ -252,7 +252,7 @@ describe('read-only KemerBet deposit history parser', () => {
       await scanRoutineKemerBetHistory(
         fakeHistoryPage([{ ...row, state: 2 }]),
         '28379330',
-        2900,
+        12900,
         window,
       ),
     ).toEqual({ outcome: 'not_observed' });

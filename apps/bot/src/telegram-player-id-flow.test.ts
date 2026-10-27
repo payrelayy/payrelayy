@@ -251,7 +251,7 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).toContain('📱 Number: 900000042');
       expect(presentation.text).not.toContain('251900000042');
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
-      expect(presentation.text).toContain('Send 25–25,000 ETB to:');
+      expect(presentation.text).toContain('Send 100–25,000 ETB to:');
       expect(presentation.text).not.toContain('send exactly 25 ETB');
       expect(presentation.text).not.toContain('Valid for 1 hour');
       expect(presentation.text).not.toContain('Check the receiver name before paying.');

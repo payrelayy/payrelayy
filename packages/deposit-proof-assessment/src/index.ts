@@ -3,7 +3,7 @@ import { isProxy } from 'node:util/types';
 export const DEPOSIT_PROOF_ASSESSMENT_CONTRACT_VERSION = 1 as const;
 export const DEPOSIT_PROOF_REFERENCE_KEY_VERSION = 2 as const;
 export const DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION = 2 as const;
-export const DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR = '2500' as const;
+export const DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR = '10000' as const;
 export const DEPOSIT_PROOF_MAXIMUM_PRINCIPAL_MINOR = '2500000' as const;
 export const DEPOSIT_PROOF_AUTOMATIC_FRESHNESS_SECONDS = 3600 as const;
 export const DEPOSIT_PROOF_MAXIMUM_FUTURE_SKEW_SECONDS = 300 as const;

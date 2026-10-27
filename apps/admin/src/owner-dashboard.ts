@@ -842,7 +842,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <button class="secondary" id="routine-processing-refresh" type="button">Refresh policy</button>
           </div>
           <p class="receipt-label">
-            25–25,000 ETB per deposit, any active deposit-eligible Player, no daily or deposit-count
+            100–25,000 ETB per automatic deposit, any active deposit-eligible Player, no daily or deposit-count
             quota. Process one at a time; uncertain results pause the queue. This policy has no
             expiry. Saving it does not turn payment switches live, but reauthorizing a paused policy
             can resume processing if those switches are already live. The pilot controls below are
@@ -2786,7 +2786,7 @@ async function submitRoutinePhoneProof() {
 function renderRoutineProcessing(value) {
   const expectedPolicy = {
     mode: 'routine_production', version: 1, provider: 'telebirr', platformCode: 'kemerbet',
-    currencyCode: 'ETB', minimumAmountMinor: 2500, maximumAmountMinor: 2500000,
+    currencyCode: 'ETB', minimumAmountMinor: 10000, maximumAmountMinor: 2500000,
     freshnessWindowSeconds: 3600, playerScope: 'all_active_deposit_eligible',
     playerOwnershipRequired: false, dailyQuotaMinor: null, successfulDepositQuota: null,
     maxConcurrentDeposits: 1, amountSource: 'official_receipt_settled_amount',
@@ -2857,7 +2857,7 @@ async function mutateRoutineProcessing(operation) {
     (operation === 'stop' && routineProcessingState?.configurationState !== 'authorized') ||
     (operation === 'save' && (kemerbetAgentProfileLoadState !== 'loaded' || !activeKemerbetAgentProfileId))) return;
   if (operation === 'save' && !window.confirm(
-    'Save a persistent routine TeleBirr policy: 25–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving does not turn payment switches live, but can resume processing if they are already live. Confirm they are off before reauthorizing a paused policy.'
+    'Save a persistent routine TeleBirr policy: 100–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving does not turn payment switches live, but can resume processing if they are already live. Confirm they are off before reauthorizing a paused policy.'
   )) return;
   const selectedGeneration = ownerAuthGeneration;
   const requestId = crypto.randomUUID();
@@ -6121,10 +6121,10 @@ async function decideManualPaymentCase(value, action) {
 }
 
 function parseEtbMinor(raw) {
-  if (typeof raw !== 'string' || !/^[0-9]{1,5}(?:\\.[0-9]{1,2})?$/.test(raw)) return null;
+  if (typeof raw !== 'string' || !/^[0-9]{1,8}(?:\\.[0-9]{1,2})?$/.test(raw)) return null;
   const parts = raw.split('.');
   const minor = Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2,'0'));
-  return Number.isSafeInteger(minor) && minor >= 2500 && minor <= 2500000
+  return Number.isSafeInteger(minor) && minor >= 1 && minor <= 9999999999
     ? String(minor) : null;
 }
 
@@ -6190,7 +6190,7 @@ function manualApprovalForm(value) {
     amountInput.type = 'text';
     amountInput.name = 'amountEtb';
     amountInput.inputMode = 'decimal';
-    amountInput.placeholder = '25.00';
+    amountInput.placeholder = '75.00';
     amountLabel.append(amountInput);
     const receiverLabel = document.createElement('label');
     receiverLabel.textContent = 'Receiving account shown in bank record';
@@ -6292,7 +6292,7 @@ function manualCompletionForm(value) {
     amountInput.type = 'text';
     amountInput.name = 'amountEtb';
     amountInput.inputMode = 'decimal';
-    amountInput.placeholder = '25.00';
+    amountInput.placeholder = '75.00';
     amountLabel.append(amountInput);
     const receiverLabel = document.createElement('label');
     receiverLabel.textContent = 'Receiving account';

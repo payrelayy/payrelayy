@@ -109,6 +109,12 @@ async function assertStaticComposeBoundary() {
   }
 
   if (
+    !composeSource.includes('sql_integration_post_cutover_postgres_host: post-cutover-postgres')
+  ) {
+    throw new Error('Post-cutover SQL tests must use their internal disposable postgres hostname.');
+  }
+
+  if (
     composeSource.includes('postgres_host_auth_method: trust') ||
     !composeSource.includes('postgres_host_auth_method: scram-sha-256') ||
     !composeSource.includes('postgres_initdb_args: --auth-host=scram-sha-256') ||

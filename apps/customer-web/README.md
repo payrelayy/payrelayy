@@ -102,7 +102,7 @@ preview. Open `http://127.0.0.1:4173/preview/dashboard` for the complete custome
 `http://127.0.0.1:4173/preview/telegram` for the matching planned Telegram interaction.
 
 The preview includes Dashboard, Deposits, Player IDs, Activity, and Account. The deposit walkthrough
-uses the normal 25 to 25,000 ETB policy and a Ready Player ID, then shows review, masked CBE Birr
+uses the normal 100 to 25,000 ETB policy and a Ready Player ID, then shows review, masked CBE Birr
 instructions, reference entry, payment checking, deposit preparation, and customer-safe outcome
 states. Every interactive result is explicitly marked Preview. It is deterministic and never calls
 PostgreSQL, KemerBet, Supabase, Telegram, or another network service.

@@ -8,7 +8,7 @@ export interface OwnerRoutineProcessingPolicy {
   readonly provider: 'telebirr';
   readonly platformCode: 'kemerbet';
   readonly currencyCode: 'ETB';
-  readonly minimumAmountMinor: 2500;
+  readonly minimumAmountMinor: 10000;
   readonly maximumAmountMinor: 2500000;
   readonly freshnessWindowSeconds: 3600;
   readonly playerScope: 'all_active_deposit_eligible';
@@ -55,7 +55,7 @@ const POLICY: OwnerRoutineProcessingPolicy = Object.freeze({
   provider: 'telebirr',
   platformCode: 'kemerbet',
   currencyCode: 'ETB',
-  minimumAmountMinor: 2500,
+  minimumAmountMinor: 10000,
   maximumAmountMinor: 2500000,
   freshnessWindowSeconds: 3600,
   playerScope: 'all_active_deposit_eligible',

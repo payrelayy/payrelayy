@@ -190,8 +190,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     (value.amountMinor === null ||
       (typeof value.amountMinor === 'string' &&
         /^[1-9][0-9]*$/u.test(value.amountMinor) &&
-        BigInt(value.amountMinor) >= 2500n &&
-        BigInt(value.amountMinor) <= 2500000n)) &&
+        BigInt(value.amountMinor) <= 9999999999n)) &&
     (value.outcomeCode === 'credited') === (value.amountMinor !== null) &&
     typeof value.referenceMasked === 'string' &&
     /^\*{3}[A-Z0-9]{4}$/u.test(value.referenceMasked)

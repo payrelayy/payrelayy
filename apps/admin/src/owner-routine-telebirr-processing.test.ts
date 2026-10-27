@@ -34,7 +34,7 @@ const configured = {
     provider: 'telebirr',
     platformCode: 'kemerbet',
     currencyCode: 'ETB',
-    minimumAmountMinor: 2500,
+    minimumAmountMinor: 10000,
     maximumAmountMinor: 2500000,
     freshnessWindowSeconds: 3600,
     playerScope: 'all_active_deposit_eligible',

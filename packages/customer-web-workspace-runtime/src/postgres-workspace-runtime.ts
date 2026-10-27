@@ -225,7 +225,7 @@ function validDepositStatus(value: unknown): value is DepositStatus {
 function validAmountMinor(value: unknown): value is string {
   if (typeof value !== 'string' || !AMOUNT_MINOR_PATTERN.test(value)) return false;
   const amount = BigInt(value);
-  return amount >= 2_500n && amount <= 2_500_000n;
+  return amount >= 10_000n && amount <= 2_500_000n;
 }
 
 function validRateLimitBucketKey(value: unknown): value is string {

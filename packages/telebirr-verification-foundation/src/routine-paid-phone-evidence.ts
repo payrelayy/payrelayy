@@ -174,7 +174,7 @@ function immutableReceiptMismatch(
   if (ownDataValue(facts, 'currencyCode') !== 'ETB') return null;
   const amountMinor = ownDataValue(facts, 'amountMinor');
   if (typeof amountMinor === 'number' && Number.isSafeInteger(amountMinor)) {
-    if (amountMinor < 2500 || amountMinor > 2_500_000) return 'amount_out_of_range';
+    if (amountMinor < 10_000 || amountMinor > 2_500_000) return 'amount_out_of_range';
   }
   if (
     utc(submittedAt) &&

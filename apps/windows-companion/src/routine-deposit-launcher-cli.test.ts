@@ -28,9 +28,9 @@ describe('protected routine launcher no-money rehearsal', () => {
       parseRoutineDepositLauncherInput({
         ...BASE,
         FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-        FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+        FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000',
       }).noMoneyPreflight,
-    ).toEqual({ playerId: 'SAMPLE-PLAYER', amountMinor: 2500 });
+    ).toEqual({ playerId: 'SAMPLE-PLAYER', amountMinor: 10000 });
   });
 
   it.each([
@@ -42,7 +42,7 @@ describe('protected routine launcher no-money rehearsal', () => {
     },
     {
       FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-      FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2499',
+      FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '9999',
     },
     {
       FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',

@@ -143,15 +143,24 @@ export function isRoutineDepositAmountMinor(value: unknown): value is number {
   );
 }
 
-export function routineDepositAmountText(amountMinor: number): string {
-  if (!isRoutineDepositAmountMinor(amountMinor)) unavailable();
+function isSupportedLocalDepositAmountMinor(value: unknown): value is number {
+  return value === PILOT_AMOUNT_MINOR || isRoutineDepositAmountMinor(value);
+}
+
+function localDepositAmountText(amountMinor: number): string {
+  if (!isSupportedLocalDepositAmountMinor(amountMinor)) unavailable();
   // Format from integer minor units; neither a Telegram amount nor a UI float is authoritative.
   return `${Math.floor(amountMinor / ETB_SCALE)}.${String(amountMinor % ETB_SCALE).padStart(2, '0')}`;
 }
 
+export function routineDepositAmountText(amountMinor: number): string {
+  if (!isRoutineDepositAmountMinor(amountMinor)) unavailable();
+  return localDepositAmountText(amountMinor);
+}
+
 /** Accept only exact, canonical renderings of the leased amount in KemerBet's input. */
 function exactAmountRenderings(amountMinor: number): readonly string[] {
-  const amount = routineDepositAmountText(amountMinor);
+  const amount = localDepositAmountText(amountMinor);
   const integer = amount.slice(0, -3);
   const fraction = amount.slice(-3);
   // KemerBet's amount control uses different thousands separators across its
@@ -166,7 +175,7 @@ function exactAmountRenderings(amountMinor: number): readonly string[] {
 }
 
 export function exactKemerBetAmountInputMatches(observed: string, amountMinor: number): boolean {
-  if (!isRoutineDepositAmountMinor(amountMinor)) return false;
+  if (!isSupportedLocalDepositAmountMinor(amountMinor)) return false;
   const withoutDirectionMark = observed.startsWith('\u200e') ? observed.slice(1) : observed;
   return exactAmountRenderings(amountMinor).includes(withoutDirectionMark);
 }
@@ -177,7 +186,7 @@ export function exactKemerBetSuccessTableMatches(
   identities: readonly string[],
   amountMinor: number,
 ): boolean {
-  if (!isRoutineDepositAmountMinor(amountMinor) || identities.length < 1) return false;
+  if (!isSupportedLocalDepositAmountMinor(amountMinor) || identities.length < 1) return false;
   const cells = dialogText
     .replace(/\u00a0/gu, ' ')
     .split(/[\t\r\n]+/u)
@@ -261,7 +270,7 @@ export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetD
       active !== undefined ||
       !Number.isSafeInteger(internalPlayerId) ||
       internalPlayerId <= 0 ||
-      !isRoutineDepositAmountMinor(amountMinor) ||
+      !isSupportedLocalDepositAmountMinor(amountMinor) ||
       typeof isFresh !== 'function'
     ) {
       return Promise.reject(new LocalKemerBetDepositError());
@@ -289,7 +298,12 @@ export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetD
       // The v2 pilot capability remains exactly 25 ETB. Do not broaden its signed authority.
       return begin(internalPlayerId, PILOT_AMOUNT_MINOR, isFresh);
     },
-    beginRoutine: begin,
+    beginRoutine(internalPlayerId: number, amountMinor: number, isFresh: () => boolean) {
+      if (!isRoutineDepositAmountMinor(amountMinor)) {
+        return Promise.reject(new LocalKemerBetDepositError());
+      }
+      return begin(internalPlayerId, amountMinor, isFresh);
+    },
     consumeExactRequest(method: string, rawUrl: string, postData: unknown) {
       // Consume before validation and before the route callback's first await. A malformed request
       // can burn an allowance, but no request can retain or reuse it.
@@ -676,6 +690,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<LocalKemerBetRoutineDepositDispatchOutcome> {
+  if (!isRoutineDepositAmountMinor(amountMinor)) unavailable();
   let privatePlayerIdentities: readonly string[] = [];
   const outcome = await executeLocalDepositForAmount(
     page,
@@ -780,11 +795,14 @@ async function executeLocalDepositForAmount(
   }
   let routeOutcome: Promise<LocalKemerBetDepositDispatchOutcome>;
   try {
-    routeOutcome = depositAuthorization.beginRoutine(
-      privatePlayer.internalPlayerId,
-      amountMinor,
-      finalAction.isFresh,
-    );
+    routeOutcome =
+      amountMinor === PILOT_AMOUNT_MINOR
+        ? depositAuthorization.begin(privatePlayer.internalPlayerId, finalAction.isFresh)
+        : depositAuthorization.beginRoutine(
+            privatePlayer.internalPlayerId,
+            amountMinor,
+            finalAction.isFresh,
+          );
   } catch {
     reportPreflight(diagnostic, 'route_authorization_unavailable');
     unavailable();
@@ -834,7 +852,7 @@ async function prepareLocalDepositForAmount(
   };
 }> {
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
-  const amountText = routineDepositAmountText(amountMinor);
+  const amountText = localDepositAmountText(amountMinor);
   reportPreflight(diagnostic, 'preflight_started');
   await openSearchSurface(page, diagnostic);
   reportPreflight(diagnostic, 'search_surface_ready');

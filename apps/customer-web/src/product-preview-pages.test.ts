@@ -116,10 +116,10 @@ describe('full FetanAgent product preview', () => {
       ...model,
       depositStage: 'details',
     });
-    expect(details).toContain('min="25"');
+    expect(details).toContain('min="100"');
     expect(details).toContain('max="25000"');
     expect(details).toContain('value="100"');
-    expect(details).toContain('25–25,000 ETB');
+    expect(details).toContain('100–25,000 ETB');
     expect(details).toContain('Ready Player ID');
 
     const review = productPreviewPage('deposits', { ...model, depositStage: 'review' });

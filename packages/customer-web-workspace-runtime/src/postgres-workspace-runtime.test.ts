@@ -126,7 +126,7 @@ async function expectAllOperationsUnavailableWithoutQueries(
   expect(await runtime.listPlayerRegistrations({ authUserId, limit: 20 })).toEqual(failure);
   expect(
     await runtime.openDeposit({
-      amountMinor: '2500',
+      amountMinor: '10000',
       authUserId,
       playerId: 'PLAYER-42',
       requestKey,
@@ -410,7 +410,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
             receiver_account_holder_name: 'FetanAgent',
             receiver_account_masked: '***1234',
             receiver_customer_instruction: 'Send the exact amount using CBE Birr.',
-            expected_amount_minor: '2500',
+            expected_amount_minor: '10000',
             currency_code: 'ETB',
             payment_deadline_at: new Date('2026-08-15T12:30:00.000Z'),
             deposit_status: 'intake_received',
@@ -444,7 +444,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
         return [
           {
             deposit_intent_id: depositIntentId,
-            expected_amount_minor: '2500',
+            expected_amount_minor: '10000',
             currency_code: 'ETB',
             deposit_status: 'verification_pending',
             created_at: createdAt,
@@ -484,7 +484,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
     expect(JSON.stringify(submitted)).not.toContain(authUserId);
     expect(JSON.stringify(submitted)).not.toContain(requestKey);
     const opened = await runtime.openDeposit({
-      amountMinor: '2500',
+      amountMinor: '10000',
       authUserId,
       playerId: 'PLAYER-42',
       requestKey,
@@ -492,7 +492,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
     expect(opened).toMatchObject({
       ok: true,
       instructions: {
-        amountMinor: '2500',
+        amountMinor: '10000',
         providerName: 'CBE Birr',
         status: { label: 'Ready to start', tone: 'neutral' },
       },
@@ -535,7 +535,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
       ok: true,
       deposits: [
         {
-          amountMinor: '2500',
+          amountMinor: '10000',
           createdAt: createdAt.toISOString(),
           currencyCode: 'ETB',
           depositIntentId,
@@ -559,7 +559,7 @@ describe('dedicated customer workspace Postgres runtime', () => {
     expect(database.queries[2]?.values).toEqual(['a'.repeat(64), 'POST /deposits/proof', 8, 60]);
     expect(database.queries[3]?.values).toEqual([authUserId, 20]);
     expect(database.queries[4]?.values).toEqual([authUserId, requestKey, 'PLAYER-42']);
-    expect(database.queries[5]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '2500']);
+    expect(database.queries[5]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '10000']);
     expect(database.queries[6]?.values).toEqual([
       authUserId,
       requestKey,

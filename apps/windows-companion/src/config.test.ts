@@ -182,26 +182,26 @@ describe('Windows companion configuration', () => {
     const environment = {
       ...base,
       INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000',
     };
     const config = loadWindowsCompanionConfig(environment);
     expect(config.routineNoMoneyPreflight).toEqual({
       playerId: 'SAMPLE-PLAYER',
-      amountMinor: 2500,
+      amountMinor: 10000,
     });
     expect(JSON.stringify(redactedWindowsCompanionConfig(config))).not.toContain('SAMPLE-PLAYER');
     expect(environment).not.toHaveProperty('INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID');
     expect(environment).not.toHaveProperty('INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR');
     for (const override of [
       { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER' },
-      { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500' },
+      { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000' },
       {
         INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2499',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '9999',
       },
       {
         INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'BAD PLAYER',
-        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000',
       },
     ]) {
       expect(() => loadWindowsCompanionConfig({ ...base, ...override })).toThrow(
@@ -213,7 +213,7 @@ describe('Windows companion configuration', () => {
         NODE_ENV: 'test',
         FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
         INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000',
       }),
     ).toThrow('no-money routine preflight is invalid');
   });

@@ -38,7 +38,7 @@ const binding: RoutineDepositProtocolBinding = Object.freeze({
   paymentClaimId: '37603277-1903-49a8-8869-051cbd78d68d',
   platformAgentAccountId: accountId,
   playerId: '28379330',
-  amountMinor: 2_501,
+  amountMinor: 10_001,
   currencyCode: 'ETB',
 });
 
@@ -49,7 +49,7 @@ const policy = Object.freeze({
   provider: 'telebirr' as const,
   platformCode: 'kemerbet' as const,
   currencyCode: 'ETB' as const,
-  minimumAmountMinor: 2500 as const,
+  minimumAmountMinor: 10000 as const,
   maximumAmountMinor: 2500000 as const,
   playerScope: 'all_active_deposit_eligible' as const,
   playerOwnershipRequired: false as const,
@@ -157,7 +157,7 @@ describe('routine deposit protocol', () => {
       operation: 'fence',
     } as const;
 
-    for (const amountMinor of [2_500, 2_501, 2_500_000]) {
+    for (const amountMinor of [10_000, 10_001, 2_500_000]) {
       expect(
         decodeRoutineDepositCommand({
           ...commandBase,
@@ -165,7 +165,7 @@ describe('routine deposit protocol', () => {
         }),
       ).toBeDefined();
     }
-    for (const amountMinor of [2_499, 2_500_001, 2_500.5]) {
+    for (const amountMinor of [9_999, 2_500_001, 10_000.5]) {
       expect(
         decodeRoutineDepositCommand({
           ...commandBase,

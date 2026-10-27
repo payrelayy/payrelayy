@@ -42,6 +42,8 @@ const [
   ownerFullActivationHelperRotation,
   ownerFullHistoryFixHelperRotation,
   ownerFullPaymentReleaseRunbook,
+  ownerOneClickHelperRotation,
+  ownerOneClickReleaseRunbook,
   botExpiryMenuHelperRotation,
   ownerControlPanelHelperRotation,
   ownerEmergencyApprovalHelperRotation,
@@ -115,6 +117,8 @@ const [
   read('infra/operations/fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1.sh'),
   read('infra/operations/production-owner-full-payment-identifiers-release.md'),
+  read('infra/operations/fetanagent-production-v2-owner-one-click-helper-rotation-v1.sh'),
+  read('infra/operations/production-owner-one-click-release.md'),
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh'),
@@ -794,14 +798,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '7c17868edc0026a170c7630bce3cd4cb80e6dbd9'/gu)].length,
+  [...workflow.matchAll(/status '8342305d6e4728dd3eccbbebaab3098509eb67ac'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='7c17868edc0026a170c7630bce3cd4cb80e6dbd9'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='8342305d6e4728dd3eccbbebaab3098509eb67ac'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1919,7 +1923,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='7c17868edc0026a170c7630bce3cd4cb80e6dbd9'",
   "readonly PREDECESSOR_SHA256='ba2bff461abc271e3650400fc3aa10d39fbd8bd6726a5abd9e6c599359107b49'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='c94d3871386ac8f7b5a948468bc345841a1576a6b536029b43badfd0ddeacee6'",
   "readonly SOURCE_REVIEW='owner-full-history-fix-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1933,7 +1937,37 @@ assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1\.sh/u,
 );
-assert.ok(ownerFullPaymentReleaseRunbook.includes(helperDigest));
+assert.ok(
+  ownerFullPaymentReleaseRunbook.includes(
+    'c94d3871386ac8f7b5a948468bc345841a1576a6b536029b43badfd0ddeacee6',
+  ),
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='8342305d6e4728dd3eccbbebaab3098509eb67ac'",
+  "readonly PREDECESSOR_SHA256='c94d3871386ac8f7b5a948468bc345841a1576a6b536029b43badfd0ddeacee6'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-one-click-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER ONE CLICK HELPER V1',
+]) {
+  assert.ok(ownerOneClickHelperRotation.includes(value));
+}
+for (const value of [
+  '593344964',
+  '8342305d6e4728dd3eccbbebaab3098509eb67ac',
+  'c94d3871386ac8f7b5a948468bc345841a1576a6b536029b43badfd0ddeacee6',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 OWNER ONE CLICK HELPER V1',
+])
+  assert.ok(ownerOneClickReleaseRunbook.includes(value));
+assert.doesNotMatch(ownerOneClickHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-owner-one-click-helper-rotation-v1\.sh/u,
+);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

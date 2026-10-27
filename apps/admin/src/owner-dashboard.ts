@@ -6106,20 +6106,14 @@ async function refreshManualReceiverAccounts() {
   manualReceiverAccounts = receivers;
 }
 
-async function decideManualPaymentCase(value, action) {
+async function decideManualPaymentCase(value, action, button) {
   if (!accessToken || receiverSmsOldBusy || value.status !== 'pending' ||
       action !== 'reject' || !value.canReject ||
       !(value.candidateId || value.legacyCandidateId)) return;
-  let reason = window.prompt('Enter the reason for rejection (10–240 characters). It is kept for the Owner; the customer receives a normal not-credited message.');
-  if (reason === null) return;
-  reason = reason.trim();
-  if (reason.length < 10 || reason.length > 240) {
-    setNotice('Enter a reason of 10–240 characters.');
-    return;
-  }
-  const reference = value.referenceMasked || 'this reference';
-  if (!window.confirm('Reject ' + reference + '? The linked customer will receive a not-credited result.')) return;
+  const reason = 'Owner rejected this submitted payment after review.';
   receiverSmsOldBusy = true;
+  button.disabled = true;
+  button.textContent = 'Rejecting…';
   const requestId = crypto.randomUUID();
   try {
     const response = await ownerRequest(
@@ -6136,6 +6130,8 @@ async function decideManualPaymentCase(value, action) {
       setNotice('Decision could not be confirmed. Refresh before trying again.');
   } finally {
     receiverSmsOldBusy = false;
+    button.disabled = false;
+    button.textContent = 'Reject';
     if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
   }
 }
@@ -6251,7 +6247,7 @@ function manualApprovalForm(value) {
   return form;
 }
 
-async function completeManualPayment(value, form) {
+async function completeManualPayment(value, form, oneClickSms, button) {
   if (!accessToken || receiverSmsOldBusy) return;
   const directSms = !value.caseId;
   const unlinkedSms = directSms && !value.candidateId;
@@ -6268,7 +6264,7 @@ async function completeManualPayment(value, form) {
       return;
     }
   }
-  if (!form.elements.creditConfirmed.checked) {
+  if (!oneClickSms && !form.elements.creditConfirmed.checked) {
     setNotice('Confirm the manual credit or resolution before recording it.');
     return;
   }
@@ -6277,8 +6273,12 @@ async function completeManualPayment(value, form) {
     : value.status === 'rejected'
       ? 'Correct this rejection after completing the outside Player credit? The reference stays blocked, and the customer will receive Deposit complete.'
       : 'Confirm that the outside Player credit is complete? FetanAgent will permanently mark this reference used and send the customer Deposit complete.';
-  if (!window.confirm(message)) return;
+  if (!oneClickSms && !window.confirm(message)) return;
   receiverSmsOldBusy = true;
+  if (oneClickSms) {
+    button.disabled = true;
+    button.textContent = 'Recording…';
+  }
   const requestId = crypto.randomUUID();
   try {
     const response = await ownerRequest('/v1/owner/manual-payments/complete', {
@@ -6298,11 +6298,15 @@ async function completeManualPayment(value, form) {
       setNotice('Completion could not be confirmed. Refresh and check the status before acting again.');
   } finally {
     receiverSmsOldBusy = false;
+    if (oneClickSms) {
+      button.disabled = false;
+      button.textContent = 'Mark manually credited';
+    }
     if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
   }
 }
 
-function manualCompletionForm(value) {
+function manualCompletionForm(value, oneClickSms = false) {
   const form = document.createElement('form');
   form.className = 'manual-completion-form';
   const hasSms = value.paymentEventId !== null;
@@ -6343,23 +6347,29 @@ function manualCompletionForm(value) {
     bankLabel.append(bankCheck,bankText);
     form.append(amountLabel,receiverLabel,bankLabel);
   }
-  const creditLabel = document.createElement('label');
-  creditLabel.className = 'confirmation-row';
-  const creditCheck = document.createElement('input');
-  creditCheck.type = 'checkbox';
-  creditCheck.name = 'creditConfirmed';
-  const creditText = document.createElement('span');
-  creditText.textContent = value.caseId || value.candidateId
-    ? 'I manually credited the selected Player in KemerBet.'
-    : 'I manually resolved this payment outside FetanAgent; no Player is linked.';
-  creditLabel.append(creditCheck,creditText);
+  const creditLabel = document.createElement(oneClickSms ? 'p' : 'label');
+  creditLabel.className = oneClickSms ? 'request-meta' : 'confirmation-row';
+  if (oneClickSms) {
+    creditLabel.textContent = value.candidateId
+      ? 'Click only after you have credited this Player in KemerBet.'
+      : 'Click to reserve this payment reference against reuse. No Player is linked or notified.';
+  } else {
+    const creditCheck = document.createElement('input');
+    creditCheck.type = 'checkbox';
+    creditCheck.name = 'creditConfirmed';
+    const creditText = document.createElement('span');
+    creditText.textContent = value.caseId || value.candidateId
+      ? 'I manually credited the selected Player in KemerBet.'
+      : 'I manually resolved this payment outside FetanAgent; no Player is linked.';
+    creditLabel.append(creditCheck,creditText);
+  }
   const button = document.createElement('button');
   button.type = 'submit';
   button.textContent = 'Mark manually credited';
   form.append(creditLabel,button);
   form.addEventListener('submit',(event) => {
     event.preventDefault();
-    void completeManualPayment(value,form);
+    void completeManualPayment(value,form,oneClickSms,button);
   });
   return form;
 }
@@ -6428,7 +6438,7 @@ function renderManualPaymentCase(value) {
     reject.textContent = 'Reject';
     reject.disabled = !value.canReject;
     if (value.canReject)
-      reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject'));
+      reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
     actions.append(reject);
     card.append(actions);
   } else if (value.ownerCaseStatus === 'rejected') {
@@ -6614,7 +6624,7 @@ function renderSmsInboxPayment(value) {
   if (value.canMarkManuallyCredited) card.append(manualCompletionForm({
     caseId: null, paymentEventId: value.paymentEventId, providerCode: value.providerCode,
     candidateId: value.candidateId, playerMasked: value.playerMasked,
-  }));
+  },true));
   return card;
 }
 

@@ -917,6 +917,95 @@ describe('Owner manual payment review', () => {
     expect(browser.fetchCalls.some((call) => call.url.endsWith('/approve'))).toBe(false);
   });
 
+  it('approves a matched-SMS submission with one click and no extra fields', async () => {
+    const matched = {
+      ...pending,
+      paymentEventId: '44444444-4444-4444-8444-444444444444',
+      paymentAt: '2026-10-20T09:59:00Z',
+      amountMinor: '3300',
+      receiverAccountId: '55555555-5555-4555-8555-555555555555',
+      receiverAccountMasked: '***1234',
+    };
+    let approved = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: false,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/submitted-payments?'))
+          return response(200, { payments: approved ? [] : [matched] });
+        if (url.endsWith('/submitted-payments/' + matched.candidateId + '/approve')) {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            amountMinor: null,
+            receiverAccountId: null,
+            bankPaymentConfirmed: false,
+            confirmed: true,
+          });
+          approved = true;
+          return response(200, {
+            approved: {
+              caseId: '33333333-3333-4333-8333-333333333333',
+              status: 'manually_credited',
+            },
+          });
+        }
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
+        return undefined;
+      },
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    await browser.call('loadManualPaymentCases', true);
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    const actions = card.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.className === 'submitted-payment-actions',
+    );
+    const form = actions?.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.className === 'manual-completion-form',
+    );
+    expect(form).toBeDefined();
+    expect(form?.children).toHaveLength(1);
+    await form?.listeners.get('submit')?.({ preventDefault() {} });
+    await vi.waitFor(() => expect(approved).toBe(true));
+  });
+
+  it('rejects a submitted payment with one click and a fixed Owner reason', async () => {
+    let rejected = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: false,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/submitted-payments?'))
+          return response(200, { payments: rejected ? [] : [pending] });
+        if (url.endsWith('/manual-payment-cases/' + pending.candidateId + '/decision')) {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            decision: 'reject',
+            reason: 'Owner rejected this submitted payment after review.',
+            confirmed: true,
+          });
+          rejected = true;
+          return response(200, { decision: { status: 'rejected' } });
+        }
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
+        return undefined;
+      },
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    await browser.call('loadManualPaymentCases', true);
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    const actions = card.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.className === 'submitted-payment-actions',
+    );
+    const reject = actions?.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.textContent === 'Reject',
+    );
+    expect(reject).toBeDefined();
+    await reject?.listeners.get('click')?.({ preventDefault() {} });
+    await vi.waitFor(() => expect(rejected).toBe(true));
+  });
+
   it('routes older signed TeleBirr receipts through the manual approval action', async () => {
     const older = {
       ...pending,
@@ -999,8 +1088,136 @@ describe('Owner manual payment review', () => {
     await browser.signIn();
     await browser.call('loadReceiverSmsInbox', true);
     const inbox = JSON.stringify(browser.element('#receiver-sms-inbox-list'));
-    expect(inbox).toContain('I manually credited the selected Player');
+    expect(inbox).toContain('Click only after you have credited this Player in KemerBet');
+    expect(inbox).not.toContain('I manually credited the selected Player');
     expect(inbox).toContain('Mark manually credited');
+  });
+
+  it('records a linked SMS manual credit on one click and ignores a second click in flight', async () => {
+    const paymentEventId = '44444444-4444-4444-8444-444444444444';
+    const candidateId = '22222222-2222-4222-8222-222222222222';
+    const completion = deferred<unknown>();
+    const browser = ownerBrowserHarness(503, {
+      confirm: false,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/receiver-sms-inbox?'))
+          return response(200, {
+            payments: [
+              {
+                paymentEventId,
+                providerCode: 'cbe_birr',
+                paymentAt: '2026-10-23T09:00:00Z',
+                receivedAt: '2026-10-23T09:00:10Z',
+                amountMinor: '3300',
+                receiverAccountMasked: '***1234',
+                receiverHolderName: 'Receiver',
+                referenceMasked: '***AB12',
+                candidateId,
+                playerMasked: '***5678',
+                status: 'auto_not_credited',
+                caseId: null,
+                canMarkManuallyCredited: true,
+              },
+            ],
+          });
+        if (url === '/v1/owner/manual-payments/complete') {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            caseId: null,
+            paymentEventId,
+            amountMinor: null,
+            receiverAccountId: null,
+            bankPaymentConfirmed: false,
+            playerCreditedConfirmed: true,
+          });
+          return completion.promise;
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    await browser.call('loadReceiverSmsInbox', true);
+    const card = browser.element('#receiver-sms-inbox-list').children[0] as FakeElement;
+    const form = card.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.className === 'manual-completion-form',
+    );
+    expect(form).toBeDefined();
+    const submit = form?.listeners.get('submit');
+    const button = form?.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.textContent === 'Mark manually credited',
+    );
+    expect(submit).toBeDefined();
+    await submit?.({ preventDefault() {} });
+    expect(button?.disabled).toBe(true);
+    expect(button?.textContent).toBe('Recording…');
+    await submit?.({ preventDefault() {} });
+    await vi.waitFor(() =>
+      expect(
+        browser.fetchCalls.filter(({ url }) => url === '/v1/owner/manual-payments/complete'),
+      ).toHaveLength(1),
+    );
+    completion.resolve(response(200, { completed: { status: 'manually_credited' } }));
+    await vi.waitFor(() =>
+      expect(browser.element('#notice').textContent).toContain('Manual credit recorded'),
+    );
+    expect(button?.disabled).toBe(false);
+  });
+
+  it('reserves an unlinked SMS reference on one click without a confirmation dialog', async () => {
+    const paymentEventId = '44444444-4444-4444-8444-444444444444';
+    let recorded = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: false,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/receiver-sms-inbox?'))
+          return response(200, {
+            payments: recorded
+              ? []
+              : [
+                  {
+                    paymentEventId,
+                    providerCode: 'telebirr',
+                    paymentAt: '2026-10-23T09:00:00Z',
+                    receivedAt: '2026-10-23T09:00:10Z',
+                    amountMinor: '3300',
+                    receiverAccountMasked: '***1234',
+                    receiverHolderName: 'Receiver',
+                    referenceMasked: '***AB12',
+                    candidateId: null,
+                    playerMasked: null,
+                    status: 'unmatched',
+                    caseId: null,
+                    canMarkManuallyCredited: true,
+                  },
+                ],
+          });
+        if (url === '/v1/owner/manual-payments/complete') {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            caseId: null,
+            paymentEventId,
+            playerCreditedConfirmed: true,
+          });
+          recorded = true;
+          return response(200, { completed: { status: 'manually_credited' } });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    await browser.call('loadReceiverSmsInbox', true);
+    const card = browser.element('#receiver-sms-inbox-list').children[0] as FakeElement;
+    const form = card.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.className === 'manual-completion-form',
+    );
+    expect(JSON.stringify(form)).toContain('No Player is linked or notified');
+    expect(JSON.stringify(form)).not.toContain('creditConfirmed');
+    await form?.listeners.get('submit')?.({ preventDefault() {} });
+    await vi.waitFor(() => expect(recorded).toBe(true));
+    await vi.waitFor(() =>
+      expect(browser.element('#notice').textContent).toContain('Its reference cannot be reused'),
+    );
   });
 
   it('loads the latest 50 SMS on opening and applies the simple filters automatically', async () => {

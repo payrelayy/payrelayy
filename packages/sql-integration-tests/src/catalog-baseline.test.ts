@@ -165,6 +165,8 @@ const betaAdmissionNoncePurgeProcedure =
 const betaInviteAdmissionMigrationName =
   '20260809195620_private_telegram_beta_invite_admission.sql';
 const depositRangeMigrationName = '20261027021500_auto_deposit_100_etb_manual_review.sql';
+const restoreDepositTransportMigrationName =
+  '20261027131000_restore_routine_transport_after_100_etb_policy.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -632,7 +634,9 @@ describe('disposable SQL migration baseline', () => {
   it('applies historical migrations in lexical filename order', async () => {
     const expectedMigrationNames = (
       await listMigrationsLexically(environment.migrationsDirectory)
-    ).filter((name) => name !== depositRangeMigrationName);
+    ).filter(
+      (name) => name !== depositRangeMigrationName && name !== restoreDepositTransportMigrationName,
+    );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
       from sql_integration.applied_migrations
@@ -10233,6 +10237,15 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [depositRangeMigrationName],
     );
+    const transportMigrationSource = await readFile(
+      join(environment.migrationsDirectory, restoreDepositTransportMigrationName),
+      'utf8',
+    );
+    await postCutoverClient.query(transportMigrationSource);
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [restoreDepositTransportMigrationName],
+    );
     await postCutoverClient.query(
       `insert into app.receiver_accounts (
         provider_id,version,account_holder_name,account_reference_ciphertext,
@@ -10266,6 +10279,11 @@ describe('100 ETB production deposit policy cutover', () => {
       'select filename from sql_integration.applied_migrations order by filename',
     );
     expect(applied.rows.map((row) => row.filename)).toEqual(expected);
+    const transport = await postCutoverClient.query<{ active: boolean; events: string }>(
+      `select app.routine_telebirr_runtime_is_active() as active,
+        (select count(*)::text from app.routine_telebirr_runtime_events) as events`,
+    );
+    expect(transport.rows).toEqual([{ active: false, events: '0' }]);
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(

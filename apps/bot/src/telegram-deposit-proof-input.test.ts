@@ -6,6 +6,7 @@ import {
   reduceTelegramDepositProofInput,
 } from './telegram-deposit-proof-input.js';
 import {
+  reduceTelegramAutoReceiverSmsMediaSubmission,
   reduceTelegramDepositProofCommand,
   reduceTelegramDepositProofSubmission,
   reduceTelegramGuidedDepositMediaSubmission,
@@ -31,7 +32,7 @@ const paymentPrompt = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('Telegram amount-free TeleBirr proof input', () => {
+describe('Telegram amount-free payment proof input', () => {
   it('chooses the incoming SMS ledger from an exact 10 or 11 character reference', () => {
     expect(reduceTelegramAutoReceiverSmsProofInput(' tb12345678 ')).toEqual({
       kind: 'candidate',
@@ -83,6 +84,52 @@ describe('Telegram amount-free TeleBirr proof input', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('accepts a CBE Birr SMS with a matching official receipt and an unrelated feedback link', () => {
+    const cbeReference = 'SYNTHCBE001';
+    const sms =
+      `Dear customer, you have sent 110.00Br. to TEST RECEIVER on 27/10/26 15:05,` +
+      `Txn ID ${cbeReference}. Your CBE Birr account balance is 1000.00Br. ` +
+      `For invoice https://cbepay1.cbe.com.et/aureceipt?TID=${cbeReference}&PH=900000001 ` +
+      'For your feedback please click https://shorturl.at/gy3A0';
+    expect(reduceTelegramAutoReceiverSmsProofInput(sms)).toEqual({
+      kind: 'candidate',
+      providerCode: 'cbe_birr',
+      transactionReference: cbeReference,
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsMediaSubmission({
+        ...metadata,
+        caption: sms,
+        extractedText: `Receipt Number: ${cbeReference}`,
+        sourceKind: 'pdf_text',
+        replyToMessage: undefined,
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: cbeReference,
+      },
+    });
+  });
+
+  it('finds the CBE reference in either official PDF layout without reading its table heading as an ID', () => {
+    const cbeReference = 'SYNTHCBE001';
+    for (const receiptText of [
+      `Order ID            ${cbeReference}\nTransaction Status Completed\n` +
+        `Receipt Number Transaction Date Amount\n${cbeReference} 2026-10-27 110.00`,
+      `Reference           ${cbeReference}\n` +
+        `Receipt Number     Transaction Date     Amount\nSYNTHETIC-0001 27/10/2026 110.00`,
+    ]) {
+      expect(reduceTelegramAutoReceiverSmsProofInput(receiptText, 'pdf_text')).toEqual({
+        kind: 'candidate',
+        providerCode: 'cbe_birr',
+        transactionReference: cbeReference,
+      });
+    }
+  });
+
   it('does not choose a method for conflicting or malformed payment information', () => {
     expect(
       reduceTelegramAutoReceiverSmsProofInput('Transaction ID: TB12345678. Txn ID: CBE12345678.'),
@@ -97,6 +144,19 @@ describe('Telegram amount-free TeleBirr proof input', () => {
         'Transaction ID: TB12345678. https://cbepay1.cbe.com.et/aureceipt?TID=short&PH=000000000000',
       ),
     ).toEqual({ kind: 'invalid_input' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'Txn ID SYNTHCBE001. https://example.invalid/aureceipt?TID=SYNTHCBE001',
+      ),
+    ).toEqual({ kind: 'invalid_input' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput('Transaction ID TB12345678. Order ID short.'),
+    ).toEqual({ kind: 'invalid_input' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'Txn ID SYNTHCBE001. https://cbepay1.cbe.com.et/aureceipt?TID=OTHERREF123&PH=900000001',
+      ),
+    ).toEqual({ kind: 'selection_required' });
   });
   it.each(['ocr_text', 'pdf_text'] as const)(
     'reduces a %s attachment to the same protected reference-only action',
@@ -331,6 +391,9 @@ describe('Telegram amount-free TeleBirr proof input', () => {
     `https://example.invalid/aureceipt?TID=${reference}&PH=900000001`,
     `https://cbepay1.cbe.com.et/aureceipt?TID=${reference}&TID=${otherReference}`,
     `Txn ID ${reference}. For invoice https://example.invalid/aureceipt?TID=${reference}`,
+    `Txn ID ${reference}-EXTRA`,
+    `Txn ID ${reference}_EXTRA`,
+    `Txn ID ${reference}é`,
     `Txn ID short`,
     `Txn ID ${reference} and Order ID short`,
   ])('does not guess CBE Birr references from unknown or malformed sources', (proofText) => {

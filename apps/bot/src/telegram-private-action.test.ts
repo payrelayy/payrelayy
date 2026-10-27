@@ -124,6 +124,8 @@ describe('private Telegram action reducers', () => {
     expect(prompt).not.toContain('Choose one available method');
     expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(prompt).toContain('After paying, send your receipt or reference here.');
+    const copyHint = 'ℹ️የስልክ ቁጥሩን በመጫን ብቻ Copy ማድረግ ትችላለህ።';
+    expect(prompt).toContain(`Number: 900000043\n\n${copyHint}\n\nSaved Player ID:`);
     expect(
       telegramReceiverNumberCodeEntities(prompt).map((entity) => ({
         type: entity.type,
@@ -136,14 +138,18 @@ describe('private Telegram action reducers', () => {
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
       true,
     );
-    const priorLocalPrompt = prompt.replace(
+    const previousCard = prompt.replace(`\n${copyHint}\n`, '');
+    expect(
+      isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: previousCard }),
+    ).toBe(true);
+    const priorLocalPrompt = previousCard.replace(
       'After paying, send your receipt or reference here.',
       'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
     );
     expect(
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
-        text: prompt.replace(
+        text: previousCard.replace(
           'After paying, send your receipt or reference here.',
           'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
         ),
@@ -222,6 +228,7 @@ describe('private Telegram action reducers', () => {
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
         text: cbeOnly
+          .replace(`\n${copyHint}\n`, '')
           .replace(
             'After paying, send your receipt or reference here.',
             'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',

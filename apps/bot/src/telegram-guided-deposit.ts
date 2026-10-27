@@ -31,6 +31,7 @@ const PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT = 'You can also paste the receipt lin
 const CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT =
   'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).';
 const PAYMENT_PROOF_INSTRUCTION_TEXT = 'After paying, send your receipt or reference here.';
+const RECEIVER_NUMBER_COPY_HINT_TEXT = 'ℹ️የስልክ ቁጥሩን በመጫን ብቻ Copy ማድረግ ትችላለህ።';
 const RECENT_PAYMENT_PROOF_INSTRUCTION_TEXT =
   'After paying, send reference, SMS, receipt link, screenshot or PDF here.';
 
@@ -169,6 +170,7 @@ function renderTelegramCombinedPaymentPrompt(
   previousWording: boolean,
   localNumbers: boolean,
   conciseProofText: boolean,
+  includeCopyHint = false,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -197,6 +199,7 @@ function renderTelegramCombinedPaymentPrompt(
       `Name: ${receiver.receiverAccountHolderName}`,
       `Number: ${localNumbers ? toTelegramLocalReceiverNumber(receiver.receiverAccountReference) : receiver.receiverAccountReference}`,
     ]),
+    ...(includeCopyHint ? ['', RECEIVER_NUMBER_COPY_HINT_TEXT] : []),
     '',
     `Saved Player ID: ${input.playerId}`,
     ...(previousWording
@@ -215,7 +218,7 @@ function renderTelegramCombinedPaymentPrompt(
 export function buildTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
 ): string {
-  return renderTelegramCombinedPaymentPrompt(input, false, true, true);
+  return renderTelegramCombinedPaymentPrompt(input, false, true, true, true);
 }
 
 export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
@@ -237,10 +240,12 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
     // Customers can still reply to cards issued before the amount change.
     const replyText = message.text.replace('Send 25–25,000 ETB.', 'Send 100–25,000 ETB.');
     const input = { playerId, receivers };
-    const currentPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true);
+    const currentPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true, true);
+    const previousPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true);
     return replyText === currentPrompt ||
+      replyText === previousPrompt ||
       replyText ===
-        currentPrompt.replace(
+        previousPrompt.replace(
           PAYMENT_PROOF_INSTRUCTION_TEXT,
           RECENT_PAYMENT_PROOF_INSTRUCTION_TEXT,
         ) ||

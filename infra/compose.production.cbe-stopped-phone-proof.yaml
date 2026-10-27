@@ -24,9 +24,11 @@ services:
       ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE: /run/secrets/routine_no_money_lookup_signer.pkcs8.der
       ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE: /run/secrets/routine_no_money_lookup_signer.v1.json
       INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'
+      INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED: 'true'
       INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'
       RECEIVER_SMS_DATABASE_URL_FILE: /run/secrets/receiver_sms_ingest_database_url
       RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/receiver_sms_reference_fingerprint_master
+      RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/receiver_sms_owner_display_encryption_master
       RECEIVER_SMS_SETTLEMENT_DATABASE_URL_FILE: /run/secrets/receiver_sms_settlement_database_url
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
@@ -63,6 +65,11 @@ services:
         mode: 0400
       - source: deposit_proof_reference_fingerprint_master
         target: receiver_sms_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: receiver_sms_owner_display_encryption_master
+        target: receiver_sms_owner_display_encryption_master
         uid: '10001'
         gid: '10001'
         mode: 0400

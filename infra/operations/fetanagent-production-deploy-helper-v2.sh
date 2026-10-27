@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_GUARDED_PREDECESSOR_SHA='d6c1865b911a95a8242331410e9dd0d24292954c'
+readonly CBE_GUARDED_PREDECESSOR_SHA='8e6367b01383b53cb7135d62083e1dfcd37cbdd4'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -483,7 +483,24 @@ verify_release_files() {
       owner-cbe-birr-receiver-lookup-profile.v2.json
     )
   fi
+  if grep -Fq "INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'" \
+    "$release/compose.production.yaml"; then
+    required+=(receiver-sms-owner-display-encryption-master)
+    grep -Fq 'OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/owner_sms_display_encryption_master' \
+      "$release/compose.production.yaml" ||
+      die 'the Owner SMS display secret mount is absent'
+  fi
   deployment_mode="$(release_deployment_mode "$release")"
+  if grep -Fq "INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'" \
+    "$release/compose.production.yaml"; then
+    [[ "$deployment_mode" == 'inert-maintenance' ]] ||
+      die 'Owner full payment identifiers require the SMS maintenance overlay'
+    grep -Fq "INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml" &&
+      grep -Fq 'RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/receiver_sms_owner_display_encryption_master' \
+        "$release/compose.production.inert-maintenance.yaml" ||
+      die 'the receiver SMS display secret mount is absent'
+  fi
   if [[ "$deployment_mode" != 'legacy' ]]; then
     [[ ! -L "$release/compose.production.shadow-review.yaml" &&
       -f "$release/compose.production.shadow-review.yaml" &&
@@ -613,6 +630,17 @@ verify_release_files() {
       LC_ALL=C grep -Eq '^[A-Za-z0-9_-]{40,256}$' \
         "$release/secrets/bot-screenshot-reference-model-access-key" ||
       die 'the screenshot model access key is malformed'
+  fi
+  if grep -Fq "INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'" \
+    "$release/compose.production.yaml"; then
+    [[ "$(stat --format='%s' "$release/secrets/receiver-sms-owner-display-encryption-master")" -eq 65 ]] &&
+      LC_ALL=C grep -Eq '^[0-9a-f]{64}$' \
+        "$release/secrets/receiver-sms-owner-display-encryption-master" &&
+      ! cmp -s "$release/secrets/receiver-sms-owner-display-encryption-master" \
+        "$release/secrets/deposit-proof-reference-encryption-master" &&
+      ! cmp -s "$release/secrets/receiver-sms-owner-display-encryption-master" \
+        "$release/secrets/deposit-proof-reference-fingerprint-master" ||
+      die 'the Owner SMS display key is malformed or reused'
   fi
   [[ "$(find -P "$release/secrets" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq "${#required[@]}" ]] ||
     die 'the production secret directory contains an unexpected file'
@@ -896,6 +924,14 @@ case "${1:-}" in
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
     expected_count=33
+    if grep -Fq "INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'" \
+      "$incoming/compose.production.yaml"; then
+      expected_count=$((expected_count + 1))
+      [[ ! -L "$incoming/receiver-sms-owner-display-encryption-master" &&
+        -f "$incoming/receiver-sms-owner-display-encryption-master" &&
+        -s "$incoming/receiver-sms-owner-display-encryption-master" ]] ||
+        die 'the Owner SMS display key is missing'
+    fi
     if grep -Fq "BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'" \
       "$incoming/compose.production.yaml"; then
       expected_count=$((expected_count + 1))

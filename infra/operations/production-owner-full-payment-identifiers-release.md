@@ -13,40 +13,61 @@ SMS**. Older SMS with an encrypted submitted reference can show it. A pending
 submission with no confirmed receiver account says **No receiving account
 confirmed**.
 
-The code defaults to masked display. Activating the full display requires this
-order:
+The code defaults to masked display. The guarded release uses this order:
 
-1. Deploy the updated Owner and SMS broker binaries with both new feature flags
-   off. The reviewed production predecessor and routine marker are
-   `d6c1865b911a95a8242331410e9dd0d24292954c`. The installed helper and
-   sudoers pin are `ab09aa773ba2eac7e7758ea3e02ab335fb5711c0031d0c7934a2afe27d2518d2`;
-   the reviewed stage-one successor is
+1. The first stage-one release at
+   `ceea0fb5f70e217adbb8b6ccbf104e7733b724f7` failed activation and the
+   guarded helper restored the healthy predecessor
+   `d6c1865b911a95a8242331410e9dd0d24292954c`. Its stage-one helper
+   rotation succeeded; the installed helper and sudoers pin are
    `94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806`.
-   Stage the exact merged-main successor helper and
-   `fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh` as
-   root-owned files on Droplet `593344964`. Run the rotation script's `inspect`,
-   then `rotate 'ROTATE EXACT PRODUCTION V2 OWNER FULL STAGE1 HELPER V1'`,
-   then `inspect` again. Require the exact predecessor and successor messages.
-   Dispatch `production-runtime.yml` from passing main with `deploy-inert`,
+   Deploy the bridge release
+   `8e6367b01383b53cb7135d62083e1dfcd37cbdd4` with both feature flags
+   off. Dispatch `production-runtime.yml` from passing main with `deploy-inert`,
    `cbe-live-v1`, routine transport `enabled`, database route `pooler`, and
-   `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services, unchanged
-   payment switches, and the routine marker on the new release.
-2. Apply `20261027163950_owner_full_payment_identifiers.sql`. Confirm the new
-   Owner read functions and the SMS display write function are present and that
-   runtime roles still have no direct table access.
-3. Provision one persistent, independently generated 32-byte encryption master
-   in the protected production secret store. Deliver that same key to the
-   Owner and SMS broker under their separate container secret names. Preserve
-   it across every later release so stored SMS references stay readable.
-4. Integrate `compose.production.owner-full-payment-identifiers.yaml` into the
-   guarded release workflow and the installed deploy helper's exact Compose
-   allowlist. The current helper and workflow do **not** include this overlay;
-   do not assume that placing the file in a release bundle activates it.
-5. Enable both feature flags together, then verify a new synthetic signed SMS,
-   a matched older SMS, an unmatched older SMS, pending/approved/rejected
-   submissions, active payment methods, and retired receiver history in the
-   authenticated Owner page. Check that non-Owner APIs and logs do not expose
-   full values. Do not replay a real payment for this display check.
+   `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services,
+   unchanged payment switches, and the routine marker on the bridge release.
+2. The schema migration `20261027163950_owner_full_payment_identifiers.sql`
+   reached production before the compatible broker. Its new grant made the old
+   broker fail its exact function-surface check. The emergency migration
+   `20261027173415_defer_owner_sms_display_grant_until_broker_rollout.sql`
+   revoked that one grant; both the broker and device bridge returned healthy.
+   The failed rollout restarted the old Owner, whose preflight rejected four
+   additional display grants. The emergency migration
+   `20261027174232_defer_owner_sensitive_read_grants_until_owner_rollout.sql`
+   revoked those grants and the old Owner recovered. Keep both recorded
+   migrations in the repository so migration history agrees.
+3. Once the bridge release is healthy at
+   `8e6367b01383b53cb7135d62083e1dfcd37cbdd4`, restore all five grants with
+   `20261027175000_restore_owner_sms_display_grant_after_broker_rollout.sql`.
+   Confirm the broker remains healthy and runtime roles still have no direct
+   table access.
+4. A persistent independently generated 32-byte encryption master is stored
+   as the production GitHub environment secret
+   `OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET`. The production workflow
+   delivers the same key to the Owner and SMS broker under separate container
+   secret names. Preserve it across later releases so stored SMS references
+   stay readable.
+5. The activation release integrates the display settings into the guarded
+   `compose.production.yaml` and `compose.production.inert-maintenance.yaml`
+   files. The separate overlay remains an example and is not transferred by
+   the exact-file deploy helper. Stage the merged-main successor helper and
+   `fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh` on
+   Droplet `593344964`. Rotate from the stage-one helper digest
+   `94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806`
+   to `ba2bff461abc271e3650400fc3aa10d39fbd8bd6726a5abd9e6c599359107b49`.
+   Run `inspect`, then
+   `rotate 'ROTATE EXACT PRODUCTION V2 OWNER FULL ACTIVATION HELPER V1'`, then
+   `inspect` again. Require the exact predecessor and successor messages.
+6. Dispatch the same guarded `deploy-inert` workflow from passing main with
+   `cbe-live-v1`, routine transport `enabled`, database route `pooler`, and
+   `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services,
+   unchanged payment switches, and the routine marker on the new release.
+   Verify a new synthetic signed SMS, a matched older SMS, an unmatched older
+   SMS, pending/approved/rejected submissions, active payment methods, and
+   retired receiver history in the authenticated Owner page. Check that
+   non-Owner APIs and logs do not expose full values. Do not replay a real
+   payment for this display check.
 
 If activation fails, turn off both feature flags and keep the migration and
 encrypted SMS display rows intact. The old masked read paths remain available.

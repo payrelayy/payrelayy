@@ -54,6 +54,8 @@ services:
       OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE: /run/secrets/owner_cbe_birr_lookup_fingerprint_master
       OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: /etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json
       INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true'
+      INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'
+      OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/owner_sms_display_encryption_master
       OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:?set the reviewed production assignment signer key ID}
       OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
@@ -101,6 +103,11 @@ services:
         mode: 0400
       - source: owner_cbe_birr_lookup_fingerprint_master
         target: owner_cbe_birr_lookup_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: receiver_sms_owner_display_encryption_master
+        target: owner_sms_display_encryption_master
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -766,6 +773,8 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-lookup-encryption-master
   owner_cbe_birr_lookup_fingerprint_master:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-lookup-fingerprint-master
+  receiver_sms_owner_display_encryption_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/receiver-sms-owner-display-encryption-master
   telegram_bot_token:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-token
   bot_player_action_transport_hmac:

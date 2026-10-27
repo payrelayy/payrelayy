@@ -886,6 +886,51 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('routes a pasted CBE SMS and a captioned PDF with an unrelated feedback link', async () => {
+    await loadComposition(false, true, true, false, true);
+    const reference = 'SYNTHCBE001';
+    const sms =
+      `Dear customer, you sent 110.00Br. on 27/10/26 15:05,Txn ID ${reference}. ` +
+      `For invoice https://cbepay1.cbe.com.et/aureceipt?TID=${reference}&PH=900000001 ` +
+      'For feedback https://shorturl.at/gy3A0';
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      matchStatus: 'pending_sms',
+    };
+    await runtime.messageHandler!(messageContext(sms));
+    runtime.mediaResult = {
+      kind: 'text',
+      text: `Order ID ${reference}\nReceipt Number Transaction Date Amount`,
+    };
+    await runtime.messageHandler!({
+      ...messageContext(''),
+      message: {
+        caption: sms,
+        document: {
+          file_id: 'synthetic-pdf-id',
+          file_size: 100,
+          file_name: 'receipt.pdf',
+          mime_type: 'application/pdf',
+        },
+      },
+    });
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: reference,
+      }),
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: reference,
+      }),
+    ]);
+  });
+
   it('asks for one reference when a live SMS proof contains two methods', async () => {
     await loadComposition(false, true, true, false, true);
     const context = messageContext('Txn ID: TB12345678. Txn ID: CBE12345678.');

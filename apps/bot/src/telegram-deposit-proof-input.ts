@@ -29,7 +29,9 @@ export type TelegramAutoReceiverSmsProofInput =
 const DIRECT_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 const FORBIDDEN_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const CBE_BIRR_REFERENCE_LABEL_PATTERN =
-  /\b(?:Txn\s+ID|Transaction\s+ID|Order\s+ID|Receipt\s+Number)\s*[:#]?\s*([A-Za-z0-9]{1,64})/giu;
+  /\b(?:Txn\s+ID|Transaction\s+(?:ID|Number)|Order\s+ID|Receipt\s+Number)\s*[:#]?\s*([^\s.,;!?:()[\]{}"'<>]+)/giu;
+const CBE_BIRR_REFERENCE_ROW_PATTERN =
+  /^[ \t]*(?:Payment[ \t]+)?Reference[ \t]*:?[ \t]+([^\s.,;!?:()[\]{}"'<>]+)/gimu;
 const LINK_PATTERN = /https?:\/\/[^\s<>"']+/giu;
 
 /** Bound the whole command before splitting, trimming, or scanning customer-controlled text. */
@@ -53,6 +55,18 @@ function extractCbeBirrReferenceCandidates(text: string): TelegramDepositProofIn
   const candidates = new Set<string>();
   let malformed = false;
   for (const match of text.matchAll(CBE_BIRR_REFERENCE_LABEL_PATTERN)) {
+    // The official CBE receipt uses this as a table heading, not a transaction reference.
+    if (
+      /^Receipt\s+Number\s+Transaction$/iu.test(match[0] ?? '') &&
+      /^\s+Date\s+Amount\b/iu.test(text.slice((match.index ?? 0) + match[0].length))
+    ) {
+      continue;
+    }
+    const reference = match[1]?.toUpperCase();
+    if (!reference || !isDirectReference(reference)) malformed = true;
+    else candidates.add(reference);
+  }
+  for (const match of text.matchAll(CBE_BIRR_REFERENCE_ROW_PATTERN)) {
     const reference = match[1]?.toUpperCase();
     if (!reference || !isDirectReference(reference)) malformed = true;
     else candidates.add(reference);
@@ -60,6 +74,12 @@ function extractCbeBirrReferenceCandidates(text: string): TelegramDepositProofIn
   for (const match of text.matchAll(LINK_PATTERN)) {
     try {
       const url = new URL(match[0]!.replace(/[.,;)]+$/u, ''));
+      const isReceiptClaim =
+        url.hostname === 'cbepay1.cbe.com.et' ||
+        url.pathname.toLowerCase().includes('aureceipt') ||
+        [...url.searchParams.keys()].some((key) => key.toUpperCase() === 'TID');
+      // CBE SMS can also contain a feedback link. It nominates no reference and is not opened.
+      if (!isReceiptClaim) continue;
       const references = url.searchParams.getAll('TID');
       if (
         url.protocol !== 'https:' ||
@@ -150,8 +170,11 @@ export function reduceTelegramAutoReceiverSmsProofInput(
     };
   }
   if (cbe.kind === 'selection_required') return cbe;
-  // A malformed CBE official link must never be hidden by another labelled reference.
-  if (/cbepay1\.cbe\.com\.et/iu.test(text) && cbe.kind === 'invalid_input') {
+  // A malformed receipt claim, including one on another host, cannot be hidden by a label.
+  if (
+    cbe.kind === 'invalid_input' &&
+    /(?:cbepay1\.cbe\.com\.et|\/aureceipt(?:[/?#]|$)|[?&]TID=)/iu.test(text)
+  ) {
     return { kind: 'invalid_input' };
   }
 

@@ -13,8 +13,7 @@ SMS**. Older SMS with an encrypted submitted reference can show it. A pending
 submission with no confirmed receiver account says **No receiving account
 confirmed**.
 
-The code defaults to masked display. Activating the full display requires this
-order:
+The code defaults to masked display. The guarded release uses this order:
 
 1. Deploy the updated Owner and SMS broker binaries with both new feature flags
    off. The reviewed production predecessor and routine marker are
@@ -31,22 +30,43 @@ order:
    `cbe-live-v1`, routine transport `enabled`, database route `pooler`, and
    `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services, unchanged
    payment switches, and the routine marker on the new release.
-2. Apply `20261027163950_owner_full_payment_identifiers.sql`. Confirm the new
-   Owner read functions and the SMS display write function are present and that
-   runtime roles still have no direct table access.
-3. Provision one persistent, independently generated 32-byte encryption master
-   in the protected production secret store. Deliver that same key to the
-   Owner and SMS broker under their separate container secret names. Preserve
-   it across every later release so stored SMS references stay readable.
-4. Integrate `compose.production.owner-full-payment-identifiers.yaml` into the
-   guarded release workflow and the installed deploy helper's exact Compose
-   allowlist. The current helper and workflow do **not** include this overlay;
-   do not assume that placing the file in a release bundle activates it.
-5. Enable both feature flags together, then verify a new synthetic signed SMS,
-   a matched older SMS, an unmatched older SMS, pending/approved/rejected
-   submissions, active payment methods, and retired receiver history in the
-   authenticated Owner page. Check that non-Owner APIs and logs do not expose
-   full values. Do not replay a real payment for this display check.
+2. The schema migration `20261027163950_owner_full_payment_identifiers.sql`
+   reached production before the compatible broker. Its new grant made the old
+   broker fail its exact function-surface check. The emergency migration
+   `20261027173415_defer_owner_sms_display_grant_until_broker_rollout.sql`
+   revoked that one grant; both the broker and device bridge returned healthy.
+   Keep this recorded migration in the repository so migration history agrees.
+3. Once the stage-one release is healthy at
+   `ceea0fb5f70e217adbb8b6ccbf104e7733b724f7`, restore the grant with
+   `20261027175000_restore_owner_sms_display_grant_after_broker_rollout.sql`.
+   Confirm the broker remains healthy and runtime roles still have no direct
+   table access.
+4. A persistent independently generated 32-byte encryption master is stored
+   as the production GitHub environment secret
+   `OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET`. The production workflow
+   delivers the same key to the Owner and SMS broker under separate container
+   secret names. Preserve it across later releases so stored SMS references
+   stay readable.
+5. The activation release integrates the display settings into the guarded
+   `compose.production.yaml` and `compose.production.inert-maintenance.yaml`
+   files. The separate overlay remains an example and is not transferred by
+   the exact-file deploy helper. Stage the merged-main successor helper and
+   `fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh` on
+   Droplet `593344964`. Rotate from the stage-one helper digest
+   `94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806`
+   to `b769f55ca34baf869f43ac7e4cd6e89aba77d57bc0f11202deb0abea90f220fc`.
+   Run `inspect`, then
+   `rotate 'ROTATE EXACT PRODUCTION V2 OWNER FULL ACTIVATION HELPER V1'`, then
+   `inspect` again. Require the exact predecessor and successor messages.
+6. Dispatch the same guarded `deploy-inert` workflow from passing main with
+   `cbe-live-v1`, routine transport `enabled`, database route `pooler`, and
+   `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services,
+   unchanged payment switches, and the routine marker on the new release.
+   Verify a new synthetic signed SMS, a matched older SMS, an unmatched older
+   SMS, pending/approved/rejected submissions, active payment methods, and
+   retired receiver history in the authenticated Owner page. Check that
+   non-Owner APIs and logs do not expose full values. Do not replay a real
+   payment for this display check.
 
 If activation fails, turn off both feature flags and keep the migration and
 encrypted SMS display rows intact. The old masked read paths remain available.

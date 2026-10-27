@@ -39,6 +39,7 @@ const [
   cbeReferenceHelperRotation,
   cbeReferenceReleaseRunbook,
   ownerFullStage1HelperRotation,
+  ownerFullActivationHelperRotation,
   ownerFullPaymentReleaseRunbook,
   botExpiryMenuHelperRotation,
   ownerControlPanelHelperRotation,
@@ -110,6 +111,7 @@ const [
   read('infra/operations/fetanagent-production-v2-cbe-reference-helper-rotation-v1.sh'),
   read('infra/operations/production-cbe-reference-release.md'),
   read('infra/operations/fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh'),
   read('infra/operations/production-owner-full-payment-identifiers-release.md'),
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
@@ -564,8 +566,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 7);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 7);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 32);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 32);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 33);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 33);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -790,14 +792,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'd6c1865b911a95a8242331410e9dd0d24292954c'/gu)].length,
+  [...workflow.matchAll(/status 'ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='d6c1865b911a95a8242331410e9dd0d24292954c'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1231,6 +1233,7 @@ const helperCountBlock =
   /local_count="\$\(find[\s\S]*?\[\[ "\$local_count" -eq "\$expected_count"/u.exec(helper)?.[0];
 assert.ok(helperCountBlock, 'the helper bundle count gate must exist');
 const [
+  ownerDisplayFiles,
   screenshotFiles,
   betaFiles,
   operationalFiles,
@@ -1243,23 +1246,29 @@ const [
 ] = [...helperCountBlock.matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu)].map(
   (match) => Number(match[1]),
 );
+assert.equal(ownerDisplayFiles, 1);
 assert.equal(screenshotFiles, 1);
 assert.ok(betaFiles > 0, 'legacy beta rollback accounting must remain explicit');
 assert.match(compose, /^  production-companion-device-bridge:/mu);
 assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'/u);
 assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'/u);
 assert.equal(
-  helperBaseCount + screenshotFiles + operationalFiles + companionFiles,
+  helperBaseCount + ownerDisplayFiles + screenshotFiles + operationalFiles + companionFiles,
   operationalTransferNames.length,
   'the helper operational bundle count must match the flattened workflow transfer',
 );
 assert.equal(
-  helperBaseCount + screenshotFiles + smsFiles + companionFiles,
+  helperBaseCount + ownerDisplayFiles + screenshotFiles + smsFiles + companionFiles,
   inertTransferNames.length,
   'the helper inert bundle count must match the flattened workflow transfer',
 );
 assert.equal(
-  helperBaseCount + screenshotFiles + routineFiles + combinedSmsFiles + companionFiles,
+  helperBaseCount +
+    ownerDisplayFiles +
+    screenshotFiles +
+    routineFiles +
+    combinedSmsFiles +
+    companionFiles,
   inertProofTransferNames.length,
   'the helper CBE-stopped proof bundle count must match the flattened workflow transfer',
 );
@@ -1876,7 +1885,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='d6c1865b911a95a8242331410e9dd0d24292954c'",
   "readonly PREDECESSOR_SHA256='ab09aa773ba2eac7e7758ea3e02ab335fb5711c0031d0c7934a2afe27d2518d2'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806'",
   "readonly SOURCE_REVIEW='owner-full-stage1-release-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1886,6 +1895,24 @@ for (const value of [
   assert.ok(ownerFullStage1HelperRotation.includes(value));
 }
 assert.doesNotMatch(ownerFullStage1HelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'",
+  "readonly PREDECESSOR_SHA256='94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-full-activation-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER FULL ACTIVATION HELPER V1',
+]) {
+  assert.ok(ownerFullActivationHelperRotation.includes(value));
+}
+assert.doesNotMatch(ownerFullActivationHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-owner-full-activation-helper-rotation-v1\.sh/u,
+);
 assert.ok(ownerFullPaymentReleaseRunbook.includes(helperDigest));
 assert.equal(
   sudoers,

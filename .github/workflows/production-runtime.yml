@@ -274,6 +274,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-deposit-range-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-reference-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh
@@ -434,6 +435,7 @@ jobs:
           OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON: ${{ vars.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON }}
           DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET: ${{ secrets.OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET }}
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
           ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
           ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
@@ -610,6 +612,13 @@ jobs:
             ['encryptionMasterFingerprint', 'fingerprintMasterFingerprint'],
             [process.env.OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET, process.env.OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET],
             'cbe_birr_receiver_lookup');
+          const displaySecret = process.env.OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET;
+          if (!/^[0-9a-f]{64}$/u.test(displaySecret ?? '') || [
+            process.env.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET,
+            process.env.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET,
+            process.env.OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET,
+            process.env.OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET,
+          ].includes(displaySecret)) throw new Error('invalid or reused Owner SMS display key');
           const token = process.env.PRODUCTION_TELEGRAM_BOT_TOKEN;
           if (!/^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$/u.test(token)) throw new Error('invalid Telegram token');
           const digest = `sha256:${createHash('sha256').update(token).digest('hex')}`;
@@ -674,6 +683,7 @@ jobs:
           printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET" >"$secret_dir/owner-cbe-birr-lookup-encryption-master"
           printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET" >"$secret_dir/owner-cbe-birr-lookup-fingerprint-master"
           printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON" >"$secret_dir/owner-cbe-birr-receiver-lookup-profile.v2.json"
+          printf '%s\n' "$OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET" >"$secret_dir/receiver-sms-owner-display-encryption-master"
           telebirr_reference_opening_key_id="$(
             node infra/operations/derive-telebirr-reference-opening-key.mjs \
               "$secret_dir/deposit-proof-reference-encryption-master" \
@@ -1206,7 +1216,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status 'd6c1865b911a95a8242331410e9dd0d24292954c'"
+              "sudo -n '$helper' status 'ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1358,7 +1368,7 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             "$RUNNER_TEMP/release/compose.production.inert-maintenance.yaml" \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,receiver-sms-owner-display-encryption-master,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
             "$SECRET_DIR"/bot-screenshot-reference-model-access-key
           )
           case "$REQUESTED_MODE" in
@@ -1438,7 +1448,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status 'd6c1865b911a95a8242331410e9dd0d24292954c'"
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status 'ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'"
 
       - name: Atomically activate production and switch the public edge
         id: activate

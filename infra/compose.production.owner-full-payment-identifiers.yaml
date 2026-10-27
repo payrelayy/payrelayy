@@ -1,7 +1,6 @@
-# Activation template. The current production deploy helper has a fixed Compose
-# file allowlist and does not yet include this overlay. Add it to the guarded
-# release workflow only after the Owner and SMS broker binaries and migration
-# are installed. Both services receive the same persistent display-only key.
+# Activation example. The guarded production release places these settings in
+# its allowlisted base and inert-maintenance Compose files. This overlay is not
+# transferred to the Droplet. Both services use one persistent display-only key.
 services:
   owner-control:
     environment:

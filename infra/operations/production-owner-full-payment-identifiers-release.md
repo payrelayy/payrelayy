@@ -17,7 +17,20 @@ The code defaults to masked display. Activating the full display requires this
 order:
 
 1. Deploy the updated Owner and SMS broker binaries with both new feature flags
-   off. Confirm both services remain healthy and payment processing is intact.
+   off. The reviewed production predecessor and routine marker are
+   `d6c1865b911a95a8242331410e9dd0d24292954c`. The installed helper and
+   sudoers pin are `ab09aa773ba2eac7e7758ea3e02ab335fb5711c0031d0c7934a2afe27d2518d2`;
+   the reviewed stage-one successor is
+   `94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806`.
+   Stage the exact merged-main successor helper and
+   `fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh` as
+   root-owned files on Droplet `593344964`. Run the rotation script's `inspect`,
+   then `rotate 'ROTATE EXACT PRODUCTION V2 OWNER FULL STAGE1 HELPER V1'`,
+   then `inspect` again. Require the exact predecessor and successor messages.
+   Dispatch `production-runtime.yml` from passing main with `deploy-inert`,
+   `cbe-live-v1`, routine transport `enabled`, database route `pooler`, and
+   `DEPLOY SCREENSHOT READER WITH CBE LIVE`. Confirm healthy services, unchanged
+   payment switches, and the routine marker on the new release.
 2. Apply `20261027163950_owner_full_payment_identifiers.sql`. Confirm the new
    Owner read functions and the SMS display write function are present and that
    runtime roles still have no direct table access.

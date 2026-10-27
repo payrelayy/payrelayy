@@ -504,8 +504,23 @@ describe('Owner full payment identifiers', () => {
       rotationReason: 'account_rotation',
     };
     expect(await browser.call('validReceiver', retired)).toEqual(retired);
-    await browser.call('renderReceivers', [retired]);
+    const retiredLegacyPhone = {
+      ...retired,
+      accountReferenceMasked: '***3456',
+      accountReference: '091123456',
+      receiverRevisionId: '44444444-4444-4444-8444-444444444444',
+    };
+    expect(await browser.call('validReceiver', retiredLegacyPhone)).toEqual(retiredLegacyPhone);
+    expect(
+      await browser.call('validReceiver', {
+        ...retiredLegacyPhone,
+        receiverStatus: 'active',
+        retiredAt: undefined,
+      }),
+    ).toBeUndefined();
+    await browser.call('renderReceivers', [retired, retiredLegacyPhone]);
     expect(JSON.stringify(browser.element('#receiver-list'))).toContain('251000009876');
+    expect(JSON.stringify(browser.element('#receiver-list'))).toContain('091123456');
   });
 });
 

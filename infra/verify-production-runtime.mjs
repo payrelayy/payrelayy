@@ -40,6 +40,7 @@ const [
   cbeReferenceReleaseRunbook,
   ownerFullStage1HelperRotation,
   ownerFullActivationHelperRotation,
+  ownerFullHistoryFixHelperRotation,
   ownerFullPaymentReleaseRunbook,
   botExpiryMenuHelperRotation,
   ownerControlPanelHelperRotation,
@@ -112,6 +113,7 @@ const [
   read('infra/operations/production-cbe-reference-release.md'),
   read('infra/operations/fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1.sh'),
   read('infra/operations/production-owner-full-payment-identifiers-release.md'),
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
@@ -792,14 +794,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '8e6367b01383b53cb7135d62083e1dfcd37cbdd4'/gu)].length,
+  [...workflow.matchAll(/status '7c17868edc0026a170c7630bce3cd4cb80e6dbd9'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='8e6367b01383b53cb7135d62083e1dfcd37cbdd4'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='7c17868edc0026a170c7630bce3cd4cb80e6dbd9'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1899,7 +1901,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='8e6367b01383b53cb7135d62083e1dfcd37cbdd4'",
   "readonly PREDECESSOR_SHA256='94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='ba2bff461abc271e3650400fc3aa10d39fbd8bd6726a5abd9e6c599359107b49'",
   "readonly SOURCE_REVIEW='owner-full-activation-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1912,6 +1914,24 @@ assert.doesNotMatch(ownerFullActivationHelperRotation, /\b(?:docker|psql|rm|sed|
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-owner-full-activation-helper-rotation-v1\.sh/u,
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='7c17868edc0026a170c7630bce3cd4cb80e6dbd9'",
+  "readonly PREDECESSOR_SHA256='ba2bff461abc271e3650400fc3aa10d39fbd8bd6726a5abd9e6c599359107b49'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-full-history-fix-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER FULL HISTORY FIX HELPER V1',
+]) {
+  assert.ok(ownerFullHistoryFixHelperRotation.includes(value));
+}
+assert.doesNotMatch(ownerFullHistoryFixHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1\.sh/u,
 );
 assert.ok(ownerFullPaymentReleaseRunbook.includes(helperDigest));
 assert.equal(

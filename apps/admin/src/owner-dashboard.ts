@@ -564,7 +564,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="receiver-refresh-button" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Choose a method, enter its official receiving name and number, then save. Previous payment records stay intact. For security, the full number will not be shown again.</p>
+          <p class="receipt-label">Choose a method, enter its official receiving name and number, then save. Previous payment records stay intact. The full number remains visible to the signed-in Owner in receiving-account history.</p>
           <p class="receipt-label">
             A receiver change pauses that method until its checks pass. The other method stays as it is.
             Resolve any in-progress credit first; earlier payments and SMS remain available for review.
@@ -3754,7 +3754,8 @@ function validReceiver(value) {
       (value.accountReference !== undefined &&
         (typeof value.accountReference !== 'string' ||
           !(providerCode === 'cbe_birr'
-            ? /^251[0-9]{9}$/.test(value.accountReference)
+            ? /^251[0-9]{9}$/.test(value.accountReference) ||
+              (value.receiverStatus === 'inactive' && /^[0-9]{9}$/.test(value.accountReference))
             : /^[0-9]{9,24}$/.test(value.accountReference)) ||
           !value.accountReference.endsWith(value.accountReferenceMasked.slice(-4)))) ||
       (value.receiverStatus !== 'active' && value.receiverStatus !== 'inactive') ||

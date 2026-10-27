@@ -34,6 +34,8 @@ const [
   playerIdHelperRotation,
   shortPlayerIdMenuHelperRotation,
   playerCreditSpeedHelperRotation,
+  depositRangeHelperRotation,
+  depositRangeReleaseRunbook,
   botExpiryMenuHelperRotation,
   ownerControlPanelHelperRotation,
   ownerEmergencyApprovalHelperRotation,
@@ -99,6 +101,8 @@ const [
   read('infra/operations/fetanagent-production-v2-player-id-auto-detect-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-player-credit-speed-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-deposit-range-helper-rotation-v1.sh'),
+  read('infra/operations/production-deposit-range-release.md'),
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh'),
@@ -778,14 +782,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '09cf011cd8d0cc381763ac63a65e3056533f032f'/gu)].length,
+  [...workflow.matchAll(/status 'f169bb563a4fe0a69a3fb5052a3120416ad2f8fc'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='09cf011cd8d0cc381763ac63a65e3056533f032f'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='f169bb563a4fe0a69a3fb5052a3120416ad2f8fc'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1785,7 +1789,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='09cf011cd8d0cc381763ac63a65e3056533f032f'",
   "readonly PREDECESSOR_SHA256='90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='cceaf528b16b7084eb751488bd931c6fd4c69cd5df9b505304e0cfc42f141211'",
   "readonly SOURCE_REVIEW='release-guard-refresh-v1'",
   'flock --nonblock 9',
   'require_current_release',
@@ -1803,10 +1807,36 @@ assert.match(
 for (const value of [
   '09cf011cd8d0cc381763ac63a65e3056533f032f',
   '90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b',
-  helperDigest,
+  'cceaf528b16b7084eb751488bd931c6fd4c69cd5df9b505304e0cfc42f141211',
   'ROTATE EXACT PRODUCTION V2 RELEASE GUARD REFRESH HELPER V1',
 ]) {
   assert.ok(releaseGuardRefreshRunbook.includes(value));
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='f169bb563a4fe0a69a3fb5052a3120416ad2f8fc'",
+  "readonly PREDECESSOR_SHA256='cceaf528b16b7084eb751488bd931c6fd4c69cd5df9b505304e0cfc42f141211'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='deposit-range-release-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 DEPOSIT RANGE HELPER V1',
+]) {
+  assert.ok(depositRangeHelperRotation.includes(value));
+}
+assert.doesNotMatch(depositRangeHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-deposit-range-helper-rotation-v1\.sh/u,
+);
+for (const value of [
+  'f169bb563a4fe0a69a3fb5052a3120416ad2f8fc',
+  'cceaf528b16b7084eb751488bd931c6fd4c69cd5df9b505304e0cfc42f141211',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 DEPOSIT RANGE HELPER V1',
+]) {
+  assert.ok(depositRangeReleaseRunbook.includes(value));
 }
 assert.equal(
   sudoers,

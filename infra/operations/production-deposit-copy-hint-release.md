@@ -21,8 +21,7 @@ using `fetanagent-production-v2-deposit-copy-hint-helper-rotation-v1.sh`.
    and restrictive modes. Verify SHA-256 and Bash syntax.
 3. Run `inspect` and require `predecessor-exact; no production runtime changed`.
    Run `rotate 'ROTATE EXACT PRODUCTION V2 DEPOSIT COPY HINT HELPER V1'`, then
-   `inspect` and require `successor-exact; rotation complete; no production
-   runtime changed`.
+   `inspect` and require a `successor-exact` result with no production runtime change.
 4. Dispatch `production-runtime.yml` from passing main with `deploy-inert`,
    project `xzztugbgtulptnbpoelr`, Droplet `593344964`, operation
    `DEPLOY SCREENSHOT READER WITH CBE LIVE`, routine transport `enabled`,

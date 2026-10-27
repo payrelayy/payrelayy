@@ -424,10 +424,18 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)') is not null)::integer
-        + (to_regprocedure('app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)') is not null)::integer
-        + (to_regprocedure('app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)') is not null)::integer
-        + (to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)') is not null)::integer
-        + (to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)') is not null)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)')::oid,
+            'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)')::oid,
+            'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)')::oid,
+            'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)')::oid,
+            'execute'), false)::integer
         + (to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user,

@@ -84,7 +84,7 @@ export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `
           and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'USAGE')
           and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
           and routine.oid not in (${oids})) as exact_function_surface,
-    pg_catalog.coalesce(pg_catalog.has_function_privilege(current_user,
+    coalesce(pg_catalog.has_function_privilege(current_user,
       pg_catalog.to_regprocedure('${FUNCTIONS[2]}')::oid, 'EXECUTE'), false)
       as display_function_available
 `;

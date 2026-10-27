@@ -150,6 +150,9 @@ describe('Telegram amount-free payment proof input', () => {
       ),
     ).toEqual({ kind: 'invalid_input' });
     expect(
+      reduceTelegramAutoReceiverSmsProofInput('Transaction ID TB12345678. Order ID short.'),
+    ).toEqual({ kind: 'invalid_input' });
+    expect(
       reduceTelegramAutoReceiverSmsProofInput(
         'Txn ID SYNTHCBE001. https://cbepay1.cbe.com.et/aureceipt?TID=OTHERREF123&PH=900000001',
       ),

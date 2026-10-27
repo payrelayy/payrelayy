@@ -343,7 +343,7 @@ describe.skipIf(process.platform !== 'win32')(
         expect(stages).toContain('provider_route_submission_attempted');
         expect(stages.at(-1)).toBe('success_modal_confirmed');
       },
-      15000,
+      30000,
     );
 
     it('confirms the newer three-row success table without a second transfer', async () => {

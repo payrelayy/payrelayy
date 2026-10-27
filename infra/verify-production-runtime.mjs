@@ -792,14 +792,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'/gu)].length,
+  [...workflow.matchAll(/status '8e6367b01383b53cb7135d62083e1dfcd37cbdd4'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='8e6367b01383b53cb7135d62083e1dfcd37cbdd4'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1897,7 +1897,7 @@ for (const value of [
 assert.doesNotMatch(ownerFullStage1HelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
-  "readonly EXPECTED_CURRENT_SHA='ceea0fb5f70e217adbb8b6ccbf104e7733b724f7'",
+  "readonly EXPECTED_CURRENT_SHA='8e6367b01383b53cb7135d62083e1dfcd37cbdd4'",
   "readonly PREDECESSOR_SHA256='94057ea1861e1df02461bc12d8d8053cb52a0a8be8cdb1b999eab00b14952806'",
   `readonly SUCCESSOR_SHA256='${helperDigest}'`,
   "readonly SOURCE_REVIEW='owner-full-activation-v1'",

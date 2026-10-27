@@ -174,6 +174,8 @@ const deferSmsDisplayGrantMigrationName =
   '20261027173415_defer_owner_sms_display_grant_until_broker_rollout.sql';
 const deferOwnerSensitiveReadGrantsMigrationName =
   '20261027174232_defer_owner_sensitive_read_grants_until_owner_rollout.sql';
+const restoreOwnerDisplayGrantsMigrationName =
+  '20261027175000_restore_owner_sms_display_grant_after_broker_rollout.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -650,7 +652,8 @@ describe('disposable SQL migration baseline', () => {
         name !== restoreDepositTransportMigrationName &&
         name !== ownerFullPaymentIdentifiersMigrationName &&
         name !== deferSmsDisplayGrantMigrationName &&
-        name !== deferOwnerSensitiveReadGrantsMigrationName,
+        name !== deferOwnerSensitiveReadGrantsMigrationName &&
+        name !== restoreOwnerDisplayGrantsMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10293,22 +10296,16 @@ describe('100 ETB production deposit policy cutover', () => {
         'app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)',
         'EXECUTE') as owner_deferred`);
     expect(deferredGrants.rows).toEqual([{ sms_deferred: true, owner_deferred: true }]);
-    // Later Owner display scenarios exercise the post-bridge grant state. Keep
-    // this fixture grant out of migration history until the guarded activation.
-    await postCutoverClient.query(`
-      grant execute on function app.record_receiver_sms_payment_event_with_display(
-        text,text,text,bigint,timestamptz,timestamptz,timestamptz,
-        text,text,text,text,text,integer,text,text)
-        to fetanagent_receiver_sms_ingest;
-      grant execute on function app.list_owner_submitted_payments_sensitive(
-        uuid,text,integer,integer) to fetanagent_owner_control;
-      grant execute on function app.list_owner_receiver_sms_inbox_sensitive(
-        uuid,text,text,text,date,date,integer,integer) to fetanagent_owner_control;
-      grant execute on function app.list_owner_provider_deposit_controls_sensitive(uuid)
-        to fetanagent_owner_control;
-      grant execute on function app.list_owner_receiver_accounts_sensitive(uuid)
-        to fetanagent_owner_control;
-    `);
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, restoreOwnerDisplayGrantsMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [restoreOwnerDisplayGrantsMigrationName],
+    );
     await postCutoverClient.query(
       `insert into app.receiver_accounts (
         provider_id,version,account_holder_name,account_reference_ciphertext,

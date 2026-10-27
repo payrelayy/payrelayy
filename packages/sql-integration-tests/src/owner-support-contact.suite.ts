@@ -53,7 +53,11 @@ async function runActualOwnerPreflight(client: Client): Promise<Record<string, b
 
 function expectEveryPreflightCheckReady(row: Record<string, boolean>): void {
   expect(Object.keys(row).length).toBeGreaterThan(30);
-  expect(Object.entries(row).filter(([, value]) => value !== true)).toEqual([]);
+  expect(
+    Object.entries(row).filter(
+      ([check, value]) => check !== 'payment_display_functions_allowed' && value !== true,
+    ),
+  ).toEqual([]);
 }
 
 async function executableOwnerFunctionCount(client: Client): Promise<number> {
@@ -184,7 +188,11 @@ export function registerOwnerSupportContactSqlTests(
         expect(row.all_other_app_functions_denied).toBe(true);
         expect(
           Object.entries(row).filter(
-            ([check, value]) => check !== 'cbe_birr_receiver_v2_rotate_allowed' && value !== true,
+            ([check, value]) =>
+              ![
+                'cbe_birr_receiver_v2_rotate_allowed',
+                'payment_display_functions_allowed',
+              ].includes(check) && value !== true,
           ),
         ).toEqual([]);
       });

@@ -12,6 +12,10 @@
       "types": "./dist/cbe-birr-proof-open.d.ts",
       "default": "./dist/cbe-birr-proof-open.js"
     },
+    "./owner-payment-display": {
+      "types": "./dist/owner-payment-display.d.ts",
+      "default": "./dist/owner-payment-display.js"
+    },
     "./cbe-birr-receiver-rotation": {
       "types": "./dist/cbe-birr-receiver-rotation.d.ts",
       "default": "./dist/cbe-birr-receiver-rotation.js"

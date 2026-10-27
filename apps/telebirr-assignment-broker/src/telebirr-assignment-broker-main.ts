@@ -166,10 +166,19 @@ export async function runTelebirrAssignmentBrokerMain(
     }
     let receiverSmsHandler: RoutineLocalHandler | undefined;
     if (receiverSms !== undefined) {
-      const runtime = await createReceiverSmsIngestPostgresRuntime(receiverSms.connection);
+      const runtime = await createReceiverSmsIngestPostgresRuntime(
+        receiverSms.connection,
+        undefined,
+        receiverSms.displayEncryptionSecret !== undefined,
+      );
       runtimes.push(runtime);
       receiverSmsHandler = createReceiverSmsIngestLocalHandler(
-        createReceiverSmsIngestBroker(runtime.database, now, receiverSms.fingerprintSecret),
+        createReceiverSmsIngestBroker(
+          runtime.database,
+          now,
+          receiverSms.fingerprintSecret,
+          receiverSms.displayEncryptionSecret,
+        ),
       );
     }
     let settlementInFlight = false;

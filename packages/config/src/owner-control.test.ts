@@ -56,6 +56,30 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe('Owner-control configuration', () => {
+  it('requires a distinct display key only when full Owner identifiers are enabled', () => {
+    const disabled = loadOwnerControlConfig(enabledEnvironment());
+    expect(disabled.runtime.enabled && disabled.runtime.paymentDisplayProtection).toBeUndefined();
+    const base = {
+      ...enabledEnvironment(),
+      INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true',
+    };
+    expect(() => loadOwnerControlConfig(base)).toThrow('Owner payment display keys');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...base,
+        OWNER_SMS_DISPLAY_ENCRYPTION_MASTER: receiverReferenceFingerprintMaster,
+      }),
+    ).toThrow('Owner payment display keys');
+    const key = 'a'.repeat(64);
+    const config = loadOwnerControlConfig({
+      ...base,
+      OWNER_SMS_DISPLAY_ENCRYPTION_MASTER: key,
+    });
+    expect(config.runtime.enabled && config.runtime.paymentDisplayProtection).toEqual({
+      smsDisplayEncryptionSecret: key,
+    });
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(config))).not.toContain(key);
+  });
   it('is disabled by default without reading credential inputs', () => {
     const environment = new Proxy(
       { NODE_ENV: 'test' },

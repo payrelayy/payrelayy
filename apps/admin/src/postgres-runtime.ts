@@ -313,6 +313,20 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 'execute'), true) as support_contact_write_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_public_support_contact()')::oid, 'execute'), true) as support_contact_public_projection_allowed,
+    (select count(*) = 4 and bool_and(
+        routine.prosecdef and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and has_function_privilege(current_user, routine.oid, 'execute')
+        and not exists (select 1
+          from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+          where acl.privilege_type = 'EXECUTE'
+            and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole)))
+      from pg_proc routine where routine.oid in (
+        to_regprocedure('app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)')::oid,
+        to_regprocedure('app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)')::oid,
+        to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)')::oid,
+        to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)')::oid
+      )) as payment_display_functions_allowed,
     not has_function_privilege(current_user, 'app.claim_agent_platform_companion_pairing(uuid,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_device_pairing_claim_denied,
     not has_function_privilege(current_user, 'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)', 'execute') as internal_companion_device_pairing_complete_denied,
     not has_function_privilege(current_user, 'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_lookup_claim_denied,
@@ -410,6 +424,10 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)') is not null)::integer
+        + (to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)') is not null)::integer
         + (to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user,
@@ -482,6 +500,10 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
@@ -517,17 +539,22 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
 export function ownerControlCatalogReady(
   row: Record<string, unknown> | undefined,
   cbeBirrReceiverV2RotationEnabled: boolean,
+  paymentDisplayEnabled = false,
 ): boolean {
   if (
     !row ||
     typeof row.cbe_birr_receiver_v2_rotate_allowed !== 'boolean' ||
-    typeof row.cbe_birr_provisioning_snapshot_catalog_safe !== 'boolean'
+    typeof row.cbe_birr_provisioning_snapshot_catalog_safe !== 'boolean' ||
+    typeof row.payment_display_functions_allowed !== 'boolean'
   )
     return false;
   return Object.entries(row).every(
     ([check, value]) =>
       (check === 'cbe_birr_receiver_v2_rotate_allowed' &&
         !cbeBirrReceiverV2RotationEnabled &&
+        value === false) ||
+      (check === 'payment_display_functions_allowed' &&
+        !paymentDisplayEnabled &&
         value === false) ||
       value === true,
   );
@@ -536,6 +563,7 @@ export function ownerControlCatalogReady(
 async function runOwnerControlCatalogPreflight(
   pool: Pool,
   cbeBirrReceiverV2RotationEnabled: boolean,
+  paymentDisplayEnabled: boolean,
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -543,7 +571,7 @@ async function runOwnerControlCatalogPreflight(
     await client.query("set local search_path = 'pg_catalog'");
     const result = await client.query<Record<string, boolean>>(OWNER_CONTROL_PREFLIGHT_SQL);
     const row = result.rows.length === 1 ? result.rows[0] : undefined;
-    if (!ownerControlCatalogReady(row, cbeBirrReceiverV2RotationEnabled)) {
+    if (!ownerControlCatalogReady(row, cbeBirrReceiverV2RotationEnabled, paymentDisplayEnabled)) {
       throw new Error('preflight failed');
     }
     await client.query('rollback');
@@ -569,7 +597,11 @@ export async function createOwnerControlPostgresRuntime(
   });
   let routineReceiptAdapter: PostgresOwnerRoutineTelebirrReceipt | undefined;
   try {
-    await runOwnerControlCatalogPreflight(pool, config.cbeBirrReceiverV2RotationEnabled);
+    await runOwnerControlCatalogPreflight(
+      pool,
+      config.cbeBirrReceiverV2RotationEnabled,
+      config.paymentDisplayProtection !== undefined,
+    );
     if (config.routineEnrollmentReceiptSigner.configured) {
       routineReceiptAdapter = new PostgresOwnerRoutineTelebirrReceipt(
         { query: async (sql, values) => pool.query(sql, [...values]) },
@@ -617,9 +649,24 @@ export async function createOwnerControlPostgresRuntime(
     receiverSmsOldPayments: new PostgresOwnerReceiverSmsOldPayments({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
-    manualPayments: new PostgresOwnerManualPayments({
-      query: async (sql, values) => pool.query(sql, [...values]),
-    }),
+    manualPayments: new PostgresOwnerManualPayments(
+      {
+        query: async (sql, values) => pool.query(sql, [...values]),
+      },
+      config.paymentDisplayProtection
+        ? {
+            receiverSecrets: {
+              encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
+              fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
+            },
+            proofSecrets: {
+              encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
+              fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
+            },
+            smsDisplayEncryptionSecret: config.paymentDisplayProtection.smsDisplayEncryptionSecret,
+          }
+        : undefined,
+    ),
     telebirrTransactions: new PostgresOwnerTelebirrTransactions({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
@@ -662,10 +709,19 @@ export async function createOwnerControlPostgresRuntime(
             fingerprintSecret: config.cbeBirrLookupKeyMaterial.fingerprintSecret,
           }
         : undefined,
+      config.paymentDisplayProtection !== undefined,
     ),
-    paymentMethods: new PostgresOwnerPaymentMethods({
-      query: async (sql, values) => pool.query(sql, [...values]),
-    }),
+    paymentMethods: new PostgresOwnerPaymentMethods(
+      {
+        query: async (sql, values) => pool.query(sql, [...values]),
+      },
+      config.paymentDisplayProtection
+        ? {
+            encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
+            fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
+          }
+        : undefined,
+    ),
     telebirrDevicePairing: config.devicePairing.configured
       ? new PostgresOwnerTelebirrDevicePairing(
           { query: async (sql, values) => pool.query(sql, [...values]) },

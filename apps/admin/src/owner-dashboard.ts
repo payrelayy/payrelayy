@@ -3751,6 +3751,12 @@ function validReceiver(value) {
       typeof value.accountHolderName !== 'string' ||
       !/^[^\\s\\u0000-\\u001f\\u007f](?:[^\\u0000-\\u001f\\u007f]{0,158}[^\\s\\u0000-\\u001f\\u007f])?$/.test(value.accountHolderName) ||
       (!currentMask && !retiredLegacyMask) ||
+      (value.accountReference !== undefined &&
+        (typeof value.accountReference !== 'string' ||
+          !(providerCode === 'cbe_birr'
+            ? /^251[0-9]{9}$/.test(value.accountReference)
+            : /^[0-9]{9,24}$/.test(value.accountReference)) ||
+          !value.accountReference.endsWith(value.accountReferenceMasked.slice(-4)))) ||
       (value.receiverStatus !== 'active' && value.receiverStatus !== 'inactive') ||
       typeof value.activeFrom !== 'string' || !Number.isFinite(Date.parse(value.activeFrom)) ||
       typeof value.protectedReference !== 'boolean' ||
@@ -3763,6 +3769,7 @@ function validReceiver(value) {
       (value.receiverStatus === 'inactive' &&
         (typeof value.retiredAt !== 'string' || !Number.isFinite(Date.parse(value.retiredAt))))) return undefined;
   return { accountHolderName: value.accountHolderName, accountReferenceMasked: value.accountReferenceMasked,
+    accountReference: value.accountReference,
     activeFrom: value.activeFrom, providerCode, providerDisplayName: expectedDisplay,
     receiverRevisionId: value.receiverRevisionId, receiverStatus: value.receiverStatus,
     protectedReference: value.protectedReference, retiredAt: value.retiredAt,
@@ -3816,7 +3823,7 @@ function renderReceivers(receivers) {
     const facts = document.createElement('p');
     facts.className = 'request-meta';
     facts.textContent = 'Revision ' + receiver.revision + ' · ' + receiver.receiverStatus +
-      ' · ' + receiver.accountReferenceMasked + ' · ' +
+      ' · ' + (receiver.accountReference || receiver.accountReferenceMasked) + ' · ' +
       (receiver.protectedReference ? receiver.rotationReason : 'legacy protection') +
       ' · active from ' + new Date(receiver.activeFrom).toLocaleString() +
       (receiver.retiredAt ? ' · retired ' + new Date(receiver.retiredAt).toLocaleString() : '');
@@ -3847,6 +3854,12 @@ function validPaymentMethod(value) {
     (value.receiverName !== null && typeof value.receiverName !== 'string') ||
     (value.receiverMasked !== null &&
       (typeof value.receiverMasked !== 'string' || !/^\\*{3}[0-9]{4}$/.test(value.receiverMasked))) ||
+    (value.receiverReference !== undefined && value.receiverReference !== null &&
+      (typeof value.receiverReference !== 'string' ||
+        !(value.providerCode === 'cbe_birr'
+          ? /^251[0-9]{9}$/.test(value.receiverReference)
+          : /^[0-9]{9,24}$/.test(value.receiverReference)) ||
+        !value.receiverReference.endsWith(value.receiverMasked?.slice(-4) || ''))) ||
     !Number.isSafeInteger(value.pendingJobs) || value.pendingJobs < 0 ||
     !Number.isSafeInteger(value.fencedAttempts) || value.fencedAttempts < 0 ||
     typeof value.changedAt !== 'string' || !Number.isFinite(Date.parse(value.changedAt)))
@@ -3874,7 +3887,7 @@ function renderPaymentMethods(methods) {
     const receiver = document.createElement('p');
     receiver.className = 'request-meta';
     receiver.textContent = method.receiverName
-      ? method.receiverName + ' · ' + method.receiverMasked
+      ? method.receiverName + ' · ' + (method.receiverReference || method.receiverMasked)
       : 'No receiver configured';
     const pending = document.createElement('p');
     pending.className = 'request-meta';
@@ -6043,6 +6056,9 @@ function validManualPaymentCase(value) {
     (value.referenceMasked === null ||
       (typeof value.referenceMasked === 'string' && value.referenceMasked.startsWith('***') &&
         value.referenceMasked.length === 7)) &&
+    (value.reference === undefined || value.reference === null ||
+      (typeof value.reference === 'string' && /^[A-Z0-9]{8,32}$/.test(value.reference) &&
+        value.reference.endsWith(value.referenceMasked?.slice(-4) || ''))) &&
     (value.amountMinor === null ||
       (typeof value.amountMinor === 'string' && Number.isSafeInteger(Number(value.amountMinor)) &&
         Number(value.amountMinor) >= 1 && Number(value.amountMinor) <= 9999999999)) &&
@@ -6050,6 +6066,9 @@ function validManualPaymentCase(value) {
     (value.receiverAccountId === null ||
       (typeof value.receiverAccountId === 'string' && value.receiverAccountId.length === 36)) &&
     (value.receiverAccountMasked === null || typeof value.receiverAccountMasked === 'string') &&
+    (value.receiverAccount === undefined || value.receiverAccount === null ||
+      (typeof value.receiverAccount === 'string' && /^[0-9]{9,24}$/.test(value.receiverAccount) &&
+        value.receiverAccount.endsWith(value.receiverAccountMasked?.slice(-4) || ''))) &&
     typeof value.playerId === 'string' &&
     /^[^\s\u0000-\u001f\u007f]{1,64}$/.test(value.playerId) &&
     typeof value.statusDetail === 'string' && value.statusDetail.length <= 160 &&
@@ -6205,7 +6224,8 @@ function manualApprovalForm(value) {
       const option = document.createElement('option');
       option.value = receiver.receiverRevisionId;
       option.textContent = receiver.accountHolderName + ' · ' +
-        receiver.accountReferenceMasked + ' · revision ' + receiver.revision;
+        (receiver.accountReference || receiver.accountReferenceMasked) +
+        ' · revision ' + receiver.revision;
       receiverSelect.append(option);
     }
     receiverLabel.append(receiverSelect);
@@ -6307,7 +6327,8 @@ function manualCompletionForm(value) {
       const option = document.createElement('option');
       option.value = receiver.receiverRevisionId;
       option.textContent = receiver.accountHolderName + ' · ' +
-        receiver.accountReferenceMasked + ' · revision ' + receiver.revision;
+        (receiver.accountReference || receiver.accountReferenceMasked) +
+        ' · revision ' + receiver.revision;
       receiverSelect.append(option);
     }
     receiverLabel.append(receiverSelect);
@@ -6347,7 +6368,7 @@ function renderManualPaymentCase(value) {
   card.className = 'request-card';
   const title = document.createElement('h3');
   title.textContent = (value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
-    ' · ' + (value.referenceMasked || 'reference ending unavailable');
+    ' · ' + (value.reference || value.referenceMasked || 'Reference not stored');
   const facts = document.createElement('dl');
   facts.className = 'transaction-facts';
   transactionFact(facts,'Status',value.status === 'approved' ? 'Approved' :
@@ -6359,7 +6380,8 @@ function renderManualPaymentCase(value) {
   transactionFact(facts,'Payment time',value.paymentAt
     ? transactionDate(value.paymentAt) : 'No matching phone SMS');
   transactionFact(facts,'Amount',value.amountMinor ? minorEtb(value.amountMinor) : 'Not verified');
-  transactionFact(facts,'Receiving account',value.receiverAccountMasked || 'Not verified');
+  transactionFact(facts,'Receiving account',value.receiverAccount ||
+    value.receiverAccountMasked || 'No receiving account confirmed');
   transactionFact(facts,'Player ID',value.playerId);
   if (value.rejectionReason) transactionFact(facts,'Owner reason',value.rejectionReason);
   if (value.decidedAt) transactionFact(facts,'Decision',transactionDate(value.decidedAt));
@@ -6468,9 +6490,17 @@ function validSmsInboxPayment(value) {
     Number.isFinite(Date.parse(value.receivedAt)) &&
     typeof value.amountMinor === 'string' && Number.isSafeInteger(Number(value.amountMinor)) &&
     typeof value.receiverAccountMasked === 'string' &&
+    (value.receiverAccount === undefined ||
+      (typeof value.receiverAccount === 'string' && /^[0-9]{9,24}$/.test(value.receiverAccount) &&
+        value.receiverAccount.endsWith(value.receiverAccountMasked.slice(-4)))) &&
     typeof value.receiverHolderName === 'string' &&
     (value.referenceMasked === null || typeof value.referenceMasked === 'string') &&
+    (value.reference === undefined || value.reference === null ||
+      (typeof value.reference === 'string' && /^[A-Z0-9]{8,32}$/.test(value.reference))) &&
     (value.playerMasked === null || typeof value.playerMasked === 'string') &&
+    (value.playerId === undefined || value.playerId === null ||
+      (typeof value.playerId === 'string' &&
+        /^[^\s\u0000-\u001f\u007f]{1,64}$/.test(value.playerId))) &&
     typeof value.status === 'string' &&
     typeof value.canMarkManuallyCredited === 'boolean';
 }
@@ -6557,15 +6587,15 @@ function renderSmsInboxPayment(value) {
   card.className = 'request-card';
   const title = document.createElement('h3');
   title.textContent = (value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
-    ' · ' + (value.referenceMasked || 'reference ending unavailable');
+    ' · ' + (value.reference || value.referenceMasked || 'Reference not stored for older SMS');
   const facts = document.createElement('dl');
   facts.className = 'transaction-facts';
   transactionFact(facts,'Amount',minorEtb(value.amountMinor));
   transactionFact(facts,'Payment time',transactionDate(value.paymentAt));
   transactionFact(facts,'Received by phone',transactionDate(value.receivedAt));
   transactionFact(facts,'Receiving account',value.receiverHolderName +
-    ' · ' + value.receiverAccountMasked);
-  transactionFact(facts,'Player',value.playerMasked || 'No linked Player');
+    ' · ' + (value.receiverAccount || value.receiverAccountMasked));
+  transactionFact(facts,'Player ID',value.playerId || value.playerMasked || 'No linked Player');
   const statusLabels = {
     unmatched: 'No customer submission',
     submission_waiting: 'Waiting for payment match',

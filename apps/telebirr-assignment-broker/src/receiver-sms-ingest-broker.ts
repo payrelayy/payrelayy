@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { fingerprintDepositProofReference } from '@fetanagent/deposit-reference-protection';
+import { protectReceiverSmsDisplayReference } from '@fetanagent/deposit-reference-protection/owner-payment-display';
 
 import {
   verifyReceiverSmsEvent,
@@ -16,6 +17,10 @@ export interface ReceiverSmsIngestDatabase {
     readonly devicePublicKeySpkiSha256: string;
     readonly referenceDigest: string;
     readonly referenceFingerprint: string;
+    readonly displayReference?: {
+      readonly ciphertext: string;
+      readonly masked: string;
+    };
   }): Promise<'recorded' | 'exact_replay' | 'conflict'>;
 }
 
@@ -31,13 +36,17 @@ export function createReceiverSmsIngestBroker(
   database: ReceiverSmsIngestDatabase,
   now: () => string,
   fingerprintSecret: string,
+  displayEncryptionSecret?: string,
 ) {
   if (
     !database ||
     typeof database.loadEnrollment !== 'function' ||
     typeof database.recordPayment !== 'function' ||
     typeof now !== 'function' ||
-    !/^[0-9a-f]{64}$/u.test(fingerprintSecret)
+    !/^[0-9a-f]{64}$/u.test(fingerprintSecret) ||
+    (displayEncryptionSecret !== undefined &&
+      (!/^[0-9a-f]{64}$/u.test(displayEncryptionSecret) ||
+        displayEncryptionSecret === fingerprintSecret))
   )
     throw new Error();
   return Object.freeze({
@@ -86,6 +95,15 @@ export function createReceiverSmsIngestBroker(
           reference: payment.transactionReference,
           fingerprintSecret,
         }),
+        ...(displayEncryptionSecret
+          ? {
+              displayReference: protectReceiverSmsDisplayReference({
+                provider: payment.providerCode,
+                reference: payment.transactionReference,
+                encryptionSecret: displayEncryptionSecret,
+              }),
+            }
+          : {}),
       });
     },
   });

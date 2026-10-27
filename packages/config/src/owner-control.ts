@@ -60,6 +60,7 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
     '/run/secrets/owner_receiver_reference_fingerprint_master',
   OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: '/run/secrets/owner_cbe_birr_lookup_encryption_master',
   OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: '/run/secrets/owner_cbe_birr_lookup_fingerprint_master',
+  OWNER_SMS_DISPLAY_ENCRYPTION_MASTER: '/run/secrets/owner_sms_display_encryption_master',
   OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: '/run/secrets/owner_control_supabase_publishable_key',
   OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: '/run/secrets/owner_routine_enrollment_signer_pkcs8',
 };
@@ -135,6 +136,9 @@ export type OwnerControlRuntimeConfig =
         readonly encryptionSecret: string;
         readonly fingerprintSecret: string;
         readonly masterProfile: DepositProofReferenceProfile;
+      };
+      readonly paymentDisplayProtection?: {
+        readonly smsDisplayEncryptionSecret: string;
       };
       readonly routineEnrollmentReceiptSigner:
         | {
@@ -430,6 +434,37 @@ export function loadOwnerControlConfig(
   if (cbeBirrReceiverV2RotationEnabled && !cbeBirrLookupKeyMaterial.configured) {
     throw new Error('Owner CBE Birr v2 receiver rotation requires the lookup key profile.');
   }
+  const fullPaymentIdentifiersEnabled = booleanFromEnv(
+    environment.INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED,
+    false,
+    'INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED',
+  );
+  let paymentDisplayProtection: { readonly smsDisplayEncryptionSecret: string } | undefined;
+  if (fullPaymentIdentifiersEnabled) {
+    const smsDisplayEncryptionSecret = readSecret(
+      environment,
+      'OWNER_SMS_DISPLAY_ENCRYPTION_MASTER',
+      dependencies,
+    );
+    if (!smsDisplayEncryptionSecret) {
+      throw new Error('Owner payment display keys are missing, malformed, or reused.');
+    }
+    const values = [
+      smsDisplayEncryptionSecret,
+      receiverReferenceEncryptionMaster,
+      receiverReferenceFingerprintMaster,
+      ...(cbeBirrLookupKeyMaterial.configured
+        ? [cbeBirrLookupKeyMaterial.encryptionSecret, cbeBirrLookupKeyMaterial.fingerprintSecret]
+        : []),
+    ];
+    if (
+      values.some((value) => !/^[0-9a-f]{64}$/u.test(value)) ||
+      new Set(values).size !== values.length
+    ) {
+      throw new Error('Owner payment display keys are missing, malformed, or reused.');
+    }
+    paymentDisplayProtection = { smsDisplayEncryptionSecret };
+  }
   const assignmentSignerKeyId = environment.OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID;
   if (
     assignmentSignerKeyId !== undefined &&
@@ -476,6 +511,7 @@ export function loadOwnerControlConfig(
         fingerprintSecret: receiverReferenceFingerprintMaster,
         masterProfile: receiverReferenceMasterProfile,
       },
+      ...(paymentDisplayProtection ? { paymentDisplayProtection } : {}),
       routineEnrollmentReceiptSigner:
         routineEnrollmentSignerPrivateKey === undefined
           ? { configured: false, privateKeyPkcs8: undefined, signerKeyId: undefined }

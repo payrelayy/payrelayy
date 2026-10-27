@@ -153,9 +153,21 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       all_other_app_functions_denied: true,
       cbe_birr_receiver_v2_rotate_allowed: false,
       cbe_birr_provisioning_snapshot_catalog_safe: true,
+      payment_display_functions_allowed: false,
     };
     expect(ownerControlCatalogReady(safeCatalog, false)).toBe(true);
     expect(ownerControlCatalogReady(safeCatalog, true)).toBe(false);
+    expect(ownerControlCatalogReady(safeCatalog, false, true)).toBe(false);
+    expect(
+      ownerControlCatalogReady(
+        {
+          ...safeCatalog,
+          payment_display_functions_allowed: true,
+        },
+        false,
+        true,
+      ),
+    ).toBe(true);
     expect(
       ownerControlCatalogReady({ ...safeCatalog, cbe_birr_receiver_v2_rotate_allowed: true }, true),
     ).toBe(true);
@@ -183,6 +195,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
         {
           cbe_birr_receiver_v2_rotate_allowed: false,
           cbe_birr_provisioning_snapshot_catalog_safe: true,
+          payment_display_functions_allowed: false,
           invite_control_grants_consistent: true,
         },
         false,
@@ -193,6 +206,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
         {
           cbe_birr_receiver_v2_rotate_allowed: false,
           cbe_birr_provisioning_snapshot_catalog_safe: true,
+          payment_display_functions_allowed: false,
           invite_control_grants_consistent: false,
         },
         false,

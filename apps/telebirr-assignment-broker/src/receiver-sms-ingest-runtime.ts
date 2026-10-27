@@ -17,10 +17,12 @@ const RUNTIME = 'fetanagent_receiver_sms_ingest_runtime';
 const target = ROUTINE_PAID_POLL_DATABASE_TARGETS.production;
 const DATABASE_URL_FILE = '/run/secrets/receiver_sms_ingest_database_url';
 const FINGERPRINT_MASTER_FILE = '/run/secrets/receiver_sms_reference_fingerprint_master';
+const DISPLAY_MASTER_FILE = '/run/secrets/receiver_sms_owner_display_encryption_master';
 const CA_FILE = '/run/configs/supabase_ca_certificate';
 const FUNCTIONS = [
   'app.load_receiver_sms_device_enrollment(text)',
   'app.record_receiver_sms_payment_event(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
+  'app.record_receiver_sms_payment_event_with_display(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer,text,text)',
 ] as const;
 const oids = FUNCTIONS.map((value) => `pg_catalog.to_regprocedure('${value}')`).join(',');
 
@@ -60,13 +62,19 @@ export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `
              'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN') or
            pg_catalog.has_any_column_privilege(current_user, relation.oid,
              'SELECT,INSERT,UPDATE,REFERENCES'))))) as no_base_access,
-    (select count(*) = 2 and pg_catalog.bool_and(routine.prosecdef
+    (select count(*) between 2 and 3
+      and pg_catalog.to_regprocedure('${FUNCTIONS[0]}') is not null
+      and pg_catalog.to_regprocedure('${FUNCTIONS[1]}') is not null
+      and pg_catalog.bool_and(routine.prosecdef
       and routine.prokind = 'f' and owner.rolname = 'postgres'
       and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[])
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_roles owner on owner.oid = routine.proowner
       where routine.oid in (${oids})) as functions_hardened,
-    (select count(*) = 2 from pg_catalog.pg_proc routine
+    (select count(*) between 2 and 3
+      and pg_catalog.to_regprocedure('${FUNCTIONS[0]}') is not null
+      and pg_catalog.to_regprocedure('${FUNCTIONS[1]}') is not null
+      from pg_catalog.pg_proc routine
       where routine.oid in (${oids}) and
         pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE'))
       and not exists (select 1 from pg_catalog.pg_proc routine
@@ -75,7 +83,10 @@ export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `
           and namespace.nspname !~ '^pg_(toast|temp)'
           and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'USAGE')
           and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-          and routine.oid not in (${oids})) as exact_function_surface
+          and routine.oid not in (${oids})) as exact_function_surface,
+    pg_catalog.coalesce(pg_catalog.has_function_privilege(current_user,
+      pg_catalog.to_regprocedure('${FUNCTIONS[2]}')::oid, 'EXECUTE'), false)
+      as display_function_available
 `;
 
 const PREFLIGHT_KEYS = [
@@ -88,6 +99,7 @@ const PREFLIGHT_KEYS = [
   'no_base_access',
   'functions_hardened',
   'exact_function_surface',
+  'display_function_available',
 ] as const;
 
 export interface ReceiverSmsIngestConnection {
@@ -100,6 +112,7 @@ export interface ReceiverSmsIngestConnection {
 export interface ReceiverSmsIngestConfig {
   readonly connection: ReceiverSmsIngestConnection;
   readonly fingerprintSecret: string;
+  readonly displayEncryptionSecret?: string;
 }
 
 function connectionFromUrl(raw: string, ca: string): ReceiverSmsIngestConnection {
@@ -133,8 +146,11 @@ export function loadReceiverSmsIngestConfig(
 ): ReceiverSmsIngestConfig | undefined {
   const flag = environment.INTERNAL_RECEIVER_SMS_BROKER_ENABLED;
   if (flag === undefined || flag === 'false') return undefined;
+  const displayEnabled = environment.INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED === 'true';
   if (
     flag !== 'true' ||
+    (environment.INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED !== undefined &&
+      !['true', 'false'].includes(environment.INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED)) ||
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     environment.TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET !== 'production' ||
@@ -143,18 +159,33 @@ export function loadReceiverSmsIngestConfig(
     environment.RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER_FILE !== FINGERPRINT_MASTER_FILE ||
     environment.RECEIVER_SMS_DATABASE_URL !== undefined ||
     environment.RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER !== undefined ||
+    environment.RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER !== undefined ||
+    (displayEnabled
+      ? environment.RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER_FILE !== DISPLAY_MASTER_FILE
+      : environment.RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER_FILE !== undefined) ||
     environment.NODE_EXTRA_CA_CERTS !== undefined
   )
     throw new Error();
   const ca = guardedCa(readGuardedText(CA_FILE, dependencies, 'public_config'));
   const fingerprintSecret = readGuardedText(FINGERPRINT_MASTER_FILE, dependencies, 'secret').trim();
   if (!/^[0-9a-f]{64}$/u.test(fingerprintSecret)) throw new Error();
+  const displayEncryptionSecret = displayEnabled
+    ? readGuardedText(DISPLAY_MASTER_FILE, dependencies, 'secret').trim()
+    : undefined;
+  if (
+    displayEnabled &&
+    (!displayEncryptionSecret ||
+      !/^[0-9a-f]{64}$/u.test(displayEncryptionSecret) ||
+      displayEncryptionSecret === fingerprintSecret)
+  )
+    throw new Error();
   return Object.freeze({
     connection: connectionFromUrl(
       readGuardedText(DATABASE_URL_FILE, dependencies, 'secret').trim(),
       ca,
     ),
     fingerprintSecret,
+    ...(displayEncryptionSecret ? { displayEncryptionSecret } : {}),
   });
 }
 
@@ -165,7 +196,10 @@ export interface ReceiverSmsIngestPostgresClient extends ReceiverSmsIngestSqlCli
   removeListener(event: 'error' | 'end', listener: () => void): void;
 }
 
-async function assertCatalog(client: ReceiverSmsIngestSqlClient): Promise<void> {
+async function assertCatalog(
+  client: ReceiverSmsIngestSqlClient,
+  displayEnabled: boolean,
+): Promise<void> {
   const result = await client.query(RECEIVER_SMS_INGEST_PREFLIGHT_SQL, []);
   if (!Array.isArray(result.rows) || result.rows.length !== 1) throw new Error();
   const row = result.rows[0];
@@ -175,7 +209,12 @@ async function assertCatalog(client: ReceiverSmsIngestSqlClient): Promise<void> 
     Array.isArray(row) ||
     Object.getPrototypeOf(row) !== Object.prototype ||
     Object.keys(row).length !== PREFLIGHT_KEYS.length ||
-    !PREFLIGHT_KEYS.every((key) => Object.getOwnPropertyDescriptor(row, key)?.value === true)
+    !PREFLIGHT_KEYS.every((key) =>
+      key === 'display_function_available'
+        ? typeof Object.getOwnPropertyDescriptor(row, key)?.value === 'boolean' &&
+          (!displayEnabled || Object.getOwnPropertyDescriptor(row, key)?.value === true)
+        : Object.getOwnPropertyDescriptor(row, key)?.value === true,
+    )
   )
     throw new Error();
 }
@@ -184,6 +223,7 @@ async function assertCatalog(client: ReceiverSmsIngestSqlClient): Promise<void> 
 export async function createReceiverSmsIngestPostgresRuntime(
   connection: ReceiverSmsIngestConnection,
   createClient?: (config: Readonly<Record<string, unknown>>) => ReceiverSmsIngestPostgresClient,
+  displayEnabled = false,
 ) {
   if (
     !connection ||
@@ -227,7 +267,7 @@ export async function createReceiverSmsIngestPostgresRuntime(
   client.on('end', unavailable);
   try {
     await client.connect();
-    await assertCatalog(client);
+    await assertCatalog(client, displayEnabled);
     available = true;
   } catch {
     await client.end().catch(() => undefined);
@@ -240,7 +280,7 @@ export async function createReceiverSmsIngestPostgresRuntime(
       if (!available || closed) throw new Error();
       return lane.run(async () => {
         try {
-          await assertCatalog(client);
+          await assertCatalog(client, displayEnabled);
           if (!available || closed) throw new Error();
           return await client.query(text, values);
         } catch {
@@ -255,7 +295,7 @@ export async function createReceiverSmsIngestPostgresRuntime(
     async ready() {
       if (!available || closed) return false;
       try {
-        await lane.run(() => assertCatalog(client));
+        await lane.run(() => assertCatalog(client, displayEnabled));
         return available && !closed;
       } catch {
         unavailable();

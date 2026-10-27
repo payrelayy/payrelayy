@@ -29,7 +29,7 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
-  /** Runs between completed or contained credits, after an empty lease, or during a failed pre-lease request. */
+  /** Runs after an empty lease, contained uncertainty, or a failed pre-lease request. */
   readonly runReadOnlyIdleWorkOnce?: () => Promise<unknown>;
 }
 
@@ -60,9 +60,8 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           continue;
         }
         if (lastLeaseWasIdle && options.runReadOnlyIdleWorkOnce) {
-          // A finished credit, idle poll, or durably contained uncertainty gives
-          // read-only Find a browser slot before another credit claim. Continuous
-          // financial work must not starve Player validation.
+          // A confirmed credit claims the next ready payment first. An empty lease
+          // or durably contained uncertainty gives read-only Find a browser slot.
           lastLeaseWasIdle = false;
           await options.runReadOnlyIdleWorkOnce();
           if (controller.signal.aborted) break;
@@ -70,10 +69,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
         }
         // The await is the execution sequence: reconciliation finishes before the next run.
         const result = await worker.runOnce();
-        lastLeaseWasIdle =
-          result.status === 'idle' ||
-          result.status === 'contained' ||
-          result.status === 'completed';
+        lastLeaseWasIdle = result.status === 'idle' || result.status === 'contained';
         try {
           options.report?.(result);
         } catch {

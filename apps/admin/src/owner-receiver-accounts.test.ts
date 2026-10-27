@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { protectReceiverAccountReference } from '@fetanagent/deposit-reference-protection';
 
 import {
   OwnerReceiverAccountRejectedError,
@@ -37,6 +38,44 @@ function rotationRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Owner receiver-account PostgreSQL adapter', () => {
+  it('opens active and retired receiver numbers in the Owner history', async () => {
+    const active = protectReceiverAccountReference({
+      provider: 'telebirr',
+      reference: '0911113456',
+      secrets,
+    });
+    const retired = protectReceiverAccountReference({
+      provider: 'telebirr',
+      reference: '0922223456',
+      secrets,
+    });
+    const query = vi.fn<OwnerReceiverDatabase['query']>(async (sql) => {
+      expect(sql).toContain('list_owner_receiver_accounts_sensitive');
+      return {
+        rows: [
+          row({
+            account_reference_masked: active.masked,
+            account_reference_ciphertext: active.ciphertext,
+            account_reference_fingerprint: active.fingerprint,
+          }),
+          row({
+            receiver_revision_id: requestId,
+            revision: 1,
+            receiver_status: 'inactive',
+            retired_at: new Date('2026-10-23T18:00:00Z'),
+            account_reference_masked: retired.masked,
+            account_reference_ciphertext: retired.ciphertext,
+            account_reference_fingerprint: retired.fingerprint,
+          }),
+        ],
+      };
+    });
+    const control = new PostgresOwnerReceiverAccounts({ query }, secrets, undefined, true);
+    await expect(control.list(authUserId)).resolves.toMatchObject([
+      { accountReference: '0911113456', receiverStatus: 'active' },
+      { accountReference: '0922223456', receiverStatus: 'inactive' },
+    ]);
+  });
   it('protects the exact account before PostgreSQL and returns only the safe revision projection', async () => {
     const query = vi.fn<OwnerReceiverDatabase['query']>(async (sql, values) => {
       expect(sql).toContain('rotate_owner_receiver_account');

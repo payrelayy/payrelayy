@@ -1,0 +1,29 @@
+# Activation template. The current production deploy helper has a fixed Compose
+# file allowlist and does not yet include this overlay. Add it to the guarded
+# release workflow only after the Owner and SMS broker binaries and migration
+# are installed. Both services receive the same persistent display-only key.
+services:
+  owner-control:
+    environment:
+      INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'
+      OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/owner_sms_display_encryption_master
+    secrets:
+      - source: receiver_sms_owner_display_encryption_master
+        target: owner_sms_display_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+  telebirr-assignment-broker:
+    environment:
+      INTERNAL_RECEIVER_SMS_OWNER_DISPLAY_ENABLED: 'true'
+      RECEIVER_SMS_OWNER_DISPLAY_ENCRYPTION_MASTER_FILE: /run/secrets/receiver_sms_owner_display_encryption_master
+    secrets:
+      - source: receiver_sms_owner_display_encryption_master
+        target: receiver_sms_owner_display_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+
+secrets:
+  receiver_sms_owner_display_encryption_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/receiver-sms-owner-display-encryption-master

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { protectReceiverAccountReference } from '@fetanagent/deposit-reference-protection';
 
 import {
   OwnerPaymentMethodsRejectedError,
@@ -34,6 +35,43 @@ const rows = [
 ];
 
 describe('Owner payment-method adapter', () => {
+  it('opens full active CBE and TeleBirr receiving numbers for the Owner', async () => {
+    const secrets = { encryptionSecret: '1'.repeat(64), fingerprintSecret: '2'.repeat(64) };
+    const cbe = protectReceiverAccountReference({
+      provider: 'cbe_birr',
+      reference: '251911111234',
+      secrets,
+    });
+    const telebirr = protectReceiverAccountReference({
+      provider: 'telebirr',
+      reference: '0911115678',
+      secrets,
+    });
+    const query = vi.fn<PaymentMethodsDatabase['query']>(async (sql) => {
+      expect(sql).toContain('list_owner_provider_deposit_controls_sensitive');
+      return {
+        rows: [
+          {
+            ...rows[0],
+            receiver_masked: cbe.masked,
+            receiver_ciphertext: cbe.ciphertext,
+            receiver_fingerprint: cbe.fingerprint,
+          },
+          {
+            ...rows[1],
+            receiver_masked: telebirr.masked,
+            receiver_ciphertext: telebirr.ciphertext,
+            receiver_fingerprint: telebirr.fingerprint,
+          },
+        ],
+      };
+    });
+    const control = new PostgresOwnerPaymentMethods({ query }, secrets);
+    await expect(control.list(owner)).resolves.toMatchObject([
+      { receiverReference: '251911111234' },
+      { receiverReference: '0911115678' },
+    ]);
+  });
   it('returns exactly two validated masked methods and uses an idempotent switch request', async () => {
     const query = vi.fn<PaymentMethodsDatabase['query']>(async (sql, values) => {
       if (sql.includes('set_owner_provider_deposit_control')) {

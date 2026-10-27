@@ -3,6 +3,38 @@ import { describe, expect, it, vi } from 'vitest';
 import { createReceiverSmsIngestPostgresDatabase } from './receiver-sms-ingest-postgres.js';
 
 describe('receiver SMS narrow SQL adapter', () => {
+  it('uses the atomic display intake with only ciphertext after the migration', async () => {
+    const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
+      rows: [{ status: 'recorded' }],
+    }));
+    const database = createReceiverSmsIngestPostgresDatabase({ query });
+    const ciphertext = 'sms-display-v1.cbe_birr.ciphertext';
+    await database.recordPayment({
+      event: {
+        deviceId: 'receiver_device_001',
+        keyId: 'receiver_key_001',
+        sourceSubscriptionId: 0,
+        sourceMessageDigest: 'sha256:' + 'a'.repeat(64),
+        eventBodyDigest: 'sha256:' + 'b'.repeat(64),
+        receivedAt: '2026-10-20T14:47:01.000Z',
+        observedAt: '2026-10-20T14:47:02.000Z',
+      },
+      payment: {
+        providerCode: 'cbe_birr',
+        transactionReference: 'SYNTHETIC1234',
+        amountMinor: 12_345,
+        occurredAt: '2026-10-20T14:47:00.000Z',
+      },
+      referenceDigest: 'sha256:' + 'c'.repeat(64),
+      referenceFingerprint: 'e'.repeat(64),
+      devicePublicKeySpkiSha256: 'sha256:' + 'd'.repeat(64),
+      displayReference: { ciphertext, masked: '***1234' },
+    });
+    expect(query.mock.calls[0]?.[0]).toContain('record_receiver_sms_payment_event_with_display');
+    expect(query.mock.calls[0]?.[1]).toHaveLength(15);
+    expect(query.mock.calls[0]?.[1]?.slice(-2)).toEqual([ciphertext, '***1234']);
+    expect(query.mock.calls[0]?.[1]).not.toContain('SYNTHETIC1234');
+  });
   it('passes a digest instead of a raw reference to the database', async () => {
     const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
       rows: [{ status: 'recorded' }],

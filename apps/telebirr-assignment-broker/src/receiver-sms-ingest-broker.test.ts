@@ -7,6 +7,7 @@ import {
   digestReceiverSmsEventBody,
 } from '@fetanagent/telebirr-verification-foundation';
 import { fingerprintDepositProofReference } from '@fetanagent/deposit-reference-protection';
+import { openReceiverSmsDisplayReference } from '@fetanagent/deposit-reference-protection/owner-payment-display';
 
 import { createReceiverSmsIngestBroker } from './receiver-sms-ingest-broker.js';
 import type { ReceiverSmsIngestDatabase } from './receiver-sms-ingest-broker.js';
@@ -54,6 +55,38 @@ function fixture(providerCode: 'telebirr' | 'cbe_birr' = 'telebirr') {
 }
 
 describe('private receiver SMS ingestion', () => {
+  it.each(['telebirr', 'cbe_birr'] as const)(
+    'stores a signed %s reference only as Owner display ciphertext',
+    async (providerCode) => {
+      const f = fixture(providerCode);
+      const recordPayment = vi.fn(
+        async (_input: Parameters<ReceiverSmsIngestDatabase['recordPayment']>[0]) =>
+          'recorded' as const,
+      );
+      const displayEncryptionSecret = 'a'.repeat(64);
+      const broker = createReceiverSmsIngestBroker(
+        {
+          loadEnrollment: async () => f.enrollment,
+          recordPayment,
+        },
+        () => '2026-10-20T14:47:03.000Z',
+        fingerprintSecret,
+        displayEncryptionSecret,
+      );
+      expect(await broker.verifyAndRecord(f)).toBe('recorded');
+      const recorded = recordPayment.mock.calls[0]?.[0];
+      expect(recorded?.displayReference?.ciphertext).not.toContain('SYNTHETIC1234');
+      expect(
+        openReceiverSmsDisplayReference({
+          provider: providerCode,
+          ciphertext: recorded!.displayReference!.ciphertext,
+          masked: recorded!.displayReference!.masked,
+          referenceDigest: recorded!.referenceDigest,
+          encryptionSecret: displayEncryptionSecret,
+        }),
+      ).toBe('SYNTHETIC1234');
+    },
+  );
   it.each(['telebirr', 'cbe_birr'] as const)(
     'records one paired-phone %s fact using only a reference digest',
     async (providerCode) => {

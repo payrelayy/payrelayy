@@ -71,7 +71,7 @@ async function fixtureCandidate(
   return inserted.rows[0]!.id;
 }
 
-async function fixturePaymentEvent(
+export async function fixturePaymentEvent(
   client: Client,
   fingerprint: string,
   occurredAt: string,

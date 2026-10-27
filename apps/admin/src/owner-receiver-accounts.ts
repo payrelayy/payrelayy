@@ -1,5 +1,6 @@
 import {
   protectReceiverAccountReference,
+  unprotectReceiverAccountReference,
   type DepositReferenceProtectionSecrets,
   type DepositProofReferenceProvider,
 } from '@fetanagent/deposit-reference-protection';
@@ -16,6 +17,7 @@ export type OwnerReceiverRotationReason =
 export interface OwnerReceiverAccount {
   readonly accountHolderName: string;
   readonly accountReferenceMasked: string;
+  readonly accountReference?: string;
   readonly activeFrom: string;
   readonly protectedReference: boolean;
   readonly providerCode: OwnerReceiverProvider;
@@ -131,6 +133,13 @@ const LIST_SQL = `
          protected_reference
     from app.list_owner_receiver_accounts($1::uuid)
 `;
+const LIST_SENSITIVE_SQL = `
+  select provider_code, provider_display_name, receiver_revision_id, revision,
+         account_holder_name, account_reference_masked, receiver_status,
+         active_from, retired_at, rotation_reason, protected_reference,
+         account_reference_ciphertext, account_reference_fingerprint
+    from app.list_owner_receiver_accounts_sensitive($1::uuid)
+`;
 
 const ROTATE_SQL = `
   select provider_code,
@@ -188,6 +197,7 @@ function isoDate(value: unknown): string {
 function receiverFromRow(
   rowValue: unknown,
   projection: 'history' | 'rotation',
+  revealSecrets?: DepositReferenceProtectionSecrets,
 ): OwnerReceiverAccount | undefined {
   const row = rowObject(rowValue);
   if (row.receiver_revision_id === null) return undefined;
@@ -234,6 +244,17 @@ function receiverFromRow(
   return {
     accountHolderName: row.account_holder_name,
     accountReferenceMasked: row.account_reference_masked,
+    ...(revealSecrets
+      ? {
+          accountReference: unprotectReceiverAccountReference({
+            ciphertext: String(row.account_reference_ciphertext),
+            fingerprint: String(row.account_reference_fingerprint),
+            masked: row.account_reference_masked,
+            provider: providerCode,
+            secrets: revealSecrets,
+          }),
+        }
+      : {}),
     activeFrom: isoDate(row.active_from),
     protectedReference,
     providerCode,
@@ -267,14 +288,20 @@ export class PostgresOwnerReceiverAccounts {
     private readonly database: OwnerReceiverDatabase,
     private readonly secrets: DepositReferenceProtectionSecrets,
     private readonly cbeBirrLookupSecrets?: DepositReferenceProtectionSecrets,
+    private readonly revealFullReferences = false,
   ) {}
 
   async list(authUserId: string): Promise<readonly OwnerReceiverAccount[]> {
     if (!UUID_PATTERN.test(authUserId)) throw new OwnerReceiverAccountRejectedError();
     try {
-      const result = await this.database.query(LIST_SQL, [authUserId]);
+      const result = await this.database.query(
+        this.revealFullReferences ? LIST_SENSITIVE_SQL : LIST_SQL,
+        [authUserId],
+      );
       const receivers = result.rows
-        .map((value) => receiverFromRow(value, 'history'))
+        .map((value) =>
+          receiverFromRow(value, 'history', this.revealFullReferences ? this.secrets : undefined),
+        )
         .filter((value) => value !== undefined);
       if (
         receivers.length > 100 ||

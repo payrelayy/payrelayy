@@ -1,3 +1,13 @@
+import {
+  unprotectReceiverAccountReference,
+  type DepositReferenceProtectionSecrets,
+  type DepositProofReferenceProvider,
+} from '@fetanagent/deposit-reference-protection';
+import {
+  openOwnerDepositProofReference,
+  openReceiverSmsDisplayReference,
+} from '@fetanagent/deposit-reference-protection/owner-payment-display';
+
 export class OwnerManualPaymentRejectedError extends Error {}
 export class OwnerManualPaymentConflictError extends Error {}
 export class OwnerManualPaymentUnavailableError extends Error {}
@@ -37,11 +47,13 @@ export interface OwnerSubmittedPayment {
   readonly paymentEventId: string | null;
   readonly providerCode: 'telebirr' | 'cbe_birr';
   readonly referenceMasked: string | null;
+  readonly reference?: string | null;
   readonly submittedAt: string;
   readonly paymentAt: string | null;
   readonly amountMinor: string | null;
   readonly receiverAccountId: string | null;
   readonly receiverAccountMasked: string | null;
+  readonly receiverAccount?: string | null;
   readonly playerId: string;
   readonly status: 'pending' | 'approved' | 'rejected';
   readonly statusDetail: string;
@@ -60,10 +72,13 @@ export interface OwnerReceiverSmsInboxItem {
   readonly receivedAt: string;
   readonly amountMinor: string;
   readonly receiverAccountMasked: string;
+  readonly receiverAccount?: string;
   readonly receiverHolderName: string;
   readonly referenceMasked: string | null;
+  readonly reference?: string | null;
   readonly candidateId: string | null;
   readonly playerMasked: string | null;
+  readonly playerId?: string | null;
   readonly status: string;
   readonly caseId: string | null;
   readonly canMarkManuallyCredited: boolean;
@@ -186,9 +201,18 @@ function translate(error: unknown): never {
   throw new OwnerManualPaymentUnavailableError();
 }
 
-/** Every query is an Owner-only, security-definer projection; no raw SMS or reference. */
+export interface OwnerPaymentDisplaySecrets {
+  readonly receiverSecrets: DepositReferenceProtectionSecrets;
+  readonly proofSecrets: DepositReferenceProtectionSecrets;
+  readonly smsDisplayEncryptionSecret: string;
+}
+
+/** Every query is an Owner-only, security-definer projection; ciphertext opens only here. */
 export class PostgresOwnerManualPayments {
-  constructor(private readonly database: OwnerManualPaymentDatabase) {}
+  constructor(
+    private readonly database: OwnerManualPaymentDatabase,
+    private readonly displaySecrets?: OwnerPaymentDisplaySecrets,
+  ) {}
 
   async systemOverview(actor: string): Promise<OwnerSystemOverview> {
     if (!UUID.test(actor)) throw new OwnerManualPaymentRejectedError();
@@ -302,8 +326,16 @@ export class PostgresOwnerManualPayments {
                 amount_minor::text as amount_minor, receiver_account_id,
                 receiver_account_masked, player_id, payment_status, status_detail,
                 owner_case_status, rejection_reason, decided_at, completed_at,
-                can_approve, can_reject
-           from app.list_owner_submitted_payments($1::uuid,$2::text,$3::integer,$4::integer)`,
+                can_approve, can_reject${
+                  this.displaySecrets
+                    ? ', reference_ciphertext, reference_fingerprint, receiver_ciphertext, receiver_fingerprint'
+                    : ''
+                }
+           from app.${
+             this.displaySecrets
+               ? 'list_owner_submitted_payments_sensitive'
+               : 'list_owner_submitted_payments'
+           }($1::uuid,$2::text,$3::integer,$4::integer)`,
         [actor, status, limit, offset],
       );
       if (result.rows.length > limit) throw new OwnerManualPaymentUnavailableError();
@@ -332,11 +364,39 @@ export class PostgresOwnerManualPayments {
           paymentEventId: uuid(row.payment_event_id, true),
           providerCode: provider(row.provider_code),
           referenceMasked: masked(row.reference_masked, MASKED_REFERENCE, true),
+          ...(this.displaySecrets
+            ? {
+                reference:
+                  row.reference_masked === null
+                    ? null
+                    : openOwnerDepositProofReference({
+                        provider: provider(row.provider_code),
+                        ciphertext: String(row.reference_ciphertext),
+                        fingerprint: String(row.reference_fingerprint),
+                        masked: String(row.reference_masked),
+                        secrets: this.displaySecrets.proofSecrets,
+                      }),
+              }
+            : {}),
           submittedAt: date(row.submitted_at)!,
           paymentAt: date(row.payment_at, true),
           amountMinor: displayedPaymentAmount(row.amount_minor, true),
           receiverAccountId: uuid(row.receiver_account_id, true),
           receiverAccountMasked: masked(row.receiver_account_masked, MASKED_RECEIVER, true),
+          ...(this.displaySecrets
+            ? {
+                receiverAccount:
+                  row.receiver_account_masked === null
+                    ? null
+                    : unprotectReceiverAccountReference({
+                        provider: provider(row.provider_code),
+                        ciphertext: String(row.receiver_ciphertext),
+                        fingerprint: String(row.receiver_fingerprint),
+                        masked: String(row.receiver_account_masked),
+                        secrets: this.displaySecrets.receiverSecrets,
+                      }),
+              }
+            : {}),
           playerId: row.player_id,
           status,
           statusDetail: row.status_detail,
@@ -426,7 +486,16 @@ export class PostgresOwnerManualPayments {
                 amount_minor::text as amount_minor, receiver_account_masked,
                 receiver_holder_name, reference_masked, candidate_id,
                 player_masked, payment_status, case_id, can_mark_manually_credited
-           from app.list_owner_receiver_sms_inbox_filtered(
+                ${
+                  this.displaySecrets
+                    ? ', receiver_ciphertext, receiver_fingerprint, player_id, reference_ciphertext, reference_source, reference_digest, reference_fingerprint, display_reference_masked'
+                    : ''
+                }
+           from app.${
+             this.displaySecrets
+               ? 'list_owner_receiver_sms_inbox_sensitive'
+               : 'list_owner_receiver_sms_inbox_filtered'
+           }(
              $1::uuid,$2::text,$3::text,$4::text,$5::date,$6::date,$7::integer,$8::integer)`,
         [
           actor,
@@ -458,10 +527,38 @@ export class PostgresOwnerManualPayments {
           receivedAt: date(row.received_at)!,
           amountMinor,
           receiverAccountMasked: masked(row.receiver_account_masked, MASKED_RECEIVER)!,
+          ...(this.displaySecrets
+            ? {
+                receiverAccount: unprotectReceiverAccountReference({
+                  provider: provider(row.provider_code),
+                  ciphertext: String(row.receiver_ciphertext),
+                  fingerprint: String(row.receiver_fingerprint),
+                  masked: String(row.receiver_account_masked),
+                  secrets: this.displaySecrets.receiverSecrets,
+                }),
+              }
+            : {}),
           receiverHolderName: row.receiver_holder_name,
           referenceMasked: masked(row.reference_masked, MASKED_REFERENCE, true),
+          ...(this.displaySecrets
+            ? {
+                reference: this.smsReference(row, provider(row.provider_code)),
+              }
+            : {}),
           candidateId: uuid(row.candidate_id, true),
           playerMasked: masked(row.player_masked, MASKED_PLAYER, true),
+          ...(this.displaySecrets
+            ? {
+                playerId:
+                  row.player_id === null
+                    ? null
+                    : typeof row.player_id === 'string' && PLAYER_ID.test(row.player_id)
+                      ? row.player_id
+                      : (() => {
+                          throw new OwnerManualPaymentUnavailableError();
+                        })(),
+              }
+            : {}),
           status: String(row.payment_status),
           caseId: uuid(row.case_id, true),
           canMarkManuallyCredited: row.can_mark_manually_credited,
@@ -470,6 +567,36 @@ export class PostgresOwnerManualPayments {
     } catch (error) {
       translate(error);
     }
+  }
+
+  private smsReference(
+    row: Record<string, unknown>,
+    code: DepositProofReferenceProvider,
+  ): string | null {
+    if (!this.displaySecrets) throw new OwnerManualPaymentUnavailableError();
+    if (row.reference_source === 'unavailable') {
+      if (row.reference_ciphertext !== null) throw new OwnerManualPaymentUnavailableError();
+      return null;
+    }
+    if (row.reference_source === 'candidate') {
+      return openOwnerDepositProofReference({
+        provider: code,
+        ciphertext: String(row.reference_ciphertext),
+        fingerprint: String(row.reference_fingerprint),
+        masked: String(row.display_reference_masked),
+        secrets: this.displaySecrets.proofSecrets,
+      });
+    }
+    if (row.reference_source === 'sms_display') {
+      return openReceiverSmsDisplayReference({
+        provider: code,
+        ciphertext: String(row.reference_ciphertext),
+        masked: String(row.display_reference_masked),
+        referenceDigest: String(row.reference_digest),
+        encryptionSecret: this.displaySecrets.smsDisplayEncryptionSecret,
+      });
+    }
+    throw new OwnerManualPaymentUnavailableError();
   }
 
   async decide(

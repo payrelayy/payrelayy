@@ -57,6 +57,7 @@ import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebi
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
 import {
+  fixturePaymentEvent,
   registerPostCutoverReceiverSmsRangeSqlTests,
   registerReceiverSmsPaymentLedgerSqlTests,
 } from './receiver-sms-payment-ledger.suite.js';
@@ -167,6 +168,8 @@ const betaInviteAdmissionMigrationName =
 const depositRangeMigrationName = '20261027021500_auto_deposit_100_etb_manual_review.sql';
 const restoreDepositTransportMigrationName =
   '20261027131000_restore_routine_transport_after_100_etb_policy.sql';
+const ownerFullPaymentIdentifiersMigrationName =
+  '20261027163950_owner_full_payment_identifiers.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -619,8 +622,11 @@ describe('disposable SQL migration baseline', () => {
         expect(
           Object.entries(readiness.rows[0]!).filter(
             ([check, value]) =>
-              !['cbe_birr_receiver_v2_rotate_allowed', 'runtime_role_is_narrow'].includes(check) &&
-              value !== true,
+              ![
+                'cbe_birr_receiver_v2_rotate_allowed',
+                'runtime_role_is_narrow',
+                'payment_display_functions_allowed',
+              ].includes(check) && value !== true,
           ),
         ).toEqual([]);
       } finally {
@@ -635,7 +641,10 @@ describe('disposable SQL migration baseline', () => {
     const expectedMigrationNames = (
       await listMigrationsLexically(environment.migrationsDirectory)
     ).filter(
-      (name) => name !== depositRangeMigrationName && name !== restoreDepositTransportMigrationName,
+      (name) =>
+        name !== depositRangeMigrationName &&
+        name !== restoreDepositTransportMigrationName &&
+        name !== ownerFullPaymentIdentifiersMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10246,6 +10255,15 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [restoreDepositTransportMigrationName],
     );
+    const ownerFullMigrationSource = await readFile(
+      join(environment.migrationsDirectory, ownerFullPaymentIdentifiersMigrationName),
+      'utf8',
+    );
+    await postCutoverClient.query(ownerFullMigrationSource);
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerFullPaymentIdentifiersMigrationName],
+    );
     await postCutoverClient.query(
       `insert into app.receiver_accounts (
         provider_id,version,account_holder_name,account_reference_ciphertext,
@@ -10284,6 +10302,107 @@ describe('100 ETB production deposit policy cutover', () => {
         (select count(*)::text from app.routine_telebirr_runtime_events) as events`,
     );
     expect(transport.rows).toEqual([{ active: false, events: '0' }]);
+  });
+
+  it('exposes the new encrypted projections only through the Owner runtime', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const submitted = await postCutoverClient.query(
+        'select * from app.list_owner_submitted_payments_sensitive($1::uuid,$2::text,25,0)',
+        [ownerAuthUserId, 'pending'],
+      );
+      expect(submitted.rows).toEqual([]);
+      const inbox = await postCutoverClient.query(
+        "select * from app.list_owner_receiver_sms_inbox_sensitive($1::uuid,'all','all',null,null,null,25,0)",
+        [ownerAuthUserId],
+      );
+      expect(inbox.rows).toEqual([]);
+      const methods = await postCutoverClient.query(
+        'select * from app.list_owner_provider_deposit_controls_sensitive($1::uuid)',
+        [ownerAuthUserId],
+      );
+      expect(methods.rows).toHaveLength(2);
+      const revisions = await postCutoverClient.query(
+        'select * from app.list_owner_receiver_accounts_sensitive($1::uuid)',
+        [ownerAuthUserId],
+      );
+      expect(revisions.rows).toHaveLength(2);
+      expect(
+        revisions.rows.some((row) => typeof row.account_reference_ciphertext === 'string'),
+      ).toBe(true);
+      const privileges = await postCutoverClient.query<{ has_access: boolean }>(
+        "select has_table_privilege(current_user, 'app.receiver_sms_payment_reference_displays', 'SELECT') as has_access",
+      );
+      expect(privileges.rows).toEqual([{ has_access: false }]);
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
+  });
+
+  it('filters a newly captured SMS reference and labels an older one without stored display data', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      const newEventId = await fixturePaymentEvent(
+        postCutoverClient,
+        'a'.repeat(64),
+        '2026-10-27T12:00:00Z',
+      );
+      const oldEventId = await fixturePaymentEvent(
+        postCutoverClient,
+        'b'.repeat(64),
+        '2026-10-27T11:00:00Z',
+      );
+      const ciphertext = `sms-display-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(11)}`;
+      await postCutoverClient.query(
+        `insert into app.receiver_sms_payment_reference_displays (
+          payment_event_id,reference_ciphertext,reference_masked
+        ) values ($1::uuid,$2::text,'***QX7U')`,
+        [newEventId, ciphertext],
+      );
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const filtered = await postCutoverClient.query<{
+        payment_event_id: string;
+        reference_masked: string;
+        reference_source: string;
+        reference_ciphertext: string;
+      }>(
+        `select payment_event_id,reference_masked,reference_source,reference_ciphertext
+          from app.list_owner_receiver_sms_inbox_sensitive(
+            $1::uuid,'all','all','QX7U',null,null,50,0)`,
+        [ownerAuthUserId],
+      );
+      expect(filtered.rows).toEqual([
+        {
+          payment_event_id: newEventId,
+          reference_masked: '***QX7U',
+          reference_source: 'sms_display',
+          reference_ciphertext: ciphertext,
+        },
+      ]);
+      const old = await postCutoverClient.query<{
+        payment_event_id: string;
+        reference_source: string;
+        reference_ciphertext: string | null;
+      }>(
+        `select payment_event_id,reference_source,reference_ciphertext
+          from app.list_owner_receiver_sms_inbox_sensitive(
+            $1::uuid,'all','all',null,null,null,50,0)
+          where payment_event_id = $2::uuid`,
+        [ownerAuthUserId, oldEventId],
+      );
+      expect(old.rows).toEqual([
+        {
+          payment_event_id: oldEventId,
+          reference_source: 'unavailable',
+          reference_ciphertext: null,
+        },
+      ]);
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(

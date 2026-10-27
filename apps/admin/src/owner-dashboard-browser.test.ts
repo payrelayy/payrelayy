@@ -394,6 +394,121 @@ function ownerBrowserHarness(
   };
 }
 
+describe('Owner full payment identifiers', () => {
+  it.each(['pending', 'approved', 'rejected'] as const)(
+    'renders the full receiving account and reference for a %s submitted payment',
+    async (status) => {
+      const browser = ownerBrowserHarness(503);
+      const payment = {
+        caseId: null,
+        candidateId: '22222222-2222-4222-8222-222222222222',
+        legacyCandidateId: null,
+        paymentEventId: null,
+        providerCode: 'cbe_birr',
+        submittedAt: '2026-10-20T10:00:00Z',
+        paymentAt: null,
+        amountMinor: null,
+        referenceMasked: '***QX7U',
+        reference: 'DJR41T3QX7U',
+        receiverAccountId: '55555555-5555-4555-8555-555555555555',
+        receiverAccountMasked: '***3456',
+        receiverAccount: '251000003456',
+        playerId: '12345678',
+        status,
+        statusDetail: 'Test submission',
+        ownerCaseStatus: null,
+        canApprove: false,
+        canReject: false,
+        rejectionReason: null,
+        decidedAt: null,
+        completedAt: null,
+      };
+      expect(await browser.call('validManualPaymentCase', payment)).toBe(true);
+      const card = await browser.call('renderManualPaymentCase', payment);
+      const rendered = JSON.stringify(card);
+      expect(rendered).toContain('DJR41T3QX7U');
+      expect(rendered).toContain('251000003456');
+      expect(rendered).toContain('12345678');
+    },
+  );
+
+  it('renders full SMS identifiers and labels a historical missing reference', async () => {
+    const browser = ownerBrowserHarness(503);
+    const payment = {
+      paymentEventId: '44444444-4444-4444-8444-444444444444',
+      providerCode: 'cbe_birr',
+      paymentAt: '2026-10-23T09:00:00Z',
+      receivedAt: '2026-10-23T09:00:10Z',
+      amountMinor: '3300',
+      receiverAccountMasked: '***3456',
+      receiverAccount: '251000003456',
+      receiverHolderName: 'Receiver',
+      referenceMasked: '***QX7U',
+      reference: 'DJR41T3QX7U',
+      candidateId: '22222222-2222-4222-8222-222222222222',
+      playerMasked: '***5678',
+      playerId: '12345678',
+      status: 'pending_review',
+      caseId: null,
+      canMarkManuallyCredited: false,
+    };
+    expect(await browser.call('validSmsInboxPayment', payment)).toBe(true);
+    const rendered = JSON.stringify(await browser.call('renderSmsInboxPayment', payment));
+    expect(rendered).toContain('DJR41T3QX7U');
+    expect(rendered).toContain('251000003456');
+    expect(rendered).toContain('12345678');
+    const oldSms = {
+      ...payment,
+      reference: null,
+      referenceMasked: null,
+      candidateId: null,
+      playerId: null,
+      playerMasked: null,
+      status: 'unmatched',
+    };
+    expect(await browser.call('validSmsInboxPayment', oldSms)).toBe(true);
+    expect(JSON.stringify(await browser.call('renderSmsInboxPayment', oldSms))).toContain(
+      'Reference not stored for older SMS',
+    );
+  });
+
+  it('renders full payment methods and retired receiver accounts', async () => {
+    const browser = ownerBrowserHarness(503);
+    const method = {
+      providerCode: 'cbe_birr',
+      ownerEnabled: true,
+      readiness: 'ready',
+      receiverName: 'Receiver',
+      receiverMasked: '***3456',
+      receiverReference: '251000003456',
+      pendingJobs: 0,
+      fencedAttempts: 0,
+      changedAt: '2026-10-23T09:00:00Z',
+    };
+    expect(await browser.call('validPaymentMethod', method)).toEqual(method);
+    await browser.call('renderPaymentMethods', [method]);
+    expect(JSON.stringify(browser.element('#payment-methods-list'))).toContain('251000003456');
+
+    const retired = {
+      accountHolderName: 'Former Receiver',
+      accountReferenceMasked: '***9876',
+      accountReference: '251000009876',
+      activeFrom: '2026-10-18T15:00:00Z',
+      protectedReference: true,
+      providerCode: 'cbe_birr',
+      providerDisplayName: 'CBE Birr',
+      receiverRevisionId: '33333333-3333-4333-8333-333333333333',
+      receiverStatus: 'inactive',
+      retiredAt: '2026-10-19T15:00:00Z',
+      revision: 1,
+      rotationReason: 'account_rotation',
+    };
+    expect(await browser.call('validReceiver', retired)).toEqual(retired);
+    await browser.call('renderReceivers', [retired]);
+    expect(JSON.stringify(browser.element('#receiver-list'))).toContain('251000009876');
+  });
+});
+
 describe('Owner workspace navigation', () => {
   it('shows a bounded live status snapshot with distinct TeleBirr lookup state', async () => {
     const browser = ownerBrowserHarness(503, {

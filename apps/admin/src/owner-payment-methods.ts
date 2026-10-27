@@ -1,3 +1,8 @@
+import {
+  unprotectReceiverAccountReference,
+  type DepositReferenceProtectionSecrets,
+} from '@fetanagent/deposit-reference-protection';
+
 export type PaymentMethodCode = 'telebirr' | 'cbe_birr';
 
 export interface OwnerPaymentMethod {
@@ -17,6 +22,7 @@ export interface OwnerPaymentMethod {
     | 'new_receiver_sms_not_seen';
   readonly receiverName: string | null;
   readonly receiverMasked: string | null;
+  readonly receiverReference?: string | null;
   readonly pendingJobs: number;
   readonly fencedAttempts: number;
   readonly changedAt: string;
@@ -46,7 +52,10 @@ const READINESS = new Set([
   'new_receiver_sms_not_seen',
 ]);
 
-function decodeMethod(value: unknown): OwnerPaymentMethod {
+function decodeMethod(
+  value: unknown,
+  revealSecrets?: DepositReferenceProtectionSecrets,
+): OwnerPaymentMethod {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new OwnerPaymentMethodsUnavailableError();
   const row = value as Record<string, unknown>;
@@ -77,6 +86,20 @@ function decodeMethod(value: unknown): OwnerPaymentMethod {
     readiness: row.readiness as OwnerPaymentMethod['readiness'],
     receiverName: row.receiver_name as string | null,
     receiverMasked: row.receiver_masked as string | null,
+    ...(revealSecrets
+      ? {
+          receiverReference:
+            row.receiver_masked === null
+              ? null
+              : unprotectReceiverAccountReference({
+                  ciphertext: String(row.receiver_ciphertext),
+                  fingerprint: String(row.receiver_fingerprint),
+                  masked: row.receiver_masked as string,
+                  provider: row.provider_code,
+                  secrets: revealSecrets,
+                }),
+        }
+      : {}),
     pendingJobs,
     fencedAttempts,
     changedAt: row.changed_at.toISOString(),
@@ -84,18 +107,26 @@ function decodeMethod(value: unknown): OwnerPaymentMethod {
 }
 
 export class PostgresOwnerPaymentMethods {
-  constructor(private readonly database: PaymentMethodsDatabase) {}
+  constructor(
+    private readonly database: PaymentMethodsDatabase,
+    private readonly revealSecrets?: DepositReferenceProtectionSecrets,
+  ) {}
 
   async list(authUserId: string): Promise<readonly OwnerPaymentMethod[]> {
     if (!UUID.test(authUserId)) throw new OwnerPaymentMethodsRejectedError();
     try {
       const result = await this.database.query(
-        `select provider_code, owner_enabled, readiness, receiver_name,
-                receiver_masked, pending_jobs, fenced_attempts, changed_at
-           from app.list_owner_provider_deposit_controls($1::uuid)`,
+        this.revealSecrets
+          ? `select provider_code, owner_enabled, readiness, receiver_name,
+                    receiver_masked, pending_jobs, fenced_attempts, changed_at,
+                    receiver_ciphertext, receiver_fingerprint
+               from app.list_owner_provider_deposit_controls_sensitive($1::uuid)`
+          : `select provider_code, owner_enabled, readiness, receiver_name,
+                    receiver_masked, pending_jobs, fenced_attempts, changed_at
+               from app.list_owner_provider_deposit_controls($1::uuid)`,
         [authUserId],
       );
-      const methods = result.rows.map(decodeMethod);
+      const methods = result.rows.map((row) => decodeMethod(row, this.revealSecrets));
       if (methods.length !== 2 || new Set(methods.map((method) => method.providerCode)).size !== 2)
         throw new OwnerPaymentMethodsUnavailableError();
       return Object.freeze(methods);

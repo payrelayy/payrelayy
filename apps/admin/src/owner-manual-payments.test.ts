@@ -1,4 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+
+import {
+  protectDepositProofReference,
+  protectReceiverAccountReference,
+} from '@fetanagent/deposit-reference-protection';
+import { protectReceiverSmsDisplayReference } from '@fetanagent/deposit-reference-protection/owner-payment-display';
 
 import {
   OwnerManualPaymentConflictError,
@@ -11,8 +18,175 @@ const actor = '11111111-1111-4111-8111-111111111111';
 const candidate = '22222222-2222-4222-8222-222222222222';
 const ownerCase = '33333333-3333-4333-8333-333333333333';
 const sms = '44444444-4444-4444-8444-444444444444';
+const displaySecrets = {
+  receiverSecrets: { encryptionSecret: '1'.repeat(64), fingerprintSecret: '2'.repeat(64) },
+  proofSecrets: { encryptionSecret: '1'.repeat(64), fingerprintSecret: '2'.repeat(64) },
+  smsDisplayEncryptionSecret: '3'.repeat(64),
+};
 
 describe('Owner manual payment boundary', () => {
+  it.each(['pending', 'approved', 'rejected'] as const)(
+    'opens the full CBE reference and receiver in a %s submission',
+    async (status) => {
+      const proof = protectDepositProofReference({
+        provider: 'cbe_birr',
+        reference: 'DJR41T3QX7U',
+        secrets: displaySecrets.proofSecrets,
+      });
+      const receiver = protectReceiverAccountReference({
+        provider: 'cbe_birr',
+        reference: '251911111234',
+        secrets: displaySecrets.receiverSecrets,
+      });
+      const service = new PostgresOwnerManualPayments(
+        {
+          query: async (sql) => {
+            expect(sql).toContain('list_owner_submitted_payments_sensitive');
+            return {
+              rows: [
+                {
+                  case_id: status === 'pending' ? null : ownerCase,
+                  candidate_id: candidate,
+                  legacy_candidate_id: null,
+                  payment_event_id: sms,
+                  provider_code: 'cbe_birr',
+                  reference_masked: proof.masked,
+                  reference_ciphertext: proof.ciphertext,
+                  reference_fingerprint: proof.fingerprint,
+                  submitted_at: new Date('2026-10-23T09:00:00Z'),
+                  payment_at: new Date('2026-10-23T09:00:00Z'),
+                  amount_minor: '11000',
+                  receiver_account_id: '55555555-5555-4555-8555-555555555555',
+                  receiver_account_masked: receiver.masked,
+                  receiver_ciphertext: receiver.ciphertext,
+                  receiver_fingerprint: receiver.fingerprint,
+                  player_id: '12345678',
+                  payment_status: status,
+                  status_detail: 'Verified',
+                  owner_case_status:
+                    status === 'pending'
+                      ? null
+                      : status === 'approved'
+                        ? 'manually_credited'
+                        : 'rejected',
+                  rejection_reason: status === 'rejected' ? 'Owner rejected payment' : null,
+                  decided_at: status === 'pending' ? null : new Date('2026-10-23T09:01:00Z'),
+                  completed_at: status === 'approved' ? new Date('2026-10-23T09:02:00Z') : null,
+                  can_approve: status === 'pending',
+                  can_reject: status === 'pending',
+                },
+              ],
+            };
+          },
+        },
+        displaySecrets,
+      );
+      await expect(service.listSubmittedPayments(actor, status)).resolves.toMatchObject([
+        {
+          reference: 'DJR41T3QX7U',
+          receiverAccount: '251911111234',
+          playerId: '12345678',
+          status,
+        },
+      ]);
+    },
+  );
+
+  it('opens new SMS, opens older matched SMS, and marks older unmatched SMS unavailable', async () => {
+    const receiver = protectReceiverAccountReference({
+      provider: 'cbe_birr',
+      reference: '251911111234',
+      secrets: displaySecrets.receiverSecrets,
+    });
+    const proof = protectDepositProofReference({
+      provider: 'cbe_birr',
+      reference: 'DJR41T3QX7U',
+      secrets: displaySecrets.proofSecrets,
+    });
+    const newDisplay = protectReceiverSmsDisplayReference({
+      provider: 'cbe_birr',
+      reference: 'NEW41T3QX7U',
+      encryptionSecret: displaySecrets.smsDisplayEncryptionSecret,
+    });
+    const base = {
+      payment_event_id: sms,
+      provider_code: 'cbe_birr',
+      payment_at: new Date('2026-10-23T09:00:00Z'),
+      received_at: new Date('2026-10-23T09:00:15Z'),
+      amount_minor: '11000',
+      receiver_account_masked: receiver.masked,
+      receiver_ciphertext: receiver.ciphertext,
+      receiver_fingerprint: receiver.fingerprint,
+      receiver_holder_name: 'Receiver',
+      case_id: null,
+      can_mark_manually_credited: false,
+    };
+    const digest = (reference: string) =>
+      'sha256:' + createHash('sha256').update(reference).digest('hex');
+    const service = new PostgresOwnerManualPayments(
+      {
+        query: async (sql) => {
+          expect(sql).toContain('list_owner_receiver_sms_inbox_sensitive');
+          return {
+            rows: [
+              {
+                ...base,
+                reference_masked: null,
+                candidate_id: null,
+                player_masked: null,
+                player_id: null,
+                payment_status: 'unmatched',
+                reference_ciphertext: null,
+                reference_source: 'unavailable',
+                reference_digest: digest('OLD41T3QX7U'),
+                reference_fingerprint: '0'.repeat(64),
+                display_reference_masked: null,
+              },
+              {
+                ...base,
+                reference_masked: proof.masked,
+                candidate_id: candidate,
+                player_masked: '***5678',
+                player_id: '12345678',
+                payment_status: 'manually_credited',
+                reference_ciphertext: proof.ciphertext,
+                reference_source: 'candidate',
+                reference_digest: digest('DJR41T3QX7U'),
+                reference_fingerprint: proof.fingerprint,
+                display_reference_masked: proof.masked,
+              },
+              {
+                ...base,
+                reference_masked: newDisplay.masked,
+                candidate_id: null,
+                player_masked: null,
+                player_id: null,
+                payment_status: 'unmatched',
+                reference_ciphertext: newDisplay.ciphertext,
+                reference_source: 'sms_display',
+                reference_digest: digest('NEW41T3QX7U'),
+                reference_fingerprint: '0'.repeat(64),
+                display_reference_masked: newDisplay.masked,
+              },
+            ],
+          };
+        },
+      },
+      displaySecrets,
+    );
+    const payments = await service.listSms(actor);
+    expect(payments.map((payment) => payment.reference)).toEqual([
+      null,
+      'DJR41T3QX7U',
+      'NEW41T3QX7U',
+    ]);
+    expect(payments.map((payment) => payment.receiverAccount)).toEqual([
+      '251911111234',
+      '251911111234',
+      '251911111234',
+    ]);
+    expect(payments[1]?.playerId).toBe('12345678');
+  });
   it('returns the full Player ID for the protected submitted-payment list', async () => {
     const calls: unknown[] = [];
     const service = new PostgresOwnerManualPayments({

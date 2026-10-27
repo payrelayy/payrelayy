@@ -194,6 +194,7 @@ jobs:
             deposit-proof-reference-fingerprint-master deposit-proof-reference-profile.v2.json \
             owner-cbe-birr-lookup-encryption-master owner-cbe-birr-lookup-fingerprint-master \
             owner-cbe-birr-receiver-lookup-profile.v2.json owner-database-url \
+            receiver-sms-owner-display-encryption-master \
             player-action-database-url publishable-key supabase-ca.crt \
             telebirr-assignment-database-url telebirr-assignment-runtime-manifest.v1.json \
             telebirr-assignment-signer.pkcs8.der telebirr-assignment.spki.der \

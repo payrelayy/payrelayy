@@ -10304,6 +10304,77 @@ describe('100 ETB production deposit policy cutover', () => {
     expect(transport.rows).toEqual([{ active: false, events: '0' }]);
   });
 
+  it('runs the SMS broker catalog SQL against PostgreSQL with the display grant present', async () => {
+    const source = await readFile(
+      '/workspace/apps/telebirr-assignment-broker/src/receiver-sms-ingest-runtime.ts',
+      'utf8',
+    );
+    const functionList = source.match(/const FUNCTIONS = \[([\s\S]*?)\] as const;/u)?.[1];
+    const template = source.match(
+      /export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `([\s\S]*?)`;/u,
+    )?.[1];
+    expect(functionList).toBeDefined();
+    expect(template).toBeDefined();
+    const signatures = [...functionList!.matchAll(/'([^']+)'/gu)].map((match) => match[1]!);
+    expect(signatures).toHaveLength(3);
+    const oids = signatures
+      .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
+      .join(',');
+    const sql = template!
+      .replaceAll('${RUNTIME}', 'fetanagent_receiver_sms_ingest_runtime')
+      .replaceAll('${GROUP}', 'fetanagent_receiver_sms_ingest')
+      .replaceAll('${oids}', oids)
+      .replace(/\$\{FUNCTIONS\[(\d+)\]\}/gu, (_match, index: string) => signatures[Number(index)]!);
+    expect(sql).not.toContain('${');
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query(
+        'set session authorization fetanagent_receiver_sms_ingest_runtime',
+      );
+      const result = await postCutoverClient.query<Record<string, boolean>>(sql);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        identity: true,
+        functions_hardened: true,
+        exact_function_surface: true,
+        display_function_available: true,
+      });
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
+  });
+
+  it('keeps the Owner exact function count valid while display grants are deferred', async () => {
+    const source = await readFile('/workspace/apps/admin/src/postgres-runtime.ts', 'utf8');
+    const sql = source.match(/export const OWNER_CONTROL_PREFLIGHT_SQL = `([\s\S]*?)`;/u)?.[1];
+    expect(sql).toBeDefined();
+    await postCutoverClient.query('begin');
+    try {
+      for (const signature of [
+        'app.list_owner_submitted_payments_sensitive(uuid,text,integer,integer)',
+        'app.list_owner_receiver_sms_inbox_sensitive(uuid,text,text,text,date,date,integer,integer)',
+        'app.list_owner_provider_deposit_controls_sensitive(uuid)',
+        'app.list_owner_receiver_accounts_sensitive(uuid)',
+      ]) {
+        await postCutoverClient.query(
+          `revoke execute on function ${signature} from fetanagent_owner_control`,
+        );
+      }
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const result = await postCutoverClient.query<Record<string, boolean>>(sql!);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        exact_app_execute_count: true,
+        all_other_app_functions_denied: true,
+        payment_display_functions_allowed: false,
+      });
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
+  });
+
   it('exposes the new encrypted projections only through the Owner runtime', async () => {
     await postCutoverClient.query('begin');
     try {

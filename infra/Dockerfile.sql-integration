@@ -116,6 +116,8 @@ COPY apps/telebirr-assignment-broker/src/routine-no-money-postgres.ts \
   ./apps/telebirr-assignment-broker/src/routine-no-money-postgres.ts
 COPY apps/telebirr-assignment-broker/src/routine-paid-poll-runtime.ts \
   ./apps/telebirr-assignment-broker/src/routine-paid-poll-runtime.ts
+COPY apps/telebirr-assignment-broker/src/receiver-sms-ingest-runtime.ts \
+  ./apps/telebirr-assignment-broker/src/receiver-sms-ingest-runtime.ts
 COPY apps/telebirr-assignment-broker/src/routine-paid-poll-postgres.ts \
   ./apps/telebirr-assignment-broker/src/routine-paid-poll-postgres.ts
 COPY apps/telebirr-assignment-broker/src/serialized-postgres-lane.ts \

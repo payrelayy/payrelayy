@@ -104,6 +104,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-player-id-auto-detect-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-player-credit-speed-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-deposit-range-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1.sh

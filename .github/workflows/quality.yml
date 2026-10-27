@@ -108,6 +108,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-cbe-reference-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-full-stage1-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-full-activation-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1.sh

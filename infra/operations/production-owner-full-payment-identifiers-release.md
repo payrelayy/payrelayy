@@ -71,3 +71,28 @@ The code defaults to masked display. The guarded release uses this order:
 
 If activation fails, turn off both feature flags and keep the migration and
 encrypted SMS display rows intact. The old masked read paths remain available.
+
+## Owner receiver-history display repair
+
+The activation Owner page rejected the full receiver-history response because
+one retired CBE Birr revision has a protected nine-digit legacy receiving
+number. The server decrypted all ten receiver revisions and the sampled
+submitted references successfully. The Owner browser now accepts nine digits
+only for an inactive CBE Birr revision; new and active CBE Birr receivers still
+require the full `251` phone. Submitted payments request receiver history first,
+so this also restores their Pending view. The Owner copy now says that the full
+number remains visible in history.
+
+The guarded predecessor is the healthy activation release
+`7c17868edc0026a170c7630bce3cd4cb80e6dbd9`. Rotate the deploy helper
+from `ba2bff461abc271e3650400fc3aa10d39fbd8bd6726a5abd9e6c599359107b49`
+to `c94d3871386ac8f7b5a948468bc345841a1576a6b536029b43badfd0ddeacee6`
+using the one-use
+`fetanagent-production-v2-owner-full-history-fix-helper-rotation-v1.sh`.
+Require `inspect` to report the exact predecessor, run
+`rotate 'ROTATE EXACT PRODUCTION V2 OWNER FULL HISTORY FIX HELPER V1'`, and
+require `inspect` to report the exact successor before dispatching the guarded
+production runtime workflow. Keep `cbe-live-v1`, routine transport `enabled`,
+and the current financial switch fingerprint. Verify full retired CBE and
+TeleBirr accounts and Pending, Approved, and Rejected Submitted payments in
+the authenticated Owner page without making a test payment.

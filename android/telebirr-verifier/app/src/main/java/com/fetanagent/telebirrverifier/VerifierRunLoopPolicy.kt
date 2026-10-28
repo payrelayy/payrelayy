@@ -81,6 +81,7 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.UPLOAD_PENDING -> delay(UPLOAD_DELAYS_MILLIS, repeat)
       LivePilotRuntimeState.ATTENTION ->
         if (status.code in TERMINAL_ATTENTION_CODES) null
+        else if (status.code == "sms_upload_retry") SMS_UPLOAD_RETRY_DELAY_MILLIS
         else if (status.code == "paid_receipt_review_retry")
           delay(RECEIPT_REVIEW_DELAYS_MILLIS, repeat)
         else if (status.code == "paid_observation_retry" || status.code == "routine_retry" ||
@@ -108,6 +109,8 @@ class VerifierRunLoopPolicy(
     private const val MAXIMUM_JITTER_FRACTION = 0.20
     private const val PAID_IDLE_DELAY_MILLIS = 10_000L
     private const val SMS_IDLE_DELAY_MILLIS = 3_000L
+    // A captured payment SMS must not sit behind the generic fifteen-minute attention backoff.
+    private const val SMS_UPLOAD_RETRY_DELAY_MILLIS = 10_000L
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
     private val ROUTINE_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 30_000L)
     private val RECEIPT_REVIEW_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L)

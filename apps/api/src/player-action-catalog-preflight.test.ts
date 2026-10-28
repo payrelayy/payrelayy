@@ -75,6 +75,17 @@ describe('Player-ID action catalog preflight', () => {
     }
   });
 
+  it('accepts only the private duplicate-disposition grant during its staged handoff', () => {
+    const sql = PLAYER_ACTION_RECEIVER_SMS_CATALOG_PREFLIGHT_SQL;
+    expect(sql).toMatch(
+      /routine\.oid not in \([\s\S]*?\)\s+and routine\.oid <> pg_catalog\.to_regprocedure\('app\.telegram_receiver_sms_duplicate_state\(uuid,uuid\)'\)/u,
+    );
+    expect(sql).toContain("routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]");
+    expect(sql).toContain("owner.rolname = 'postgres'");
+    expect(sql).toContain("where privilege.privilege_type = 'EXECUTE'");
+    expect(sql).toContain("where rolname = 'fetanagent_player_actions_runtime'");
+  });
+
   it('requires onboarding, proof, notification, and instruction functions in the exact 31-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',

@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'b8eb1d2280613a355bb81dc71579c3b236b61d85'/gu)].length,
+  [...workflow.matchAll(/status '20beb62d28aedc1e60873f9ad9ecec164fee9466'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='b8eb1d2280613a355bb81dc71579c3b236b61d85'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='20beb62d28aedc1e60873f9ad9ecec164fee9466'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1867,7 +1867,7 @@ const companionSessionDiagnosticsReleaseRunbook = await read(
 for (const value of [
   "readonly EXPECTED_CURRENT_SHA='b8eb1d2280613a355bb81dc71579c3b236b61d85'",
   "readonly PREDECESSOR_SHA256='b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06'",
   "readonly SOURCE_REVIEW='companion-session-diagnostics-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1883,11 +1883,47 @@ assert.doesNotMatch(
 for (const value of [
   'b8eb1d2280613a355bb81dc71579c3b236b61d85',
   'b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45',
-  helperDigest,
+  '843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06',
   'ROTATE EXACT PRODUCTION V2 COMPANION SESSION DIAGNOSTICS HELPER V1',
 ]) {
   assert.ok(companionSessionDiagnosticsReleaseRunbook.includes(value));
 }
+const duplicateSubmissionHelperRotation = await read(
+  'infra/operations/fetanagent-production-v2-duplicate-submission-helper-rotation-v1.sh',
+);
+const duplicateSubmissionReleaseRunbook = await read(
+  'infra/operations/production-duplicate-submission-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='20beb62d28aedc1e60873f9ad9ecec164fee9466'",
+  "readonly PREDECESSOR_SHA256='843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='duplicate-submission-release-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 DUPLICATE SUBMISSION HELPER V1',
+]) {
+  assert.ok(duplicateSubmissionHelperRotation.includes(value));
+}
+assert.doesNotMatch(duplicateSubmissionHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '20beb62d28aedc1e60873f9ad9ecec164fee9466',
+  '843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 DUPLICATE SUBMISSION HELPER V1',
+]) {
+  assert.ok(duplicateSubmissionReleaseRunbook.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-duplicate-submission-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-duplicate-submission-helper-rotation-v1\.sh/u,
+);
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,

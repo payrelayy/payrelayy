@@ -388,7 +388,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each(['older_review', 'held_review'] as const)(
-    'defers the %s SMS response to the durable outcome notifier',
+    'acknowledges a %s SMS submission without a later review warning',
     (matchStatus) => {
       expect(
         presentTelegramPlayerIdFlowResult({
@@ -398,7 +398,10 @@ describe('Telegram Player-ID flow presentation', () => {
           providerName: 'TeleBirr',
           matchStatus,
         }),
-      ).toEqual({ kind: 'deferred' });
+      ).toEqual({
+        kind: 'message',
+        text: '⏳ Payment details received. We’ll update you here.',
+      });
     },
   );
 

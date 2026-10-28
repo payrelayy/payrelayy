@@ -4,10 +4,7 @@ import type {
   TelegramPrivateActionEnvelope,
   TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
-import {
-  TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
-  TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT,
-} from './telegram-customer-copy.js';
+import { TELEGRAM_PAYMENT_ALREADY_USED_TEXT } from './telegram-customer-copy.js';
 import { processOneTelegramPaymentInstructionExpiry } from './telegram-payment-instruction-expiry.js';
 import { processOneTelegramPlayerValidationOutcome } from './telegram-player-validation-notifier.js';
 
@@ -38,7 +35,12 @@ function formatMinorEtb(amountMinor: string): string {
 }
 
 /** Customer-safe copy: no full receipt reference, Player ID, or internal job state. */
-export function presentTelegramDepositOutcome(delivery: Delivery): string {
+export function presentTelegramDepositOutcome(delivery: Delivery): string | null {
+  // These are interim review states, not an Owner decision. The submission
+  // already received its intake acknowledgement; wait for a final outcome.
+  if (['held_review', 'older_pending', 'manual_review'].includes(delivery.outcomeCode)) {
+    return null;
+  }
   if (delivery.outcomeCode === 'checking') {
     return '⏳ Still checking your payment. We’ll update you here.';
   }
@@ -66,17 +68,8 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'unrelated_receipt') {
     return '❌ Deposit not credited. This receipt does not match. Contact support.';
   }
-  if (delivery.outcomeCode === 'held_review') {
-    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
-  }
-  if (delivery.outcomeCode === 'older_pending') {
-    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
-  }
   if (delivery.outcomeCode === 'old_rejected') {
     return '❌ Deposit not credited. This payment is too old. Contact support.';
-  }
-  if (delivery.outcomeCode === 'manual_review') {
-    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
   }
   if (delivery.outcomeCode === 'rejected') {
     return '❌ Deposit not credited. Contact support if you need help.';
@@ -132,12 +125,17 @@ export async function processOneTelegramDepositOutcome(
   if (claimed.outcome !== 'deposit_outcome_delivery') {
     throw new Error('Unexpected Telegram deposit outcome response.');
   }
+  const message = presentTelegramDepositOutcome(claimed);
+  if (message === null) {
+    await complete(dependencies, claimed, 'unavailable', null);
+    return 'processed';
+  }
   let result: 'sent' | 'retry' | 'unavailable' = 'retry';
   let messageId: number | null = null;
   try {
     const sent = await dependencies.send(
       Number(claimed.privateChatId),
-      presentTelegramDepositOutcome(claimed),
+      message,
       claimed.outcomeCode !== 'checking' && claimed.outcomeCode !== 'verified_waiting',
     );
     if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) {

@@ -264,14 +264,8 @@ export function presentTelegramPlayerIdFlowResult(
           text: TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
         };
       }
-      if (result.matchStatus === 'older_review') {
-        // The database has already queued the durable Owner-review notice.
-        return { kind: 'deferred' };
-      }
-      if (result.matchStatus === 'held_review') {
-        // The notifier owns the one customer-visible held result and its retries.
-        return { kind: 'deferred' };
-      }
+      // Interim Owner-review notices are silent. Acknowledge intake once so
+      // these submissions are not left with no bot reply.
       return {
         kind: 'message',
         text: TELEGRAM_PAYMENT_RECEIVED_TEXT,

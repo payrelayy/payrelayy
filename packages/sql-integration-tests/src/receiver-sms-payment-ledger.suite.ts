@@ -1554,10 +1554,99 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
           [candidate],
         );
         expect(reason.rows).toEqual([{ reason_code: 'no_receiver_sms_after_60m' }]);
+        const reviewNotice = await client.query<{ outcome_code: string; status: string }>(
+          `select outcome_code,status from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid and notification_stage = 'final'`,
+          [candidate],
+        );
+        expect(reviewNotice.rows).toEqual([{ outcome_code: 'held_review', status: 'unavailable' }]);
       } finally {
         await client.query('rollback');
       }
     });
+
+    it.each(['telebirr', 'cbe_birr'] as const)(
+      'does not hold a repeated %s submission or send a review notice',
+      async (providerCode) => {
+        const client = getClient();
+        await client.query('begin');
+        try {
+          await client.query(
+            `update app.receiver_sms_route_control set enabled = true,
+              cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+              where singleton`,
+          );
+          const fingerprint = hexDigest();
+          const first = await fixtureCandidate(
+            client,
+            fingerprint,
+            new Date(Date.now() - 62 * 60_000).toISOString(),
+            providerCode,
+          );
+          const repeat = await fixtureCandidate(
+            client,
+            fingerprint,
+            new Date(Date.now() - 61 * 60_000).toISOString(),
+            providerCode,
+          );
+          const duplicate = await client.query<{ duplicate_state: string }>(
+            `select app.receiver_sms_duplicate_state($1::uuid) as duplicate_state`,
+            [repeat],
+          );
+          expect(duplicate.rows).toEqual([{ duplicate_state: 'other_account_pending' }]);
+          expect(
+            (
+              await client.query<{ outcome: string }>(
+                `select app.settle_next_receiver_sms_match() as outcome`,
+              )
+            ).rows,
+          ).toEqual([{ outcome: 'held_review' }]);
+          expect(
+            (
+              await client.query<{ outcome: string }>(
+                `select app.settle_next_receiver_sms_match() as outcome`,
+              )
+            ).rows,
+          ).toEqual([{ outcome: 'empty' }]);
+          const holds = await client.query<{ candidate_id: string }>(
+            `select candidate_id from app.receiver_sms_settlement_holds
+              where candidate_id in ($1::uuid,$2::uuid)`,
+            [first, repeat],
+          );
+          expect(holds.rows).toEqual([{ candidate_id: first }]);
+          const reviewDeliveries = await client.query<{
+            candidate_id: string;
+            outcome_code: string;
+            status: string;
+          }>(
+            `select candidate_id,outcome_code,status
+              from app.telegram_deposit_outcome_deliveries
+              where candidate_id in ($1::uuid,$2::uuid)`,
+            [first, repeat],
+          );
+          expect(reviewDeliveries.rows).toEqual([
+            { candidate_id: first, outcome_code: 'held_review', status: 'unavailable' },
+          ]);
+          await client.query('set session authorization fetanagent_owner_control_runtime');
+          const ownerDecision = await client.query<{ decision: { status: string } }>(
+            `select app.decide_owner_manual_payment_case(
+              $1::uuid,$2::uuid,'reject','Payment could not be confirmed.') as decision`,
+            [getOwner(), first],
+          );
+          expect(ownerDecision.rows[0]?.decision.status).toBe('rejected');
+          await client.query('reset session authorization');
+          const finalDelivery = await client.query<{ outcome_code: string; status: string }>(
+            `select outcome_code,status from app.telegram_deposit_outcome_deliveries
+              where candidate_id = $1::uuid and notification_stage = 'manual_final'`,
+            [first],
+          );
+          expect(finalDelivery.rows).toEqual([{ outcome_code: 'rejected', status: 'pending' }]);
+        } finally {
+          await client.query('reset session authorization').catch(() => undefined);
+          await client.query('rollback');
+        }
+      },
+    );
 
     it('preserves an earlier five-minute review hold without queuing a credit', async () => {
       const client = getClient();

@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '7fca3343a2a2057845634cc9aa684aed55603c0c'/gu)].length,
+  [...workflow.matchAll(/status '781fa538102a5b7d490438d75d285882a71a8e68'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='7fca3343a2a2057845634cc9aa684aed55603c0c'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='781fa538102a5b7d490438d75d285882a71a8e68'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1970,7 +1970,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='7fca3343a2a2057845634cc9aa684aed55603c0c'",
   "readonly PREDECESSOR_SHA256='c39f6648d2d0dc7127a9661cef8e7ecf8cc8edf4c96b8480af8fa97931020fbb'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000'",
   "readonly SOURCE_REVIEW='telegram-brand-menu-release-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1983,7 +1983,7 @@ assert.doesNotMatch(telegramBrandMenuHelperRotation, /\b(?:docker|psql|rm|sed|ch
 for (const value of [
   '7fca3343a2a2057845634cc9aa684aed55603c0c',
   'c39f6648d2d0dc7127a9661cef8e7ecf8cc8edf4c96b8480af8fa97931020fbb',
-  helperDigest,
+  'e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000',
   'ROTATE EXACT PRODUCTION V2 TELEGRAM BRAND MENU HELPER V1',
 ]) {
   assert.ok(telegramBrandMenuReleaseRunbook.includes(value));
@@ -1995,6 +1995,42 @@ assert.match(
 assert.match(
   quality,
   /bash -n infra\/operations\/fetanagent-production-v2-telegram-brand-menu-helper-rotation-v1\.sh/u,
+);
+const reviewNoticeBotHelperRotation = await read(
+  'infra/operations/fetanagent-production-v2-review-notice-bot-helper-rotation-v1.sh',
+);
+const reviewNoticeBotReleaseRunbook = await read(
+  'infra/operations/production-review-notice-bot-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='781fa538102a5b7d490438d75d285882a71a8e68'",
+  "readonly PREDECESSOR_SHA256='e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='review-notice-bot-release-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 REVIEW NOTICE BOT HELPER V1',
+]) {
+  assert.ok(reviewNoticeBotHelperRotation.includes(value));
+}
+assert.doesNotMatch(reviewNoticeBotHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '781fa538102a5b7d490438d75d285882a71a8e68',
+  'e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 REVIEW NOTICE BOT HELPER V1',
+]) {
+  assert.ok(reviewNoticeBotReleaseRunbook.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-review-notice-bot-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-review-notice-bot-helper-rotation-v1\.sh/u,
 );
 assert.match(
   workflow,

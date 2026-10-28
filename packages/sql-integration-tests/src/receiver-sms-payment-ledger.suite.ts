@@ -1853,7 +1853,252 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
   getOwner: () => string,
 ): void {
   describe('Owner duplicate credit status', () => {
-    it('shows a repeat for the credited Player as already credited while holding another Player', async () => {
+    it('rejects a repeat after the first submission was explicitly rejected', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const first = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await fixturePaymentEvent(
+          client,
+          fingerprint,
+          new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        );
+        await client.query(
+          `insert into app.receiver_sms_owner_decisions
+            (candidate_id,payment_event_id,decision,actor_admin_id)
+            select matched.candidate_id,matched.payment_event_id,
+              'rejected',owner_user.id
+              from app.receiver_sms_payment_matches matched
+              cross join app.admin_users owner_user
+              where matched.candidate_id = $1::uuid
+                and owner_user.auth_user_id = $2::uuid`,
+          [first, getOwner()],
+        );
+        const firstIdentity = await client.query<{ origin_identity_id: string }>(
+          `select origin_identity_id from app.receiver_sms_deposit_candidates
+            where id = $1::uuid`,
+          [first],
+        );
+        const repeatInbound = await fixtureInboundEvent(
+          client,
+          firstIdentity.rows[0]!.origin_identity_id,
+        );
+        const repeat = await client.query<{ id: string }>(
+          `insert into app.receiver_sms_deposit_candidates (
+            origin_inbound_event_id,origin_identity_id,submitting_customer_id,
+            beneficiary_customer_id,platform_id,player_account_id,
+            player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+            reference_ciphertext,reference_fingerprint,reference_masked,
+            reference_key_version,reference_profile_version,semantic_input_hmac,submitted_at
+          ) select $2::uuid,origin_identity_id,submitting_customer_id,
+              beneficiary_customer_id,platform_id,player_account_id,
+              player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+              reference_ciphertext,reference_fingerprint,reference_masked,
+              reference_key_version,reference_profile_version,$3::text,
+              submitted_at + interval '1 second'
+            from app.receiver_sms_deposit_candidates where id = $1::uuid
+            returning id`,
+          [first, repeatInbound, `hmac-sha256-v1:${hexDigest()}`],
+        );
+        const state = await client.query<{ duplicate_state: string }>(
+          `select app.receiver_sms_duplicate_state($1::uuid) as duplicate_state`,
+          [repeat.rows[0]!.id],
+        );
+        expect(state.rows).toEqual([{ duplicate_state: 'closed' }]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const rejected = await client.query<{
+          payment_status: string;
+          can_approve: boolean;
+          can_reject: boolean;
+        }>(
+          `select payment_status,can_approve,can_reject
+            from app.list_owner_submitted_payments($1::uuid,'rejected',25,0)
+            where candidate_id = $2::uuid`,
+          [getOwner(), repeat.rows[0]!.id],
+        );
+        expect(rejected.rows).toEqual([
+          { payment_status: 'rejected', can_approve: false, can_reject: false },
+        ]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('keeps the first Player assignment and rejects pending repeats from both account identities', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const first = await fixtureCandidate(
+          client,
+          fingerprint,
+          new Date(Date.now() - 3000).toISOString(),
+          'cbe_birr',
+        );
+        const original = await client.query<{
+          origin_identity_id: string;
+          submitting_customer_id: string;
+        }>(
+          `select origin_identity_id,submitting_customer_id
+            from app.receiver_sms_deposit_candidates where id = $1::uuid`,
+          [first],
+        );
+        const secondPlayerId = await fixtureEligiblePlayer(
+          client,
+          original.rows[0]!.submitting_customer_id,
+        );
+        const secondPlayer = await client.query<{ id: string; eligibility_id: string }>(
+          `select player.id, eligibility.id as eligibility_id
+            from app.customer_platform_players player
+            join app.player_deposit_eligibility_decisions eligibility
+              on eligibility.player_account_id = player.id
+            where player.player_id = $1::text`,
+          [secondPlayerId],
+        );
+        const repeatInbound = await fixtureInboundEvent(
+          client,
+          original.rows[0]!.origin_identity_id,
+        );
+        const sameAccountRepeat = await client.query<{ id: string }>(
+          `insert into app.receiver_sms_deposit_candidates (
+            origin_inbound_event_id,origin_identity_id,submitting_customer_id,
+            beneficiary_customer_id,platform_id,player_account_id,
+            player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+            reference_ciphertext,reference_fingerprint,reference_masked,
+            reference_key_version,reference_profile_version,semantic_input_hmac,submitted_at
+          ) select $2::uuid,origin_identity_id,submitting_customer_id,
+              beneficiary_customer_id,platform_id,$3::uuid,$4::uuid,
+              payment_provider_id,provider_code,reference_ciphertext,
+              reference_fingerprint,reference_masked,reference_key_version,
+              reference_profile_version,$5::text,submitted_at + interval '1 second'
+            from app.receiver_sms_deposit_candidates where id = $1::uuid
+            returning id`,
+          [
+            first,
+            repeatInbound,
+            secondPlayer.rows[0]!.id,
+            secondPlayer.rows[0]!.eligibility_id,
+            `hmac-sha256-v1:${hexDigest()}`,
+          ],
+        );
+        const otherAccountRepeat = await fixtureCandidate(
+          client,
+          fingerprint,
+          new Date(Date.now() - 1000).toISOString(),
+          'cbe_birr',
+        );
+        const states = await client.query<{ candidate_id: string; duplicate_state: string }>(
+          `select id as candidate_id,app.receiver_sms_duplicate_state(id) as duplicate_state
+            from app.receiver_sms_deposit_candidates
+            where id in ($1::uuid,$2::uuid,$3::uuid) order by submitted_at`,
+          [first, sameAccountRepeat.rows[0]!.id, otherAccountRepeat],
+        );
+        expect(states.rows).toEqual([
+          { candidate_id: first, duplicate_state: 'none' },
+          {
+            candidate_id: sameAccountRepeat.rows[0]!.id,
+            duplicate_state: 'same_account_pending',
+          },
+          { candidate_id: otherAccountRepeat, duplicate_state: 'other_account_pending' },
+        ]);
+        await client.query(
+          `insert into app.receiver_accounts (
+            provider_id,version,account_holder_name,account_reference_ciphertext,
+            account_reference_masked,account_reference_fingerprint,
+            protection_profile_version,encryption_key_version,fingerprint_key_version,
+            rotation_request_id,rotation_reason
+          ) select provider.id,1,'Synthetic CBE Receiver',$1::text,
+              '***7002',$2::text,1,1,1,$3::uuid,'initial_configuration'
+            from app.payment_providers provider where provider.code = 'cbe_birr'`,
+          [
+            `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+            hexDigest(),
+            randomUUID(),
+          ],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString(), 'cbe_birr');
+        const matches = await client.query<{ candidate_id: string }>(
+          `select matched.candidate_id from app.receiver_sms_payment_matches matched
+            join app.receiver_sms_payment_events sms on sms.id = matched.payment_event_id
+            where sms.provider_code = 'cbe_birr'
+              and sms.reference_fingerprint = $1::text`,
+          [fingerprint],
+        );
+        expect(matches.rows).toEqual([{ candidate_id: first }]);
+        await client.query('set session authorization fetanagent_player_actions_runtime');
+        const bounded = await client.query<{ duplicate_state: string }>(
+          `select app.telegram_receiver_sms_duplicate_state($1::uuid,$2::uuid)
+              as duplicate_state`,
+          [repeatInbound, sameAccountRepeat.rows[0]!.id],
+        );
+        expect(bounded.rows).toEqual([{ duplicate_state: 'same_account_pending' }]);
+        await client.query('savepoint wrong_origin');
+        await expect(
+          client.query(`select app.telegram_receiver_sms_duplicate_state($1::uuid,$2::uuid)`, [
+            randomUUID(),
+            sameAccountRepeat.rows[0]!.id,
+          ]),
+        ).rejects.toThrow(/submission result is unavailable/u);
+        await client.query('rollback to savepoint wrong_origin');
+        await client.query('reset session authorization');
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const pending = await client.query<{ candidate_id: string; player_id: string }>(
+          `select candidate_id,player_id
+            from app.list_owner_submitted_payments($1::uuid,'pending',25,0)
+            where candidate_id in ($2::uuid,$3::uuid,$4::uuid)`,
+          [getOwner(), first, sameAccountRepeat.rows[0]!.id, otherAccountRepeat],
+        );
+        expect(pending.rows).toHaveLength(1);
+        expect(pending.rows[0]!.candidate_id).toBe(first);
+        expect(pending.rows[0]!.player_id).not.toBe(secondPlayerId);
+        const rejected = await client.query<{
+          candidate_id: string;
+          payment_status: string;
+          can_approve: boolean;
+          can_reject: boolean;
+        }>(
+          `select candidate_id,payment_status,can_approve,can_reject
+            from app.list_owner_submitted_payments($1::uuid,'rejected',25,0)
+            where candidate_id in ($2::uuid,$3::uuid)`,
+          [getOwner(), sameAccountRepeat.rows[0]!.id, otherAccountRepeat],
+        );
+        expect(rejected.rows).toEqual(
+          expect.arrayContaining([
+            {
+              candidate_id: sameAccountRepeat.rows[0]!.id,
+              payment_status: 'rejected',
+              can_approve: false,
+              can_reject: false,
+            },
+            {
+              candidate_id: otherAccountRepeat,
+              payment_status: 'rejected',
+              can_approve: false,
+              can_reject: false,
+            },
+          ]),
+        );
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('rejects repeat submissions for an already credited payment without Owner actions', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -2004,8 +2249,13 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
           fingerprint,
           new Date(Date.now() + 2000).toISOString(),
         );
+        const creditedState = await client.query<{ duplicate_state: string }>(
+          `select app.receiver_sms_duplicate_state($1::uuid) as duplicate_state`,
+          [repeat.rows[0]!.id],
+        );
+        expect(creditedState.rows).toEqual([{ duplicate_state: 'credited' }]);
         await client.query('set session authorization fetanagent_owner_control_runtime');
-        const approved = await client.query<{
+        const rejected = await client.query<{
           candidate_id: string;
           payment_status: string;
           status_detail: string;
@@ -2013,19 +2263,28 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
           can_reject: boolean;
         }>(
           `select candidate_id,payment_status,status_detail,can_approve,can_reject
-            from app.list_owner_submitted_payments($1::uuid,'approved',25,0)
-            where candidate_id = $2::uuid`,
-          [getOwner(), repeat.rows[0]!.id],
+            from app.list_owner_submitted_payments($1::uuid,'rejected',25,0)
+            where candidate_id in ($2::uuid,$3::uuid)`,
+          [getOwner(), repeat.rows[0]!.id, otherPlayer],
         );
-        expect(approved.rows).toEqual([
-          {
-            candidate_id: repeat.rows[0]!.id,
-            payment_status: 'approved',
-            status_detail: 'Already credited — duplicate submission',
-            can_approve: false,
-            can_reject: false,
-          },
-        ]);
+        expect(rejected.rows).toEqual(
+          expect.arrayContaining([
+            {
+              candidate_id: repeat.rows[0]!.id,
+              payment_status: 'rejected',
+              status_detail: 'Already credited — repeat rejected',
+              can_approve: false,
+              can_reject: false,
+            },
+            {
+              candidate_id: otherPlayer,
+              payment_status: 'rejected',
+              status_detail: 'Already credited — repeat rejected',
+              can_approve: false,
+              can_reject: false,
+            },
+          ]),
+        );
         const pending = await client.query<{
           candidate_id: string;
           payment_status: string;
@@ -2037,14 +2296,7 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
             where candidate_id in ($2::uuid,$3::uuid)`,
           [getOwner(), repeat.rows[0]!.id, otherPlayer],
         );
-        expect(pending.rows).toEqual([
-          {
-            candidate_id: otherPlayer,
-            payment_status: 'pending',
-            can_approve: false,
-            can_reject: false,
-          },
-        ]);
+        expect(pending.rows).toEqual([]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
         await client.query('rollback');

@@ -670,6 +670,33 @@ describe('Telegram private-action bot client', () => {
     }
   });
 
+  it('accepts the bounded SMS duplicate state and rejects private or unknown fields', async () => {
+    const result = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      matchStatus: 'already_used',
+      duplicateState: 'same_account_pending',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => result }),
+      }),
+    ).resolves.toEqual(result);
+    for (const unsafe of [
+      { ...result, duplicateState: 'credited_and_amount' },
+      { ...result, playerId: 'PLAYER-DEMO-42' },
+      { ...result, transactionReference: 'AB12CD34EF' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafe }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only the narrow same-customer completed-duplicate projection', async () => {
     const duplicateResult = {
       version: 1,

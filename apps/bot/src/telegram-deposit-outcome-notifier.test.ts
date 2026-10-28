@@ -231,7 +231,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(duplicate).toBe(
-      'This payment was submitted before. If your Player balance is missing, contact support.',
+      'This payment reference has already been used. It can’t be submitted again.',
     );
     expect(duplicate).not.toContain('30.00');
     expect(duplicate).not.toContain('fake');

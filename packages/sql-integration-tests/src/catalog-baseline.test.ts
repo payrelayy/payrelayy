@@ -58,6 +58,7 @@ import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
 import {
   fixturePaymentEvent,
+  registerOwnerDuplicateCreditStatusSqlTests,
   registerPostCutoverReceiverSmsRangeSqlTests,
   registerReceiverSmsPaymentLedgerSqlTests,
 } from './receiver-sms-payment-ledger.suite.js';
@@ -176,6 +177,7 @@ const deferOwnerSensitiveReadGrantsMigrationName =
   '20261027174232_defer_owner_sensitive_read_grants_until_owner_rollout.sql';
 const restoreOwnerDisplayGrantsMigrationName =
   '20261027175000_restore_owner_sms_display_grant_after_broker_rollout.sql';
+const ownerDuplicateCreditStatusMigrationName = '20261027235655_owner_duplicate_credit_status.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -653,7 +655,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerFullPaymentIdentifiersMigrationName &&
         name !== deferSmsDisplayGrantMigrationName &&
         name !== deferOwnerSensitiveReadGrantsMigrationName &&
-        name !== restoreOwnerDisplayGrantsMigrationName,
+        name !== restoreOwnerDisplayGrantsMigrationName &&
+        name !== ownerDuplicateCreditStatusMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10307,6 +10310,16 @@ describe('100 ETB production deposit policy cutover', () => {
       [restoreOwnerDisplayGrantsMigrationName],
     );
     await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerDuplicateCreditStatusMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerDuplicateCreditStatusMigrationName],
+    );
+    await postCutoverClient.query(
       `insert into app.receiver_accounts (
         provider_id,version,account_holder_name,account_reference_ciphertext,
         account_reference_masked,account_reference_fingerprint,
@@ -10519,6 +10532,10 @@ describe('100 ETB production deposit policy cutover', () => {
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
+  registerOwnerDuplicateCreditStatusSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
   );

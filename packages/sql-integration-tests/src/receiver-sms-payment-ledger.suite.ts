@@ -1654,3 +1654,208 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
     );
   });
 }
+
+export function registerOwnerDuplicateCreditStatusSqlTests(
+  getClient: () => Client,
+  getOwner: () => string,
+): void {
+  describe('Owner duplicate credit status', () => {
+    it('shows a repeat for the credited Player as already credited while holding another Player', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const creditedCandidate = await fixtureCandidate(
+          client,
+          fingerprint,
+          new Date().toISOString(),
+        );
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [creditedCandidate],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString(), 'telebirr', 10100);
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'queued' }]);
+        const settled = await client.query<{ deposit_intent_id: string }>(
+          `select deposit_intent_id from app.finalize_receiver_sms_match($1::uuid)`,
+          [creditedCandidate],
+        );
+        expect(settled.rows).toHaveLength(1);
+
+        const ready = await client.query<{
+          job_status: string;
+          intent_status: string;
+          amount_minor: string;
+          due: boolean;
+        }>(
+          `select job.status::text as job_status,intent.status::text as intent_status,
+              intent.expected_amount_minor::text as amount_minor,
+              job.run_after <= clock_timestamp() as due
+            from app.receiver_sms_settlement_lineages lineage
+            join app.deposit_jobs job on job.id = lineage.execution_job_id
+            join app.deposit_intents intent on intent.id = lineage.deposit_intent_id
+            where lineage.candidate_id = $1::uuid`,
+          [creditedCandidate],
+        );
+        expect(ready.rows).toEqual([
+          {
+            job_status: 'queued',
+            intent_status: 'execution_pending',
+            amount_minor: '10100',
+            due: true,
+          },
+        ]);
+        // Historical lease is used only to create a confirmed test ledger. Production
+        // execution still requires the separate signed Companion command path.
+        await client.query(
+          `alter table app.deposit_jobs
+            disable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
+        const leased = await client.query<{
+          execution_attempt_id: string;
+          lease_token: string;
+        }>(`select * from app.lease_next_deposit_execution($1::uuid, 300)`, [randomUUID()]);
+        await client.query(
+          `alter table app.deposit_jobs
+            enable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
+        expect(leased.rows).toHaveLength(1);
+        const attemptId = leased.rows[0]!.execution_attempt_id;
+        const leaseToken = leased.rows[0]!.lease_token;
+        const fenced = await client.query<{ first_fence_acquired: boolean }>(
+          `select first_fence_acquired
+            from app.fence_deposit_execution_final_action($1::uuid,$2::uuid)`,
+          [attemptId, leaseToken],
+        );
+        expect(fenced.rows).toEqual([{ first_fence_acquired: true }]);
+        await client.query('set local role fetanagent_deposit_executor');
+        await client.query(
+          `select * from app.require_deposit_execution_reconciliation($1::uuid,$2::uuid,true)`,
+          [attemptId, leaseToken],
+        );
+        const reconciliation = await client.query<{
+          reconciliation_job_id: string;
+          lease_token: string;
+        }>(`select * from app.lease_next_deposit_execution_reconciliation($1::uuid,300)`, [
+          randomUUID(),
+        ]);
+        expect(reconciliation.rows).toHaveLength(1);
+        await client.query('reset role');
+        const historyTime = await client.query<{ occurred_at: string }>(
+          `select (final_action_fenced_at +
+              (reconciliation_required_at - final_action_fenced_at) / 2)::text as occurred_at
+            from app.deposit_execution_attempts where id = $1::uuid`,
+          [attemptId],
+        );
+        await client.query('set local role fetanagent_deposit_executor');
+        const confirmed = await client.query<{ deposit_status: string }>(
+          `select deposit_status from app.record_deposit_execution_reconciliation(
+            $1::uuid,$2::uuid,'confirmed_executed',$3::text,1::smallint,
+            'deposit',$4::timestamptz,true,true,true,true)`,
+          [
+            reconciliation.rows[0]!.reconciliation_job_id,
+            reconciliation.rows[0]!.lease_token,
+            `hmac-sha256-v1:${hexDigest()}`,
+            historyTime.rows[0]!.occurred_at,
+          ],
+        );
+        expect(confirmed.rows).toEqual([{ deposit_status: 'executed' }]);
+        await client.query('reset role');
+
+        const creditedIdentity = await client.query<{ origin_identity_id: string }>(
+          `select origin_identity_id from app.receiver_sms_deposit_candidates where id = $1::uuid`,
+          [creditedCandidate],
+        );
+        const repeatInboundId = await fixtureInboundEvent(
+          client,
+          creditedIdentity.rows[0]!.origin_identity_id,
+        );
+        const repeat = await client.query<{ id: string }>(
+          `insert into app.receiver_sms_deposit_candidates (
+            origin_inbound_event_id,origin_identity_id,submitting_customer_id,
+            beneficiary_customer_id,platform_id,player_account_id,
+            player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+            reference_ciphertext,reference_fingerprint,reference_masked,
+            reference_key_version,reference_profile_version,semantic_input_hmac,submitted_at
+          ) select $2::uuid,origin_identity_id,submitting_customer_id,
+              beneficiary_customer_id,platform_id,player_account_id,
+              player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+              reference_ciphertext,reference_fingerprint,reference_masked,
+              reference_key_version,reference_profile_version,$3::text,
+              submitted_at + interval '1 second'
+            from app.receiver_sms_deposit_candidates where id = $1::uuid
+            returning id`,
+          [creditedCandidate, repeatInboundId, `hmac-sha256-v1:${hexDigest()}`],
+        );
+        const otherPlayer = await fixtureCandidate(
+          client,
+          fingerprint,
+          new Date(Date.now() + 2000).toISOString(),
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const approved = await client.query<{
+          candidate_id: string;
+          payment_status: string;
+          status_detail: string;
+          can_approve: boolean;
+          can_reject: boolean;
+        }>(
+          `select candidate_id,payment_status,status_detail,can_approve,can_reject
+            from app.list_owner_submitted_payments($1::uuid,'approved',25,0)
+            where candidate_id = $2::uuid`,
+          [getOwner(), repeat.rows[0]!.id],
+        );
+        expect(approved.rows).toEqual([
+          {
+            candidate_id: repeat.rows[0]!.id,
+            payment_status: 'approved',
+            status_detail: 'Already credited — duplicate submission',
+            can_approve: false,
+            can_reject: false,
+          },
+        ]);
+        const pending = await client.query<{
+          candidate_id: string;
+          payment_status: string;
+          can_approve: boolean;
+          can_reject: boolean;
+        }>(
+          `select candidate_id,payment_status,can_approve,can_reject
+            from app.list_owner_submitted_payments($1::uuid,'pending',25,0)
+            where candidate_id in ($2::uuid,$3::uuid)`,
+          [getOwner(), repeat.rows[0]!.id, otherPlayer],
+        );
+        expect(pending.rows).toEqual([
+          {
+            candidate_id: otherPlayer,
+            payment_status: 'pending',
+            can_approve: false,
+            can_reject: false,
+          },
+        ]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+  });
+}

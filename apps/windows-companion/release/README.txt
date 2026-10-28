@@ -80,7 +80,7 @@ matches. Repeated page events do not extend the fixed one-job pilot deadline; th
 session has an overall twelve-hour-ten-minute cap. Routine mode has no client-renewed testing
 window, but every command still requires the current server policy, certificate, account binding,
 runtime activation, one-use claim and fence. Losing any of those stops new work. In routine mode,
-the same guarded KemerBet page refreshes every eleven minutes and the bound account is verified
+the same guarded KemerBet page refreshes after seven idle minutes and the bound account is verified
 again before more Player work. The routine Chrome window does not close merely because twelve
 hours pass. If the bound account header is temporarily unavailable after a refresh, credit work
 pauses and the same guarded window retries identity verification; a different account still fails
@@ -88,6 +88,12 @@ closed. After the offline-queue migration, a missing signed worker leaves verifi
 queued; only an explicit stop or incident can turn paid TeleBirr off. If
 KemerBet itself returns to login, credit work pauses and the window waits for you to sign in
 manually; the Companion cannot override KemerBet's own server-session expiry.
+
+For a later sign-out investigation, the Companion keeps redacted session events at
+D:\FetanAgent Companion\diagnostics\kemerbet-session.jsonl when drive D exists, or under the
+current Windows user's Local AppData\FetanAgent Companion\diagnostics folder. The prior
+rotated file is kemerbet-session.jsonl.1. These files contain fixed event names and timing,
+without KemerBet credentials, account numbers, Player IDs, or payment details.
 
 The dedicated browser profile is stored at D:\FetanAgent Companion when drive D exists, otherwise
 under the current Windows user's Local AppData folder. Credentials are submitted to KemerBet, and

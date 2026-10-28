@@ -62,14 +62,47 @@ describe('passive provider session diagnostics', () => {
       status: () => 401,
       body: unreadBody,
     });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 503,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 429,
+      body: unreadBody,
+    });
     context.emit('requestfailed', { url: () => REFRESH_URL, method: () => 'POST' });
+    context.emit('response', {
+      url: () => 'https://admin-api.agt-digi.com/Account/Info?languageCode=en',
+      request: () => ({ method: () => 'GET' }),
+      status: () => 401,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => 'https://admin-api.agt-digi.com/Account/Info',
+      request: () => ({ method: () => 'GET' }),
+      status: () => 503,
+      body: unreadBody,
+    });
+    context.emit('requestfailed', {
+      url: () => 'https://admin-api.agt-digi.com/Account/Info',
+      method: () => 'GET',
+    });
     expect(events).toEqual([
       'admin_socket_browser_opened',
       'admin_socket_refresh_received',
       'admin_socket_closed',
       'refresh_http_succeeded',
+      'refresh_http_auth_rejected',
+      'refresh_http_server_error',
       'refresh_http_rejected',
       'refresh_http_network_failed',
+      'account_info_auth_rejected',
+      'account_info_server_error',
+      'account_info_network_failed',
     ]);
     expect(unreadBody).not.toHaveBeenCalled();
     expect(JSON.stringify(events)).not.toContain('do-not-log-me');

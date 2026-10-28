@@ -29,6 +29,7 @@ import {
 } from './local-kemerbet-session.js';
 import type { LocalKemerBetRoutinePreflightStage } from './local-kemerbet-deposit.js';
 import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
+import { createSessionDiagnosticJournal } from './session-diagnostic-journal.js';
 import {
   runCompanionExecutionWorker,
   type CompanionExecutionWorkerEvent,
@@ -270,6 +271,19 @@ function reportRoutineDepositBrokerDiagnostic(event: RoutineDepositHttpStoreDiag
 
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
+  const sessionJournal = createSessionDiagnosticJournal({
+    dataRoot: config.dataRoot,
+    releaseSha: config.releaseSha,
+  });
+  sessionJournal.record({ category: 'process', state: 'started' });
+  const reportSession = (event: LocalKemerBetSessionEvent): void => {
+    sessionJournal.record({ category: 'session', state: event.state, reason: event.reason });
+    report(event);
+  };
+  const reportProvider = (state: ProviderSessionDiagnosticEvent): void => {
+    sessionJournal.record({ category: 'provider', state });
+    reportProviderSessionDiagnostic(state);
+  };
   const launchProofRequest = takeCompanionLaunchProofRequest(
     process.env,
     config.executionV2Enabled || config.routineDepositsEnabled,
@@ -288,12 +302,19 @@ export async function runWindowsCompanion(): Promise<void> {
     }),
   );
   const pairingPackage = config.takePairingPackage();
-  const session = await startLocalKemerBetSession(
-    config,
-    report,
-    reportProviderSessionDiagnostic,
-    reportRoutinePreflightDiagnostic,
-  );
+  let session: Awaited<ReturnType<typeof startLocalKemerBetSession>>;
+  try {
+    session = await startLocalKemerBetSession(
+      config,
+      reportSession,
+      reportProvider,
+      reportRoutinePreflightDiagnostic,
+    );
+  } catch (error) {
+    sessionJournal.record({ category: 'process', state: 'exited' });
+    await sessionJournal.flush();
+    throw error;
+  }
   const lookupAbort = new AbortController();
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   let guardedShutdown: GuardedPrePermitShutdown | undefined;
@@ -555,6 +576,7 @@ export async function runWindowsCompanion(): Promise<void> {
   }
   const onParentDisconnect = () => {
     if (!config.routineDepositsEnabled) return;
+    sessionJournal.record({ category: 'process', state: 'parent_disconnected' });
     lookupAbort.abort();
     void session.stop();
   };
@@ -564,7 +586,8 @@ export async function runWindowsCompanion(): Promise<void> {
   const stop = () => {
     if (stopping) return;
     stopping = true;
-    report({ state: 'stopping', transferDisabled: true, detailsRedacted: true });
+    sessionJournal.record({ category: 'process', state: 'stop_requested' });
+    reportSession({ state: 'stopping', transferDisabled: true, detailsRedacted: true });
     void session.stop();
   };
   process.once('SIGINT', stop);
@@ -586,6 +609,8 @@ export async function runWindowsCompanion(): Promise<void> {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     process.off('disconnect', onParentDisconnect);
+    sessionJournal.record({ category: 'process', state: 'exited' });
+    await sessionJournal.flush();
   }
 }
 

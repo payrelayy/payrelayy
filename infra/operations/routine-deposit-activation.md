@@ -231,14 +231,19 @@ verified queued payment. A paused or changed Owner policy may require operator
 resolution instead of silently crediting an old queue item.
 
 Review any unfinished attempt before restarting the automatic-deposit Companion.
-The signed routine browser refreshes the same guarded KemerBet page every eleven
-minutes and re-verifies the bound account before new credit work. It stays open
+The signed routine browser refreshes the same guarded KemerBet page after seven
+idle minutes and re-verifies the bound account before new credit work. It stays open
 beyond 24 hours while signed in; the separate non-routine enrollment/execution
 windows retain their twelve-hour cap. If KemerBet itself returns to login, the
 routine window stays open for manual sign-in but stops claiming credit work. The
 signed worker lease then goes stale, while paid verification and already verified
 jobs remain available/queued. No token is exported from Chrome or used to
 reauthenticate silently. Recheck any unfinished attempt before credit work resumes.
+For a sign-out investigation, inspect the local `diagnostics/kemerbet-session.jsonl`
+and `.jsonl.1` files under the Companion data root. Correlate `login_required` with
+the preceding fixed event names: provider `Logout`, refresh rejection/network failure,
+Account/Info authentication failure, guarded reload, or local process stop. No provider
+payloads or payment identifiers are written to these files.
 
 The existing no-money reference is not a paid activation check. Observe the
 first naturally occurring eligible live deposit through the Owner and protected

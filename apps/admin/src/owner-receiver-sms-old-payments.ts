@@ -16,6 +16,7 @@ export interface OwnerReceiverSmsOldPayment {
   readonly reasonCode:
     | 'old_payment'
     | 'no_receiver_sms_after_5m'
+    | 'no_receiver_sms_after_60m'
     | 'settlement_preflight_failed'
     | 'sms_match_uncertain';
 }
@@ -76,6 +77,7 @@ export class PostgresOwnerReceiverSmsOldPayments {
           ![
             'old_payment',
             'no_receiver_sms_after_5m',
+            'no_receiver_sms_after_60m',
             'settlement_preflight_failed',
             'sms_match_uncertain',
           ].includes(String(row.reason_code)) ||

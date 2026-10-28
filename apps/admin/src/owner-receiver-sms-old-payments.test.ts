@@ -65,4 +65,27 @@ describe('Owner older receiver SMS payments', () => {
     await expect(malformed.list(owner)).rejects.toBeInstanceOf(OwnerOldPaymentUnavailableError);
     await expect(malformed.list('bad')).rejects.toBeInstanceOf(OwnerOldPaymentRejectedError);
   });
+
+  it('recognizes the new 60-minute review reason and historical 5-minute holds', async () => {
+    for (const reasonCode of ['no_receiver_sms_after_60m', 'no_receiver_sms_after_5m']) {
+      const adapter = new PostgresOwnerReceiverSmsOldPayments({
+        query: async () => ({
+          rows: [
+            {
+              candidate_id: candidate,
+              provider_code: 'telebirr',
+              submitted_at: new Date('2026-10-28T00:00:00Z'),
+              payment_at: null,
+              amount_minor: null,
+              reference_masked: '***AB12',
+              player_masked: '***5678',
+              review_kind: 'held_review',
+              reason_code: reasonCode,
+            },
+          ],
+        }),
+      });
+      expect(await adapter.list(owner)).toMatchObject([{ reasonCode }]);
+    }
+  });
 });

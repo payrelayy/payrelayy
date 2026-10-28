@@ -77,6 +77,7 @@ export async function fixturePaymentEvent(
   occurredAt: string,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
   amountMinor = 12500,
+  receivedAt = occurredAt,
 ): Promise<string> {
   const receiver = await client.query<{ id: string; version: number; provider_id: string }>(
     `select receiver.id, receiver.version, receiver.provider_id
@@ -118,7 +119,7 @@ export async function fixturePaymentEvent(
       source_subscription_id,device_enrollment_id,device_id,device_key_id,
       device_public_key_spki_sha256
     ) values ($13::text,$1::uuid,$2::uuid,$3::integer,$4::text,$5::text,
-      $14::bigint,$6::timestamptz,$6::timestamptz,$6::timestamptz,$7::text,
+      $14::bigint,$6::timestamptz,$15::timestamptz,$15::timestamptz,$7::text,
       $8::text,1,$9::uuid,$10::text,$11::text,$12::text) returning id`,
     [
       receiver.rows[0]!.provider_id,
@@ -135,6 +136,7 @@ export async function fixturePaymentEvent(
       keyDigest,
       providerCode,
       amountMinor,
+      receivedAt,
     ],
   );
   return event.rows[0]!.id;
@@ -1528,6 +1530,197 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
   getOwner: () => string,
 ): void {
   describe('100–25,000 ETB receiver SMS cutover', () => {
+    it('holds an unmatched submission only after 60 minutes', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const candidate = await fixtureCandidate(
+          client,
+          hexDigest(),
+          new Date(Date.now() - 61 * 60_000).toISOString(),
+        );
+        const held = await client.query<{ outcome: string }>(
+          `select app.settle_next_receiver_sms_match() as outcome`,
+        );
+        expect(held.rows).toEqual([{ outcome: 'held_review' }]);
+        const reason = await client.query<{ reason_code: string }>(
+          `select reason_code from app.receiver_sms_settlement_holds
+            where candidate_id = $1::uuid`,
+          [candidate],
+        );
+        expect(reason.rows).toEqual([{ reason_code: 'no_receiver_sms_after_60m' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('preserves an earlier five-minute review hold without queuing a credit', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(
+          client,
+          fingerprint,
+          new Date(Date.now() - 30 * 60_000).toISOString(),
+        );
+        await client.query(
+          `insert into app.receiver_sms_settlement_holds (candidate_id,reason_code)
+            values ($1::uuid,'no_receiver_sms_after_5m')`,
+          [candidate],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const outcome = await client.query<{ result: string }>(
+          `select app.settle_next_receiver_sms_match() as result`,
+        );
+        expect(outcome.rows).toEqual([{ result: 'empty' }]);
+        const jobs = await client.query<{ count: string }>(
+          `select count(*)::text as count from app.receiver_sms_settlement_lineages
+            where candidate_id = $1::uuid`,
+          [candidate],
+        );
+        expect(jobs.rows).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it.each(['telebirr', 'cbe_birr'] as const)(
+      'queues a %s payment when its signed SMS arrives 30 minutes after submission',
+      async (providerCode) => {
+        const client = getClient();
+        await client.query('begin');
+        try {
+          const submittedAt = new Date(Date.now() - 30 * 60_000).toISOString();
+          await persistentPolicyFixture(
+            client,
+            getOwner(),
+            new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+          );
+          await client.query(
+            `update app.feature_switches set mode = 'live'
+              where feature_key in ('payment_verification','deposit_execution',
+                'cbe_birr_authoritative_verification')`,
+          );
+          await client.query(
+            `update app.receiver_sms_route_control set enabled = true,
+              cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+              where singleton`,
+          );
+          if (providerCode === 'cbe_birr') {
+            await client.query(
+              `insert into app.receiver_accounts (
+                provider_id, version, account_holder_name,
+                account_reference_ciphertext, account_reference_masked,
+                account_reference_fingerprint, protection_profile_version,
+                encryption_key_version, fingerprint_key_version,
+                rotation_request_id, rotation_reason
+              ) select provider.id,
+                  coalesce((select max(receiver.version) + 1
+                    from app.receiver_accounts receiver
+                    where receiver.provider_id = provider.id), 1),
+                  'Synthetic CBE Receiver', $1::text, '***7002', $2::text,
+                  1, 1, 1, $3::uuid, 'initial_configuration'
+                from app.payment_providers provider
+                where provider.code = 'cbe_birr'
+                  and not exists (select 1 from app.receiver_accounts receiver
+                    where receiver.provider_id = provider.id
+                      and receiver.status = 'active' and receiver.retired_at is null)`,
+              [
+                `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+                hexDigest(),
+                randomUUID(),
+              ],
+            );
+          }
+          // The disposable receiver fixture must predate this simulated transfer.
+          await client.query(
+            `alter table app.receiver_accounts disable trigger receiver_accounts_immutable_revision`,
+          );
+          await client.query(
+            `update app.receiver_accounts receiver
+              set active_from = pg_catalog.clock_timestamp() - interval '1 day'
+              from app.payment_providers provider
+              where provider.id = receiver.provider_id
+                and provider.code = $1::text
+                and receiver.status = 'active' and receiver.retired_at is null`,
+            [providerCode],
+          );
+          await client.query(
+            `alter table app.receiver_accounts enable trigger receiver_accounts_immutable_revision`,
+          );
+          const fingerprint = hexDigest();
+          const candidate = await fixtureCandidate(client, fingerprint, submittedAt, providerCode);
+          await client.query(
+            `update app.inbound_events inbound set processed_at = candidate.submitted_at
+              from app.receiver_sms_deposit_candidates candidate
+              where inbound.id = candidate.origin_inbound_event_id
+                and candidate.id = $1::uuid`,
+            [candidate],
+          );
+          expect(
+            (
+              await client.query<{ outcome: string }>(
+                `select app.settle_next_receiver_sms_match() as outcome`,
+              )
+            ).rows,
+          ).toEqual([{ outcome: 'empty' }]);
+          await fixturePaymentEvent(
+            client,
+            fingerprint,
+            submittedAt,
+            providerCode,
+            12500,
+            new Date().toISOString(),
+          );
+          const match = await client.query<{ disposition: string }>(
+            `select disposition from app.receiver_sms_payment_matches
+              where candidate_id = $1::uuid`,
+            [candidate],
+          );
+          expect(match.rows).toEqual([{ disposition: 'ready' }]);
+          const queued = await client.query<{ outcome: string }>(
+            `select app.settle_next_receiver_sms_match() as outcome`,
+          );
+          expect(queued.rows).toEqual([{ outcome: 'queued' }]);
+          const outcome = await client.query<{
+            holds: string;
+            owner_decisions: string;
+            jobs: string;
+            admissible: string;
+          }>(
+            `select
+              (select count(*)::text from app.receiver_sms_settlement_holds
+                where candidate_id = $1::uuid) as holds,
+              (select count(*)::text from app.receiver_sms_owner_decisions
+                where candidate_id = $1::uuid) as owner_decisions,
+              (select count(*)::text from app.receiver_sms_settlement_lineages
+                where candidate_id = $1::uuid) as jobs,
+              (select count(*)::text from app.assess_routine_telebirr_execution_job(
+                lineage.execution_job_id)) as admissible
+              from app.receiver_sms_settlement_lineages lineage
+              where lineage.candidate_id = $1::uuid`,
+            [candidate],
+          );
+          expect(outcome.rows).toEqual([
+            { holds: '0', owner_decisions: '0', jobs: '1', admissible: '1' },
+          ]);
+        } finally {
+          await client.query('rollback');
+        }
+      },
+    );
+
     it.each([10000, 2500000])(
       'queues an exact %i minor signed payment once',
       async (amountMinor) => {

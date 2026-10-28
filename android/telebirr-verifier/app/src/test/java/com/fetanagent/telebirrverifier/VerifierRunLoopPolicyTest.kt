@@ -37,6 +37,16 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `queued receiver SMS retries remain prompt during a network outage`() {
+    val status = status(LivePilotRuntimeState.ATTENTION, "sms_upload_retry")
+    val fastest = VerifierRunLoopPolicy { 0.0 }
+    val slowest = VerifierRunLoopPolicy { 1.0 }
+    assertEquals(listOf(10_000L, 10_000L, 10_000L, 10_000L, 10_000L),
+      (0..4).map { fastest.decide(status, it.toLong()).delayMillis })
+    assertEquals(12_000L, slowest.decide(status, 5L).delayMillis)
+  }
+
+  @Test
   fun `paid idle poll remains responsive without changing no-money backoff`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
     val status = status(LivePilotRuntimeState.READY, "no_paid_assignment")

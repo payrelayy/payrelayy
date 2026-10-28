@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '08248f9865af52a4887d61e24b4540987b246f4e'/gu)].length,
+  [...workflow.matchAll(/status 'b8eb1d2280613a355bb81dc71579c3b236b61d85'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='08248f9865af52a4887d61e24b4540987b246f4e'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='b8eb1d2280613a355bb81dc71579c3b236b61d85'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1848,7 +1848,7 @@ const receiverSmsWindowReleaseRunbook = await read(
 for (const value of [
   "readonly EXPECTED_CURRENT_SHA='08248f9865af52a4887d61e24b4540987b246f4e'",
   "readonly PREDECESSOR_SHA256='4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45'",
   "readonly SOURCE_REVIEW='receiver-sms-window-guard-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1858,6 +1858,44 @@ for (const value of [
   assert.ok(receiverSmsWindowHelperRotation.includes(value));
 }
 assert.doesNotMatch(receiverSmsWindowHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+const companionSessionDiagnosticsHelperRotation = await read(
+  'infra/operations/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1.sh',
+);
+const companionSessionDiagnosticsReleaseRunbook = await read(
+  'infra/operations/production-companion-session-diagnostics-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_CURRENT_SHA='b8eb1d2280613a355bb81dc71579c3b236b61d85'",
+  "readonly PREDECESSOR_SHA256='b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='companion-session-diagnostics-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 COMPANION SESSION DIAGNOSTICS HELPER V1',
+]) {
+  assert.ok(companionSessionDiagnosticsHelperRotation.includes(value));
+}
+assert.doesNotMatch(
+  companionSessionDiagnosticsHelperRotation,
+  /\b(?:docker|psql|rm|sed|chmod|chown)\s/u,
+);
+for (const value of [
+  'b8eb1d2280613a355bb81dc71579c3b236b61d85',
+  'b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 COMPANION SESSION DIAGNOSTICS HELPER V1',
+]) {
+  assert.ok(companionSessionDiagnosticsReleaseRunbook.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,
+);
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-window-helper-rotation-v1\.sh/u,
@@ -1869,7 +1907,7 @@ assert.match(
 for (const value of [
   '08248f9865af52a4887d61e24b4540987b246f4e',
   '4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888',
-  helperDigest,
+  'b2ca13921de2e66d079bb97439397127068782018fabf89fceb4aad9d7831a45',
   'ROTATE EXACT PRODUCTION V2 RECEIVER SMS WINDOW GUARD HELPER V1',
 ]) {
   assert.ok(receiverSmsWindowReleaseRunbook.includes(value));

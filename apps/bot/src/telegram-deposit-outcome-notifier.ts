@@ -43,9 +43,12 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     return '⏳ Still checking your payment. We’ll update you here.';
   }
   if (delivery.outcomeCode === 'verified_waiting') {
-    return '✅ Payment confirmed. Finishing your deposit.';
+    return '⏳ Payment verified. Crediting your Player account.';
   }
-  if (delivery.outcomeCode === 'credited' && delivery.amountMinor !== null) {
+  if (delivery.outcomeCode === 'credited') {
+    if (delivery.amountMinor === null) {
+      return '⚠️ Deposit status is unavailable. Contact support.';
+    }
     return [
       '✅ Deposit complete',
       `${formatMinorEtb(delivery.amountMinor)} ETB credited to your Player account.`,
@@ -55,13 +58,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     return TELEGRAM_PAYMENT_ALREADY_USED_TEXT;
   }
   if (delivery.outcomeCode === 'wrong_receiver') {
-    return 'Deposit not credited. Payment went to a different receiver. Contact support.';
+    return '❌ Deposit not credited. Payment went to a different receiver. Contact support.';
   }
   if (delivery.outcomeCode === 'invalid_reference') {
-    return 'Deposit not credited. Check the reference or contact support.';
+    return '❌ Deposit not credited. Check the reference or contact support.';
   }
   if (delivery.outcomeCode === 'unrelated_receipt') {
-    return 'Deposit not credited. This receipt does not match. Contact support.';
+    return '❌ Deposit not credited. This receipt does not match. Contact support.';
   }
   if (delivery.outcomeCode === 'held_review') {
     return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
@@ -70,7 +73,7 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
   }
   if (delivery.outcomeCode === 'old_rejected') {
-    return 'Deposit not credited. This payment is too old. Contact support.';
+    return '❌ Deposit not credited. This payment is too old. Contact support.';
   }
   if (delivery.outcomeCode === 'manual_review') {
     return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
@@ -81,7 +84,10 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'not_credited') {
     return '⚠️ We couldn’t confirm your deposit. Contact support.';
   }
-  return '❌ Deposit not credited. Check the reference or contact support.';
+  if (delivery.outcomeCode === 'not_verified') {
+    return '❌ Deposit not credited. Check the reference or contact support.';
+  }
+  return '⚠️ Deposit status is unavailable. Contact support.';
 }
 
 function telegramErrorCode(error: unknown): number | undefined {

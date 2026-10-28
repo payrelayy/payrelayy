@@ -1,6 +1,7 @@
 import {
   formatTelegramDepositProofStatusCallback,
   formatTelegramDepositProofTrackingHandle,
+  type CustomerDepositStatusProjection,
   type TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
@@ -41,7 +42,23 @@ export interface TelegramPlayerIdFlowContext {
 }
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
-  'Deposit status is unavailable. Please try again shortly.';
+  '⚠️ Deposit status is unavailable. Please try again shortly.';
+
+function formatTelegramDepositStatus(status: CustomerDepositStatusProjection): string {
+  const icon =
+    status.tone === 'success'
+      ? '✅'
+      : status.label === 'Could not confirm' ||
+          status.label === 'Expired' ||
+          status.label === 'Cancelled'
+        ? '❌'
+        : status.tone === 'attention'
+          ? '⚠️'
+          : status.tone === 'working'
+            ? '⏳'
+            : 'ℹ️';
+  return `${icon} ${status.label}`;
+}
 
 /**
  * Maps the API's deliberately small, non-sensitive result union to English-only Telegram copy.
@@ -287,7 +304,7 @@ export function presentTelegramPlayerIdFlowResult(
         menu: {
           text: [
             '💰 Deposit',
-            `Status: ${result.depositStatus.label}`,
+            `Status: ${formatTelegramDepositStatus(result.depositStatus)}`,
             ...(result.amountMinor === null
               ? []
               : [`Amount: ${formatMinorEtb(result.amountMinor)} ETB`]),
@@ -304,7 +321,7 @@ export function presentTelegramPlayerIdFlowResult(
     case 'deposit_status':
       return {
         kind: 'message',
-        text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${result.depositStatus.label}.`,
+        text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${formatTelegramDepositStatus(result.depositStatus)}.`,
       };
     case 'deposit_input_invalid':
       return {

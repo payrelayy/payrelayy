@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WindowsCompanionConfig } from './config.js';
+import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSession,
@@ -225,6 +226,7 @@ async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
   const order: string[] = [];
   const context = new FakeContext(order);
   const events: LocalKemerBetSessionEvent[] = [];
+  const diagnostics: ProviderSessionDiagnosticEvent[] = [];
   context.page.goto.mockImplementationOnce(async () => {
     order.push('page:goto');
     context.page.navigate(landingUrl);
@@ -234,11 +236,15 @@ async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
     order.push('context:launch');
     return context;
   });
-  const session = await startLocalKemerBetSession(sessionConfig, (event) => events.push(event));
+  const session = await startLocalKemerBetSession(
+    sessionConfig,
+    (event) => events.push(event),
+    (event) => diagnostics.push(event),
+  );
   // Expected deadline failures are consumed before timers run, avoiding unhandled test promises.
   void session.done.catch(() => undefined);
   sessions.push(session);
-  return { context, events, order, page: context.page, session };
+  return { context, diagnostics, events, order, page: context.page, session };
 }
 
 async function settleIdentityVerification(): Promise<void> {
@@ -492,7 +498,7 @@ describe('local KemerBet enrollment session', () => {
   });
 
   it('pauses Player work during an early idle reload and re-verifies the bound account', async () => {
-    const { context, page, session } = await start();
+    const { context, diagnostics, page, session } = await start();
     let completeReload: (() => void) | undefined;
     page.reload.mockImplementationOnce(
       () =>
@@ -509,11 +515,13 @@ describe('local KemerBet enrollment session', () => {
     expect(session.isSignedInVerified()).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     expect(page.reload).toHaveBeenCalledWith({ waitUntil: 'commit', timeout: 45_000 });
+    expect(diagnostics).toContain('guarded_page_reload_started');
     expect(session.isSignedInVerified()).toBe(false);
     expect(completeReload).toBeDefined();
 
     completeReload!();
     await settleIdentityVerification();
+    expect(diagnostics).toContain('guarded_page_reload_committed');
     expect(session.isSignedInVerified()).toBe(true);
     expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
     expect(context.close).not.toHaveBeenCalled();
@@ -542,13 +550,14 @@ describe('local KemerBet enrollment session', () => {
   });
 
   it('fails closed if the guarded same-page reload itself fails', async () => {
-    const { events, page, session } = await start();
+    const { diagnostics, events, page, session } = await start();
     page.reload.mockRejectedValueOnce(new Error('redacted navigation failure'));
 
     await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     await expect(session.done).rejects.toThrow('failed closed');
     expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)?.reason).toBe('provider_request_failed');
+    expect(diagnostics).toContain('guarded_page_reload_failed');
     expect(JSON.stringify(events)).not.toContain('redacted navigation failure');
   });
 

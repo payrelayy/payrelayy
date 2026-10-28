@@ -6,6 +6,7 @@ import {
 } from './provider-websocket.js';
 
 const REFRESH_URL = 'https://admin-api.agt-digi.com/Account/RefreshToken';
+const ACCOUNT_INFO_ORIGIN = 'https://admin-api.agt-digi.com';
 const SIGNALR_RECORD_SEPARATOR = '\u001e';
 
 export type ProviderSessionDiagnosticEvent =
@@ -15,8 +16,25 @@ export type ProviderSessionDiagnosticEvent =
   | 'admin_socket_logout_received'
   | 'admin_socket_closed'
   | 'refresh_http_succeeded'
+  | 'refresh_http_auth_rejected'
+  | 'refresh_http_server_error'
   | 'refresh_http_rejected'
-  | 'refresh_http_network_failed';
+  | 'refresh_http_network_failed'
+  | 'account_info_auth_rejected'
+  | 'account_info_server_error'
+  | 'account_info_network_failed'
+  | 'guarded_page_reload_started'
+  | 'guarded_page_reload_committed'
+  | 'guarded_page_reload_failed';
+
+function isAccountInfoUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return url.origin === ACCOUNT_INFO_ORIGIN && url.pathname === '/Account/Info';
+  } catch {
+    return false;
+  }
+}
 
 /** Classify only a SignalR event name; never copy a provider frame or token into telemetry. */
 export function classifyProviderSessionServerFrame(
@@ -62,16 +80,30 @@ export function installProviderSessionPassiveDiagnostics(
     websocket.on('close', () => reportDiagnostic('admin_socket_closed'));
   });
   context.on('response', (response) => {
-    if (response.url() !== REFRESH_URL || response.request().method() !== 'POST') return;
-    reportDiagnostic(
-      response.status() >= 200 && response.status() < 300
-        ? 'refresh_http_succeeded'
-        : 'refresh_http_rejected',
-    );
+    if (response.url() === REFRESH_URL && response.request().method() === 'POST') {
+      const status = response.status();
+      reportDiagnostic(
+        status >= 200 && status < 300
+          ? 'refresh_http_succeeded'
+          : status === 401 || status === 403
+            ? 'refresh_http_auth_rejected'
+            : status >= 500
+              ? 'refresh_http_server_error'
+              : 'refresh_http_rejected',
+      );
+    } else if (isAccountInfoUrl(response.url()) && response.request().method() === 'GET') {
+      if (response.status() === 401 || response.status() === 403) {
+        reportDiagnostic('account_info_auth_rejected');
+      } else if (response.status() >= 500) {
+        reportDiagnostic('account_info_server_error');
+      }
+    }
   });
   context.on('requestfailed', (request) => {
     if (request.url() === REFRESH_URL && request.method() === 'POST') {
       reportDiagnostic('refresh_http_network_failed');
+    } else if (isAccountInfoUrl(request.url()) && request.method() === 'GET') {
+      reportDiagnostic('account_info_network_failed');
     }
   });
 }

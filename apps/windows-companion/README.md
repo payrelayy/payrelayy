@@ -39,11 +39,15 @@ off by default; without the exact opt-in configuration it retains the original r
   WebSocket is admitted, and all other provider WebSockets are blocked;
 - non-routine guarded sessions stop after ten minutes on the login page or twelve hours after
   detecting the exact reviewed agent page, with an overall twelve-hour-ten-minute cap;
-- the separately signed Automatic Deposits routine session refreshes that same guarded page every
-  eleven minutes, re-verifies the locally bound account before new Player work, and stays open
+- the separately signed Automatic Deposits routine session refreshes that same guarded page after
+  seven idle minutes, re-verifies the locally bound account before new Player work, and stays open
   beyond 24 hours while signed in. If KemerBet ends its own server session, new work pauses and
   the login page stays open for manual sign-in; the Companion does not save a provider token
   outside Chrome or bypass KemerBet's authentication.
+- redacted session and provider-refresh events are retained only on this Windows computer in
+  `diagnostics/kemerbet-session.jsonl` under the Companion data root. The file rotates at 8 MiB
+  to `.jsonl.1`. Records contain UTC time, a launch ID, release identity, and fixed event/reason
+  names; no provider frames, tokens, cookies, account details, Player IDs, or payment details.
 
 The exact reviewed main-frame `/agents` page first produces only `signed_in_candidate`. The
 companion then rejects visible login/CAPTCHA state, observes exactly one reviewed identity header

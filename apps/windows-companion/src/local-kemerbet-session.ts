@@ -541,10 +541,17 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+        reportDiagnostic('guarded_page_reload_started');
         void page
           .reload({ waitUntil: 'commit', timeout: 45_000 })
-          .then(() => observePage(page))
-          .catch(() => finish('failed', 'provider_request_failed'));
+          .then(() => {
+            reportDiagnostic('guarded_page_reload_committed');
+            return observePage(page);
+          })
+          .catch(() => {
+            reportDiagnostic('guarded_page_reload_failed');
+            return finish('failed', 'provider_request_failed');
+          });
       }, delayMs);
       signedInReloadTimer.unref();
     };

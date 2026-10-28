@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'bc6905f906850a61230837ef5b7ed2303fb3f001'/gu)].length,
+  [...workflow.matchAll(/status '08248f9865af52a4887d61e24b4540987b246f4e'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='bc6905f906850a61230837ef5b7ed2303fb3f001'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='08248f9865af52a4887d61e24b4540987b246f4e'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1839,6 +1839,41 @@ for (const value of [
 ]) {
   assert.ok(releaseGuardRefreshRunbook.includes(value));
 }
+const receiverSmsWindowHelperRotation = await read(
+  'infra/operations/fetanagent-production-v2-receiver-sms-window-helper-rotation-v1.sh',
+);
+const receiverSmsWindowReleaseRunbook = await read(
+  'infra/operations/production-receiver-sms-window-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_CURRENT_SHA='08248f9865af52a4887d61e24b4540987b246f4e'",
+  "readonly PREDECESSOR_SHA256='4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='receiver-sms-window-guard-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 RECEIVER SMS WINDOW GUARD HELPER V1',
+]) {
+  assert.ok(receiverSmsWindowHelperRotation.includes(value));
+}
+assert.doesNotMatch(receiverSmsWindowHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-window-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-window-helper-rotation-v1\.sh/u,
+);
+for (const value of [
+  '08248f9865af52a4887d61e24b4540987b246f4e',
+  '4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 RECEIVER SMS WINDOW GUARD HELPER V1',
+]) {
+  assert.ok(receiverSmsWindowReleaseRunbook.includes(value));
+}
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='f169bb563a4fe0a69a3fb5052a3120416ad2f8fc'",
@@ -1976,7 +2011,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='bc6905f906850a61230837ef5b7ed2303fb3f001'",
   "readonly PREDECESSOR_SHA256='6bca4a0883bfea3bf538bf1cc8b10d3daba3e38c518f1da3bc6b69a3a4a40e18'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888'",
   "readonly SOURCE_REVIEW='deposit-copy-hint-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -1989,7 +2024,7 @@ for (const value of [
   '593344964',
   'bc6905f906850a61230837ef5b7ed2303fb3f001',
   '6bca4a0883bfea3bf538bf1cc8b10d3daba3e38c518f1da3bc6b69a3a4a40e18',
-  helperDigest,
+  '4041da029ce206492d8de5da3cb08add6e1ec85683705a21f8fc8fdc464c9888',
   'ROTATE EXACT PRODUCTION V2 DEPOSIT COPY HINT HELPER V1',
 ])
   assert.ok(depositCopyHintReleaseRunbook.includes(value));

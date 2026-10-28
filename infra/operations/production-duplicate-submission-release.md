@@ -5,8 +5,9 @@ new runtime function that the older API's exact permission check does not yet
 recognize, leaving that API's readiness check unhealthy. Apply
 `20261028200342_telegram_duplicate_runtime_compatibility_revoke.sql` first;
 the old API can then become healthy. The replacement API accepts the function
-with or without its direct runtime grant. Restore that grant with a separate
-tracked migration immediately after the replacement release is healthy.
+with or without its direct runtime grant. Restore that grant with
+`20261028202030_telegram_duplicate_runtime_grant_restore.sql` immediately
+after the replacement release is healthy.
 The bot and API remain on release `20beb62d28aedc1e60873f9ad9ecec164fee9466` because the
 guarded runtime deployment requires that exact predecessor. The routine-deposit
 marker has the same SHA. The installed root deploy helper and its sudoers grant
@@ -37,9 +38,8 @@ The successor helper pins the current release and has SHA-256
    `not-applicable`, routine transport `enabled`, financial profile `cbe-live-v1`,
    and database route `pooler`. Require the workflow's exact predecessor,
    payment-switch fingerprint, activation, health, and routine-marker checks.
-5. Verify the live release SHA and bot/API health. Merge a second tracked
-   migration that restores the direct grant to
-   `fetanagent_player_actions_runtime`, apply it through the guarded SQL
+5. Verify the live release SHA and bot/API health. Merge the separate grant
+   restoration PR after activation, then apply its migration through the guarded SQL
    workflow, and verify that API readiness remains healthy. Use read-only
    production queries to check the duplicate-disposition function and existing
    row counts. Do not create a real payment to test a customer message.

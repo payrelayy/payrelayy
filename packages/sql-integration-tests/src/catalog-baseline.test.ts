@@ -184,6 +184,8 @@ const telegramDuplicateSubmissionMigrationName =
   '20261028185254_telegram_duplicate_submission_dispositions.sql';
 const telegramDuplicateRuntimeCompatibilityRevokeMigrationName =
   '20261028200342_telegram_duplicate_runtime_compatibility_revoke.sql';
+const telegramDuplicateRuntimeGrantRestoreMigrationName =
+  '20261028202030_telegram_duplicate_runtime_grant_restore.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -665,7 +667,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerDuplicateCreditStatusMigrationName &&
         name !== receiverSms60MinuteWindowMigrationName &&
         name !== telegramDuplicateSubmissionMigrationName &&
-        name !== telegramDuplicateRuntimeCompatibilityRevokeMigrationName,
+        name !== telegramDuplicateRuntimeCompatibilityRevokeMigrationName &&
+        name !== telegramDuplicateRuntimeGrantRestoreMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10361,6 +10364,30 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [telegramDuplicateRuntimeCompatibilityRevokeMigrationName],
     );
+    const stagedGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
+      `select pg_catalog.has_function_privilege(
+        'fetanagent_player_actions_runtime',
+        'app.telegram_receiver_sms_duplicate_state(uuid,uuid)', 'EXECUTE')
+        as runtime_allowed`,
+    );
+    expect(stagedGrant.rows).toEqual([{ runtime_allowed: false }]);
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, telegramDuplicateRuntimeGrantRestoreMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [telegramDuplicateRuntimeGrantRestoreMigrationName],
+    );
+    const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
+      `select pg_catalog.has_function_privilege(
+        'fetanagent_player_actions_runtime',
+        'app.telegram_receiver_sms_duplicate_state(uuid,uuid)', 'EXECUTE')
+        as runtime_allowed`,
+    );
+    expect(restoredGrant.rows).toEqual([{ runtime_allowed: true }]);
     await postCutoverClient.query(
       `insert into app.receiver_accounts (
         provider_id,version,account_holder_name,account_reference_ciphertext,

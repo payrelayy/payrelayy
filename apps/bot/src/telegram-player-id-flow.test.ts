@@ -393,6 +393,40 @@ describe('Telegram Player-ID flow presentation', () => {
     });
   });
 
+  it.each(['telebirr', 'cbe_birr'] as const)(
+    'gives %s immediate, distinct replies for credited, same-account, and other-account repeats',
+    (providerCode) => {
+      const providerName = providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr';
+      for (const [duplicateState, text] of [
+        ['credited', '✅ This payment was already credited. It can’t be credited again.'],
+        [
+          'same_account_pending',
+          '⏳ This payment is already submitted. Please wait for an update here.',
+        ],
+        [
+          'other_account_pending',
+          '❌ This payment was already submitted. It can’t be submitted again.',
+        ],
+        ['closed', '❌ This payment was already closed. Contact support if you need help.'],
+        [
+          'recorded_elsewhere',
+          '❌ This payment is already being handled. It can’t be submitted again.',
+        ],
+      ] as const) {
+        expect(
+          presentTelegramPlayerIdFlowResult({
+            version: 1,
+            outcome: 'receiver_sms_candidate_received',
+            providerCode,
+            providerName,
+            matchStatus: 'already_used',
+            duplicateState,
+          }),
+        ).toEqual({ kind: 'message', text });
+      }
+    },
+  );
+
   it('does not imply a prior CBE submission was credited when its reference is submitted again', () => {
     expect(
       presentTelegramPlayerIdFlowResult({
@@ -404,7 +438,7 @@ describe('Telegram Player-ID flow presentation', () => {
       }),
     ).toEqual({
       kind: 'message',
-      text: 'This payment was submitted before. If your Player balance is missing, contact support.',
+      text: 'This payment reference has already been used. It can’t be submitted again.',
     });
   });
 
@@ -420,7 +454,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'menu',
       menu: {
-        text: 'This payment was submitted before. If your Player balance is missing, contact support.',
+        text: 'This payment reference has already been used. It can’t be submitted again.',
         buttons: [{ text: '💰 Deposit', callbackData: 'gd1.deposit' }],
       },
     });

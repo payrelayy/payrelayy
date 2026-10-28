@@ -7,6 +7,11 @@ import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import {
   TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_CREDITED_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_SUBMITTED_OTHER_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_SUBMITTED_WAIT_TEXT,
   TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
   TELEGRAM_PAYMENT_RECEIVED_TEXT,
 } from './telegram-customer-copy.js';
@@ -221,6 +226,21 @@ export function presentTelegramPlayerIdFlowResult(
       // if the phone/provider remains unavailable.
       return { kind: 'deferred' };
     case 'receiver_sms_candidate_received':
+      if (result.duplicateState === 'credited') {
+        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_CREDITED_TEXT };
+      }
+      if (result.duplicateState === 'same_account_pending') {
+        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_SUBMITTED_WAIT_TEXT };
+      }
+      if (result.duplicateState === 'other_account_pending') {
+        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_SUBMITTED_OTHER_TEXT };
+      }
+      if (result.duplicateState === 'closed') {
+        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT };
+      }
+      if (result.duplicateState === 'recorded_elsewhere') {
+        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT };
+      }
       if (result.matchStatus === 'already_used') {
         return {
           kind: 'message',

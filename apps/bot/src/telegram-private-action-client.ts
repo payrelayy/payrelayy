@@ -388,12 +388,21 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   }
   if (
     value.outcome === 'receiver_sms_candidate_received' &&
-    keys.length === 5 &&
+    (keys.length === 5 || keys.length === 6) &&
     ((value.providerCode === 'cbe_birr' && value.providerName === 'CBE Birr') ||
       (value.providerCode === 'telebirr' && value.providerName === 'TeleBirr')) &&
     ['pending_sms', 'ready', 'older_review', 'held_review', 'already_used'].includes(
       value.matchStatus as string,
-    )
+    ) &&
+    (keys.length === 5 ||
+      [
+        'none',
+        'credited',
+        'same_account_pending',
+        'other_account_pending',
+        'closed',
+        'recorded_elsewhere',
+      ].includes(value.duplicateState as string))
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }

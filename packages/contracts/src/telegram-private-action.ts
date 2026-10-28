@@ -490,6 +490,14 @@ export type TelegramPrivateActionResult =
       readonly providerName: 'CBE Birr' | 'TeleBirr';
       readonly matchStatus:
         'pending_sms' | 'ready' | 'older_review' | 'held_review' | 'already_used';
+      /** Present on the current API; absent during a rolling server upgrade. */
+      readonly duplicateState?:
+        | 'none'
+        | 'credited'
+        | 'same_account_pending'
+        | 'other_account_pending'
+        | 'closed'
+        | 'recorded_elsewhere';
     }
   | {
       readonly version: 1;

@@ -2,7 +2,22 @@
 export const TELEGRAM_PAYMENT_RECEIVED_TEXT = '⏳ Payment details received. We’ll update you here.';
 
 export const TELEGRAM_PAYMENT_ALREADY_USED_TEXT =
-  'This payment was submitted before. If your Player balance is missing, contact support.';
+  'This payment reference has already been used. It can’t be submitted again.';
+
+export const TELEGRAM_PAYMENT_ALREADY_CREDITED_TEXT =
+  '✅ This payment was already credited. It can’t be credited again.';
+
+export const TELEGRAM_PAYMENT_ALREADY_SUBMITTED_WAIT_TEXT =
+  '⏳ This payment is already submitted. Please wait for an update here.';
+
+export const TELEGRAM_PAYMENT_ALREADY_SUBMITTED_OTHER_TEXT =
+  '❌ This payment was already submitted. It can’t be submitted again.';
+
+export const TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT =
+  '❌ This payment was already closed. Contact support if you need help.';
+
+export const TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT =
+  '❌ This payment is already being handled. It can’t be submitted again.';
 
 export const TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT =
   '⚠️ Your deposit needs review. We’ll update you here.';

@@ -180,6 +180,8 @@ const restoreOwnerDisplayGrantsMigrationName =
 const ownerDuplicateCreditStatusMigrationName = '20261027235655_owner_duplicate_credit_status.sql';
 const receiverSms60MinuteWindowMigrationName =
   '20261028002131_receiver_sms_60_minute_submission_window.sql';
+const telegramDuplicateSubmissionMigrationName =
+  '20261028185254_telegram_duplicate_submission_dispositions.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -659,7 +661,8 @@ describe('disposable SQL migration baseline', () => {
         name !== deferOwnerSensitiveReadGrantsMigrationName &&
         name !== restoreOwnerDisplayGrantsMigrationName &&
         name !== ownerDuplicateCreditStatusMigrationName &&
-        name !== receiverSms60MinuteWindowMigrationName,
+        name !== receiverSms60MinuteWindowMigrationName &&
+        name !== telegramDuplicateSubmissionMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10331,6 +10334,16 @@ describe('100 ETB production deposit policy cutover', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [receiverSms60MinuteWindowMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, telegramDuplicateSubmissionMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [telegramDuplicateSubmissionMigrationName],
     );
     await postCutoverClient.query(
       `insert into app.receiver_accounts (

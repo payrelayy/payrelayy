@@ -36,6 +36,7 @@ describe('Telegram receiver SMS candidate intake', () => {
                 proof_status: 'ready',
                 submitted_at: new Date(),
                 request_replayed: false,
+                duplicate_state: 'none',
               },
             ],
           };
@@ -105,5 +106,53 @@ describe('Telegram receiver SMS candidate intake', () => {
       ),
     ).rejects.toThrow(/unavailable/u);
     expect(called).toBe(false);
+  });
+
+  it('accepts only a bounded duplicate classification from the same candidate query', async () => {
+    const action = {
+      version: 1,
+      kind: 'deposit_proof_command',
+      updateId: '100',
+      telegramUserId: '200',
+      privateChatId: '200',
+      preferredLocale: 'en',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'SYNTHSMS1234',
+    } as const;
+    const response = (duplicateState: string) => ({
+      rows: [
+        {
+          candidate_id: candidateId,
+          proof_status: 'already_used',
+          submitted_at: new Date(),
+          request_replayed: false,
+          duplicate_state: duplicateState,
+        },
+      ],
+    });
+    const accepted = await captureTelegramReceiverSmsCandidate(
+      {
+        async query() {
+          return response('credited');
+        },
+      },
+      inboundId,
+      action,
+      config,
+    );
+    expect(accepted).toMatchObject({ duplicateState: 'credited' });
+    await expect(
+      captureTelegramReceiverSmsCandidate(
+        {
+          async query() {
+            return response('credited_with_amount');
+          },
+        },
+        inboundId,
+        action,
+        config,
+      ),
+    ).rejects.toThrow(/unavailable/u);
   });
 });

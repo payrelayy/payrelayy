@@ -1,14 +1,22 @@
 # Production duplicate-submission release
 
-The duplicate-submission database migration is already applied. The bot and API
-remain on release `20beb62d28aedc1e60873f9ad9ecec164fee9466` because the
+The duplicate-submission database migration is already applied. It granted a
+new runtime function that the older API's exact permission check does not yet
+recognize, leaving that API's readiness check unhealthy. Apply
+`20261028200342_telegram_duplicate_runtime_compatibility_revoke.sql` first;
+the old API can then become healthy. The replacement API accepts the function
+with or without its direct runtime grant. Restore that grant with a separate
+tracked migration immediately after the replacement release is healthy.
+The bot and API remain on release `20beb62d28aedc1e60873f9ad9ecec164fee9466` because the
 guarded runtime deployment requires that exact predecessor. The routine-deposit
 marker has the same SHA. The installed root deploy helper and its sudoers grant
 have SHA-256 `843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06`.
 The successor helper pins the current release and has SHA-256
 `2683e4c0a0f9c47ff6e3f4ae8dedcf439e6ac3d976baa523651f32621922477e`.
 
-1. Require passing PR and exact-main CI. Confirm Droplet `593344964`, current
+1. Require passing PR and exact-main CI. Apply the compatibility-revoke
+   migration through the guarded production SQL workflow. Confirm the old API
+   becomes healthy before continuing. Confirm Droplet `593344964`, current
    release, routine marker, release mode, absent execution-v2 marker, installed
    helper digest, sudoers pin, and helper `status`. Confirm payment switches
    still match the `cbe-live-v1` profile and inspect active or unresolved credit
@@ -29,9 +37,12 @@ The successor helper pins the current release and has SHA-256
    `not-applicable`, routine transport `enabled`, financial profile `cbe-live-v1`,
    and database route `pooler`. Require the workflow's exact predecessor,
    payment-switch fingerprint, activation, health, and routine-marker checks.
-5. Verify the live release SHA and bot/API health. Use read-only production
-   queries to check the duplicate-disposition function and existing row counts.
-   Do not create a real payment to test a customer message.
+5. Verify the live release SHA and bot/API health. Merge a second tracked
+   migration that restores the direct grant to
+   `fetanagent_player_actions_runtime`, apply it through the guarded SQL
+   workflow, and verify that API readiness remains healthy. Use read-only
+   production queries to check the duplicate-disposition function and existing
+   row counts. Do not create a real payment to test a customer message.
 
 Stop on a failed guard and inspect the reason. Do not change payment switches
 to force a deployment.

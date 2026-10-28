@@ -1907,10 +1907,7 @@ for (const value of [
 ]) {
   assert.ok(duplicateSubmissionHelperRotation.includes(value));
 }
-assert.doesNotMatch(
-  duplicateSubmissionHelperRotation,
-  /\b(?:docker|psql|rm|sed|chmod|chown)\s/u,
-);
+assert.doesNotMatch(duplicateSubmissionHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 for (const value of [
   '20beb62d28aedc1e60873f9ad9ecec164fee9466',
   '843230c82f4a7fb1401e0a7e6277b041935b8ec3601867b2f083604845271d06',

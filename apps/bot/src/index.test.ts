@@ -263,6 +263,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
         kind: 'set',
         commands: [
           { command: 'start', description: 'Home' },
+          { command: 'deposit', description: 'Deposit' },
+          { command: 'support', description: 'Support' },
           { command: 'help', description: 'Help' },
         ],
         scope: { type: 'all_private_chats' },
@@ -642,7 +644,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
         kind: 'set',
         commands: [
           { command: 'start', description: 'Home' },
+          { command: 'deposit', description: 'Deposit' },
           { command: 'change_player_id', description: 'Change Player ID' },
+          { command: 'support', description: 'Support' },
           { command: 'help', description: 'Help' },
         ],
         scope: { type: 'chat', chat_id: 123456789 },

@@ -186,8 +186,8 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'verified_waiting',
       amountMinor: null,
     });
-    expect(waiting).toContain('Payment confirmed');
-    expect(waiting).toContain('Finishing your deposit');
+    expect(waiting).toBe('⏳ Payment verified. Crediting your Player account.');
+    expect(waiting).not.toContain('✅');
     expect(waiting).not.toContain('1A2B');
     expect(waiting).not.toContain('30.00');
     expect(waiting).not.toContain('Deposit complete');
@@ -231,7 +231,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(duplicate).toBe(
-      'This payment reference has already been used. It can’t be submitted again.',
+      '❌ This payment reference has already been used. It can’t be submitted again.',
     );
     expect(duplicate).not.toContain('30.00');
     expect(duplicate).not.toContain('fake');
@@ -244,7 +244,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(wrongReceiver).toBe(
-      'Deposit not credited. Payment went to a different receiver. Contact support.',
+      '❌ Deposit not credited. Payment went to a different receiver. Contact support.',
     );
     expect(wrongReceiver).not.toContain('30.00');
   });
@@ -255,7 +255,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'invalid_reference',
       amountMinor: null,
     });
-    expect(invalid).toBe('Deposit not credited. Check the reference or contact support.');
+    expect(invalid).toBe('❌ Deposit not credited. Check the reference or contact support.');
     expect(invalid).not.toContain('30.00');
     expect(invalid).not.toContain('fake');
   });
@@ -266,7 +266,9 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'unrelated_receipt',
       amountMinor: null,
     });
-    expect(unrelated).toBe('Deposit not credited. This receipt does not match. Contact support.');
+    expect(unrelated).toBe(
+      '❌ Deposit not credited. This receipt does not match. Contact support.',
+    );
     expect(unrelated).not.toContain('1A2B');
   });
 
@@ -295,7 +297,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'old_rejected',
       amountMinor: null,
     });
-    expect(rejected).toBe('Deposit not credited. This payment is too old. Contact support.');
+    expect(rejected).toBe('❌ Deposit not credited. This payment is too old. Contact support.');
   });
 
   it('holds a rotated-instruction submission for review without implying rejection', () => {
@@ -331,6 +333,32 @@ describe('Telegram deposit outcome notifier', () => {
       expect(text).not.toContain('refunded');
       expect(text).not.toContain('fake');
     }
+  });
+
+  it.each([
+    ['checking', '⏳'],
+    ['verified_waiting', '⏳'],
+    ['credited', '✅'],
+    ['rejected', '❌'],
+    ['wrong_receiver', '❌'],
+    ['invalid_reference', '❌'],
+    ['unrelated_receipt', '❌'],
+    ['held_review', '⚠️'],
+    ['older_pending', '⚠️'],
+    ['old_rejected', '❌'],
+    ['manual_review', '⚠️'],
+    ['not_credited', '⚠️'],
+    ['not_verified', '❌'],
+    ['already_used', '❌'],
+  ] as const)('uses %s status copy with a %s icon', (outcomeCode, icon) => {
+    const text = presentTelegramDepositOutcome({ ...delivery, outcomeCode });
+    expect(text.startsWith(icon)).toBe(true);
+    if (icon !== '✅') expect(text).not.toContain('✅');
+  });
+
+  it('never calls a credited result with a missing amount rejected', () => {
+    const text = presentTelegramDepositOutcome({ ...delivery, amountMinor: null });
+    expect(text).toBe('⚠️ Deposit status is unavailable. Contact support.');
   });
 
   it.each([

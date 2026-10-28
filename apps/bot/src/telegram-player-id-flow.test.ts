@@ -172,7 +172,31 @@ describe('Telegram Player-ID flow presentation', () => {
         currencyCode: 'ETB',
         depositStatus: { label: 'Preparing deposit', tone: 'working' },
       }),
-    ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — Preparing deposit.' });
+    ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — ⏳ Preparing deposit.' });
+  });
+
+  it.each([
+    ['Ready to start', 'neutral', 'ℹ️'],
+    ['Checking payment', 'working', '⏳'],
+    ['Being checked', 'working', '⏳'],
+    ['Preparing deposit', 'working', '⏳'],
+    ['Completed', 'success', '✅'],
+    ['Needs attention', 'attention', '⚠️'],
+    ['Could not confirm', 'attention', '❌'],
+    ['Expired', 'neutral', '❌'],
+    ['Cancelled', 'neutral', '❌'],
+  ] as const)('shows %s with the correct status icon', (label, tone, icon) => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'deposit_status',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      depositStatus: { label, tone },
+    });
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: `Deposit 25.00 ETB — ${icon} ${label}.`,
+    });
   });
 
   it('does not invite payment to a disabled receiver', () => {
@@ -398,7 +422,7 @@ describe('Telegram Player-ID flow presentation', () => {
     (providerCode) => {
       const providerName = providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr';
       for (const [duplicateState, text] of [
-        ['credited', '✅ This payment was already credited. It can’t be credited again.'],
+        ['credited', '❌ This payment was already credited. It can’t be credited again.'],
         [
           'same_account_pending',
           '⏳ This payment is already submitted. Please wait for an update here.',
@@ -438,7 +462,7 @@ describe('Telegram Player-ID flow presentation', () => {
       }),
     ).toEqual({
       kind: 'message',
-      text: 'This payment reference has already been used. It can’t be submitted again.',
+      text: '❌ This payment reference has already been used. It can’t be submitted again.',
     });
   });
 
@@ -454,7 +478,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'menu',
       menu: {
-        text: 'This payment reference has already been used. It can’t be submitted again.',
+        text: '❌ This payment reference has already been used. It can’t be submitted again.',
         buttons: [{ text: '💰 Deposit', callbackData: 'gd1.deposit' }],
       },
     });

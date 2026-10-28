@@ -272,26 +272,14 @@ describe('Telegram deposit outcome notifier', () => {
     expect(unrelated).not.toContain('1A2B');
   });
 
-  it('holds an uncertain phone check without calling the payment invalid', () => {
-    const held = presentTelegramDepositOutcome({
-      ...delivery,
-      outcomeCode: 'held_review',
-      amountMinor: null,
-    });
-    expect(held).toBe('⚠️ Your deposit needs review. We’ll update you here.');
-    expect(held).not.toContain('1A2B');
-    expect(held).not.toContain('invalid');
-  });
-
-  it('reports a verified older payment as pending until the Owner decides', () => {
-    const pending = presentTelegramDepositOutcome({
-      ...delivery,
-      outcomeCode: 'older_pending',
-      amountMinor: null,
-    });
-    expect(pending).toBe('⚠️ Your deposit needs review. We’ll update you here.');
-    expect(pending).not.toContain('1A2B');
-    expect(pending).not.toContain('credited');
+  it('keeps an older payment quiet until the Owner decides', () => {
+    expect(
+      presentTelegramDepositOutcome({
+        ...delivery,
+        outcomeCode: 'older_pending',
+        amountMinor: null,
+      }),
+    ).toBeNull();
     const rejected = presentTelegramDepositOutcome({
       ...delivery,
       outcomeCode: 'old_rejected',
@@ -300,18 +288,27 @@ describe('Telegram deposit outcome notifier', () => {
     expect(rejected).toBe('❌ Deposit not credited. This payment is too old. Contact support.');
   });
 
-  it('holds a rotated-instruction submission for review without implying rejection', () => {
-    const held = presentTelegramDepositOutcome({
-      ...delivery,
-      outcomeCode: 'manual_review',
-      amountMinor: null,
-    });
-    expect(held).toContain('deposit needs review');
-    expect(held).toContain('We’ll update you here');
-    expect(held).not.toContain('receiving number');
-    expect(held).not.toContain('Deposit rejected');
-    expect(held).not.toContain('30.00');
-  });
+  it.each(['held_review', 'older_pending', 'manual_review'] as const)(
+    'silently retires a %s notice while preserving later final outcomes',
+    async (outcomeCode) => {
+      const actions: TelegramPrivateActionEnvelope[] = [];
+      const send = vi.fn(async () => ({ message_id: 99 }));
+      expect(
+        presentTelegramDepositOutcome({ ...delivery, outcomeCode, amountMinor: null }),
+      ).toBeNull();
+      expect(
+        await processOneTelegramDepositOutcome(
+          dependencies({ ...delivery, outcomeCode, amountMinor: null }, send, actions),
+        ),
+      ).toBe('processed');
+      expect(send).not.toHaveBeenCalled();
+      expect(actions[1]).toMatchObject({
+        kind: 'deposit_outcome_complete',
+        deliveryResult: 'unavailable',
+        telegramMessageId: null,
+      });
+    },
+  );
 
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
@@ -343,16 +340,14 @@ describe('Telegram deposit outcome notifier', () => {
     ['wrong_receiver', '❌'],
     ['invalid_reference', '❌'],
     ['unrelated_receipt', '❌'],
-    ['held_review', '⚠️'],
-    ['older_pending', '⚠️'],
     ['old_rejected', '❌'],
-    ['manual_review', '⚠️'],
     ['not_credited', '⚠️'],
     ['not_verified', '❌'],
     ['already_used', '❌'],
   ] as const)('uses %s status copy with a %s icon', (outcomeCode, icon) => {
     const text = presentTelegramDepositOutcome({ ...delivery, outcomeCode });
-    expect(text.startsWith(icon)).toBe(true);
+    expect(text).not.toBeNull();
+    expect(text?.startsWith(icon)).toBe(true);
     if (icon !== '✅') expect(text).not.toContain('✅');
   });
 

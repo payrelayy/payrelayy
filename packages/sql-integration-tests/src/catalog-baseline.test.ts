@@ -186,6 +186,8 @@ const telegramDuplicateRuntimeCompatibilityRevokeMigrationName =
   '20261028200342_telegram_duplicate_runtime_compatibility_revoke.sql';
 const telegramDuplicateRuntimeGrantRestoreMigrationName =
   '20261028202030_telegram_duplicate_runtime_grant_restore.sql';
+const silenceAmbiguousReviewNoticesMigrationName =
+  '20261028231519_silence_ambiguous_deposit_review_notices.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -668,7 +670,8 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSms60MinuteWindowMigrationName &&
         name !== telegramDuplicateSubmissionMigrationName &&
         name !== telegramDuplicateRuntimeCompatibilityRevokeMigrationName &&
-        name !== telegramDuplicateRuntimeGrantRestoreMigrationName,
+        name !== telegramDuplicateRuntimeGrantRestoreMigrationName &&
+        name !== silenceAmbiguousReviewNoticesMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10380,6 +10383,16 @@ describe('100 ETB production deposit policy cutover', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [telegramDuplicateRuntimeGrantRestoreMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, silenceAmbiguousReviewNoticesMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [silenceAmbiguousReviewNoticesMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(

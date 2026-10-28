@@ -19,9 +19,6 @@ export const TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT =
 export const TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT =
   '❌ This payment is already being handled. It can’t be submitted again.';
 
-export const TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT =
-  '⚠️ Your deposit needs review. We’ll update you here.';
-
 export const TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT =
   '⚠️ I couldn’t find a valid payment reference. Send one reference or receipt.';
 

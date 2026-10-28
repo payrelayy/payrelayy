@@ -2039,6 +2039,7 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
           [fingerprint],
         );
         expect(matches.rows).toEqual([{ candidate_id: first }]);
+        await client.query('set session authorization fetanagent_player_actions_runtime');
         const bounded = await client.query<{ duplicate_state: string }>(
           `select app.telegram_receiver_sms_duplicate_state($1::uuid,$2::uuid)
               as duplicate_state`,
@@ -2053,15 +2054,6 @@ export function registerOwnerDuplicateCreditStatusSqlTests(
           ]),
         ).rejects.toThrow(/submission result is unavailable/u);
         await client.query('rollback to savepoint wrong_origin');
-        await client.query('set session authorization fetanagent_player_actions_runtime');
-        await client.query('savepoint staged_runtime_grant');
-        await expect(
-          client.query(`select app.telegram_receiver_sms_duplicate_state($1::uuid,$2::uuid)`, [
-            repeatInbound,
-            sameAccountRepeat.rows[0]!.id,
-          ]),
-        ).rejects.toThrow(/permission denied/u);
-        await client.query('rollback to savepoint staged_runtime_grant');
         await client.query('reset session authorization');
         await client.query('set session authorization fetanagent_owner_control_runtime');
         const pending = await client.query<{ candidate_id: string; player_id: string }>(

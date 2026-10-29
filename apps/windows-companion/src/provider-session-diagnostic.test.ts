@@ -65,6 +65,24 @@ describe('passive provider session diagnostics', () => {
     context.emit('response', {
       url: () => REFRESH_URL,
       request: () => ({ method: () => 'POST' }),
+      status: () => 400,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 409,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 422,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
       status: () => 503,
       body: unreadBody,
     });
@@ -72,6 +90,18 @@ describe('passive provider session diagnostics', () => {
       url: () => REFRESH_URL,
       request: () => ({ method: () => 'POST' }),
       status: () => 429,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 302,
+      body: unreadBody,
+    });
+    context.emit('response', {
+      url: () => REFRESH_URL,
+      request: () => ({ method: () => 'POST' }),
+      status: () => 404,
       body: unreadBody,
     });
     context.emit('requestfailed', { url: () => REFRESH_URL, method: () => 'POST' });
@@ -97,7 +127,12 @@ describe('passive provider session diagnostics', () => {
       'admin_socket_closed',
       'refresh_http_succeeded',
       'refresh_http_auth_rejected',
+      'refresh_http_bad_request',
+      'refresh_http_conflict',
+      'refresh_http_unprocessable',
       'refresh_http_server_error',
+      'refresh_http_rate_limited',
+      'refresh_http_redirected',
       'refresh_http_rejected',
       'refresh_http_network_failed',
       'account_info_auth_rejected',

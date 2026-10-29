@@ -17,6 +17,11 @@ export type ProviderSessionDiagnosticEvent =
   | 'admin_socket_closed'
   | 'refresh_http_succeeded'
   | 'refresh_http_auth_rejected'
+  | 'refresh_http_bad_request'
+  | 'refresh_http_conflict'
+  | 'refresh_http_unprocessable'
+  | 'refresh_http_rate_limited'
+  | 'refresh_http_redirected'
   | 'refresh_http_server_error'
   | 'refresh_http_rejected'
   | 'refresh_http_network_failed'
@@ -87,9 +92,19 @@ export function installProviderSessionPassiveDiagnostics(
           ? 'refresh_http_succeeded'
           : status === 401 || status === 403
             ? 'refresh_http_auth_rejected'
-            : status >= 500
-              ? 'refresh_http_server_error'
-              : 'refresh_http_rejected',
+            : status === 400
+              ? 'refresh_http_bad_request'
+              : status === 409
+                ? 'refresh_http_conflict'
+                : status === 422
+                  ? 'refresh_http_unprocessable'
+                  : status === 429
+                    ? 'refresh_http_rate_limited'
+                    : status >= 300 && status < 400
+                      ? 'refresh_http_redirected'
+                      : status >= 500
+                        ? 'refresh_http_server_error'
+                        : 'refresh_http_rejected',
       );
     } else if (isAccountInfoUrl(response.url()) && response.request().method() === 'GET') {
       if (response.status() === 401 || response.status() === 403) {

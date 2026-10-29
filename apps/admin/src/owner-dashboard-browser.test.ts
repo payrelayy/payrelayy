@@ -419,6 +419,7 @@ describe('Owner full payment identifiers', () => {
         ownerCaseStatus: null,
         canApprove: false,
         canReject: false,
+        canRecordStoppedCredit: false,
         rejectionReason: null,
         decidedAt: null,
         completedAt: null,
@@ -993,6 +994,7 @@ describe('Owner manual payment review', () => {
     ownerCaseStatus: null,
     canApprove: true,
     canReject: true,
+    canRecordStoppedCredit: false,
     rejectionReason: null,
     decidedAt: null,
     completedAt: null,
@@ -1144,6 +1146,60 @@ describe('Owner manual payment review', () => {
     expect(form?.children).toHaveLength(1);
     await form?.listeners.get('submit')?.({ preventDefault() {} });
     await vi.waitFor(() => expect(approved).toBe(true));
+  });
+
+  it('records an outside credit for a proven stopped attempt without a second transfer', async () => {
+    const stopped = {
+      ...pending,
+      paymentEventId: '44444444-4444-4444-8444-444444444444',
+      paymentAt: '2026-10-20T09:59:00Z',
+      amountMinor: '34000',
+      receiverAccountId: '55555555-5555-4555-8555-555555555555',
+      receiverAccountMasked: '***1234',
+      statusDetail: 'Automatic processing or reconciliation; check before manual credit',
+      canApprove: false,
+      canReject: false,
+      canRecordStoppedCredit: true,
+    };
+    let recorded = false;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/submitted-payments?'))
+          return response(200, { payments: recorded ? [] : [stopped] });
+        if (url.endsWith('/stopped-credits/' + stopped.candidateId + '/record')) {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            playerCreditedConfirmed: true,
+          });
+          recorded = true;
+          return response(200, {
+            completed: {
+              caseId: '33333333-3333-4333-8333-333333333333',
+              status: 'manually_credited',
+            },
+          });
+        }
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
+        return undefined;
+      },
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    await browser.call('loadManualPaymentCases', true);
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    expect(JSON.stringify(card)).toContain('will not credit the Player again');
+    expect(JSON.stringify(card)).not.toContain('Immediately credit this Player ID');
+    const record = card.children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.textContent === 'Record outside credit',
+    );
+    expect(record).toBeDefined();
+    await record?.listeners.get('click')?.({ preventDefault() {} });
+    await vi.waitFor(() => expect(recorded).toBe(true));
+    expect(
+      browser.fetchCalls.filter(
+        (call) => call.init.method === 'POST' && call.url.endsWith('/record'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('rejects a submitted payment with one click and a fixed Owner reason', async () => {

@@ -17,6 +17,11 @@ export type ProviderSessionDiagnosticEvent =
   | 'admin_socket_closed'
   | 'refresh_http_succeeded'
   | 'refresh_http_auth_rejected'
+  | 'refresh_http_bad_request'
+  | 'refresh_http_conflict'
+  | 'refresh_http_unprocessable'
+  | 'refresh_http_rate_limited'
+  | 'refresh_http_redirected'
   | 'refresh_http_server_error'
   | 'refresh_http_rejected'
   | 'refresh_http_network_failed'
@@ -34,6 +39,18 @@ function isAccountInfoUrl(rawUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+function classifyRefreshHttpStatus(status: number): ProviderSessionDiagnosticEvent {
+  if (status >= 200 && status < 300) return 'refresh_http_succeeded';
+  if (status === 401 || status === 403) return 'refresh_http_auth_rejected';
+  if (status === 400) return 'refresh_http_bad_request';
+  if (status === 409) return 'refresh_http_conflict';
+  if (status === 422) return 'refresh_http_unprocessable';
+  if (status === 429) return 'refresh_http_rate_limited';
+  if (status >= 300 && status < 400) return 'refresh_http_redirected';
+  if (status >= 500) return 'refresh_http_server_error';
+  return 'refresh_http_rejected';
 }
 
 /** Classify only a SignalR event name; never copy a provider frame or token into telemetry. */
@@ -81,16 +98,7 @@ export function installProviderSessionPassiveDiagnostics(
   });
   context.on('response', (response) => {
     if (response.url() === REFRESH_URL && response.request().method() === 'POST') {
-      const status = response.status();
-      reportDiagnostic(
-        status >= 200 && status < 300
-          ? 'refresh_http_succeeded'
-          : status === 401 || status === 403
-            ? 'refresh_http_auth_rejected'
-            : status >= 500
-              ? 'refresh_http_server_error'
-              : 'refresh_http_rejected',
-      );
+      reportDiagnostic(classifyRefreshHttpStatus(response.status()));
     } else if (isAccountInfoUrl(response.url()) && response.request().method() === 'GET') {
       if (response.status() === 401 || response.status() === 403) {
         reportDiagnostic('account_info_auth_rejected');

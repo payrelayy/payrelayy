@@ -74,6 +74,7 @@ describe('Owner manual payment boundary', () => {
                   completed_at: status === 'approved' ? new Date('2026-10-23T09:02:00Z') : null,
                   can_approve: status === 'pending',
                   can_reject: status === 'pending',
+                  can_record_stopped_credit: false,
                 },
               ],
             };
@@ -215,6 +216,7 @@ describe('Owner manual payment boundary', () => {
               completed_at: null,
               can_approve: true,
               can_reject: true,
+              can_record_stopped_credit: false,
             },
           ],
         };
@@ -258,6 +260,27 @@ describe('Owner manual payment boundary', () => {
         bankPaymentConfirmed: false,
       }),
     ).rejects.toBeInstanceOf(OwnerManualPaymentRejectedError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('records a stopped pre-action review without authorizing another transfer', async () => {
+    const calls: unknown[] = [];
+    const service = new PostgresOwnerManualPayments({
+      query: async (sql, values) => {
+        calls.push([sql, values]);
+        return { rows: [{ completed: { caseId: ownerCase, status: 'manually_credited' } }] };
+      },
+    });
+    expect(await service.recordStoppedCredit(actor, candidate)).toEqual({
+      caseId: ownerCase,
+      status: 'manually_credited',
+    });
+    expect(calls).toEqual([
+      [expect.stringContaining('app.record_owner_stopped_credit'), [actor, candidate, true]],
+    ]);
+    await expect(service.recordStoppedCredit(actor, 'bad')).rejects.toBeInstanceOf(
+      OwnerManualPaymentRejectedError,
+    );
     expect(calls).toHaveLength(1);
   });
 

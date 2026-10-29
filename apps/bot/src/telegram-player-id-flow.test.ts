@@ -179,7 +179,7 @@ describe('Telegram Player-ID flow presentation', () => {
         depositStatus: { label: 'Checking payment', tone: 'working' },
         financialMode: 'live',
       }),
-    ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
+    ).toEqual({ kind: 'message', text: '⏳ Payment details received. We’ll update you here.' });
     expect(
       presentTelegramPlayerIdFlowResult({
         version: 1,
@@ -414,7 +414,7 @@ describe('Telegram Player-ID flow presentation', () => {
           providerName: 'TeleBirr',
           matchStatus,
         }),
-      ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
+      ).toEqual({ kind: 'message', text: '⏳ Payment details received. We’ll update you here.' });
     },
   );
 
@@ -427,7 +427,7 @@ describe('Telegram Player-ID flow presentation', () => {
         providerName: 'CBE Birr',
         matchStatus: 'pending_sms',
       }),
-    ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
+    ).toEqual({ kind: 'message', text: '⏳ Payment details received. We’ll update you here.' });
   });
 
   it.each(['telebirr', 'cbe_birr'] as const)(
@@ -499,7 +499,7 @@ describe('Telegram Player-ID flow presentation', () => {
     );
   });
 
-  it('renders a live verifier acknowledgement with one opaque tracking button', () => {
+  it('renders a live verifier acknowledgement with only its status button', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,
       outcome: 'telebirr_live_verification_queued',
@@ -513,10 +513,7 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'menu',
       menu: {
         text: '⏳ Payment details received. We’ll update you here.',
-        buttons: [
-          { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
-          { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-        ],
+        buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
       },
     });
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|SYNTB|uuid/iu);

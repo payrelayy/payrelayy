@@ -931,6 +931,37 @@ describe('Telegram admission, private action, and ingress composition', () => {
     ]);
   });
 
+  it.each([
+    ['telebirr', 'TB12345678'],
+    ['cbe_birr', 'CBE12345678'],
+  ] as const)(
+    'acknowledges a new %s payment without suggesting another deposit',
+    async (providerCode, reference) => {
+      await loadComposition(false, true, true, false, true);
+      runtime.actionResult = {
+        version: 1,
+        outcome: 'receiver_sms_candidate_received',
+        providerCode,
+        providerName: providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
+        matchStatus: 'pending_sms',
+      };
+      const context = messageContext(reference);
+      const reply = vi.fn(async (text: string, options?: unknown) => {
+        context.replies.push(text);
+        return options;
+      });
+      await runtime.messageHandler!({ ...context, reply });
+      expect(context.replies).toEqual(['⏳ Payment details received. We’ll update you here.']);
+      expect(reply).toHaveBeenCalledExactlyOnceWith(context.replies[0], undefined);
+      expect(runtime.actionDeliveries).toEqual([
+        expect.objectContaining({
+          kind: 'saved_receiver_sms_proof_command',
+          transactionReference: reference,
+        }),
+      ]);
+    },
+  );
+
   it('routes a pasted CBE SMS and a captioned PDF with an unrelated feedback link', async () => {
     await loadComposition(false, true, true, false, true);
     const reference = 'SYNTHCBE001';

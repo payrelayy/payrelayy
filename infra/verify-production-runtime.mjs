@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '842f1fb301de9a479c558b06cbc20fd67e3e45fc'/gu)].length,
+  [...workflow.matchAll(/status '7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='842f1fb301de9a479c558b06cbc20fd67e3e45fc'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2078,7 +2078,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='842f1fb301de9a479c558b06cbc20fd67e3e45fc'",
   "readonly PREDECESSOR_SHA256='b0c9115f3b14d74c38356923cbc68e95de6223dce2dd5e5c0cb7e2c77b01feb2'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c'",
   "readonly SOURCE_REVIEW='deposit-outcome-button-release-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2091,7 +2091,7 @@ assert.doesNotMatch(depositOutcomeButtonRotation, /\b(?:docker|psql|rm|sed|chmod
 for (const value of [
   '842f1fb301de9a479c558b06cbc20fd67e3e45fc',
   'b0c9115f3b14d74c38356923cbc68e95de6223dce2dd5e5c0cb7e2c77b01feb2',
-  helperDigest,
+  '2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c',
   'ROTATE EXACT PRODUCTION V2 DEPOSIT OUTCOME BUTTON HELPER V1',
 ]) {
   assert.ok(depositOutcomeButtonRunbook.includes(value));
@@ -2103,6 +2103,42 @@ assert.match(
 assert.match(
   quality,
   /bash -n infra\/operations\/fetanagent-production-v2-deposit-outcome-button-helper-rotation-v1\.sh/u,
+);
+const paymentIntakeAckRotation = await read(
+  'infra/operations/fetanagent-production-v2-payment-intake-ack-helper-rotation-v1.sh',
+);
+const paymentIntakeAckRunbook = await read(
+  'infra/operations/production-payment-intake-ack-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'",
+  "readonly PREDECESSOR_SHA256='2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='payment-intake-ack-release-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 PAYMENT INTAKE ACK HELPER V1',
+]) {
+  assert.ok(paymentIntakeAckRotation.includes(value));
+}
+assert.doesNotMatch(paymentIntakeAckRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732',
+  '2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 PAYMENT INTAKE ACK HELPER V1',
+]) {
+  assert.ok(paymentIntakeAckRunbook.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-payment-intake-ack-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-payment-intake-ack-helper-rotation-v1\.sh/u,
 );
 assert.match(
   workflow,

@@ -93,6 +93,50 @@ describe('TeleBirr candidate extraction', () => {
     }
   });
 
+  it('reads a dated TeleBirr PDF invoice row instead of the adjacent column headings', () => {
+    const receipt =
+      'telebirr Transaction information\nInvoice details\n' +
+      'Invoice No. /Payment date /Settled Amount\n' +
+      'SYNTHB1234 28-10-2026 21:59:23 2,000 Birr\n';
+    expect(extractTelebirrReferenceCandidates(request('pdf_text', receipt))).toMatchObject({
+      outcome: 'candidate_ready',
+      normalizedReference: 'SYNTHB1234',
+    });
+    expect(
+      extractTelebirrReferenceCandidates(
+        request('pdf_text', `${receipt}Transaction ID: OTHERB1234`),
+      ),
+    ).toMatchObject({ outcome: 'selection_required' });
+    expect(
+      extractTelebirrReferenceCandidates(
+        request('pdf_text', `${receipt}\nOTHERB1234 29-10-2026 02:00:00 100 Birr`),
+      ),
+    ).toMatchObject({ outcome: 'selection_required' });
+  });
+
+  it('rejects an invoice table with a missing or malformed dated reference row', () => {
+    for (const row of ['', 'SHORT 28-10-2026 21:59:23 2,000 Birr']) {
+      expect(
+        extractTelebirrReferenceCandidates(
+          request('pdf_text', `Invoice No. Payment date Settled Amount\n${row}`),
+        ),
+      ).toMatchObject({ outcome: 'invalid_input' });
+    }
+  });
+
+  it('does not treat a CBE VAT invoice field as a TeleBirr transaction label', () => {
+    expect(
+      extractTelebirrReferenceCandidates(
+        request('pdf_text', 'VAT Invoice No:    TIN (TAX ID):\nOrder ID SYNTHCBE001'),
+      ),
+    ).toMatchObject({ outcome: 'no_candidates' });
+    expect(
+      extractTelebirrReferenceCandidates(
+        request('pdf_text', 'VAT Invoice No:\nTransaction ID: SHORT'),
+      ),
+    ).toMatchObject({ outcome: 'invalid_input' });
+  });
+
   it('scans both receipt paths and labels in pasted text instead of preferring a URL', () => {
     expect(
       extractTelebirrReferenceCandidates(

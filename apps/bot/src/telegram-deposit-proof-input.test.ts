@@ -130,6 +130,42 @@ describe('Telegram amount-free payment proof input', () => {
     }
   });
 
+  it('reads CBE embedded text despite its blank VAT invoice field', () => {
+    const receipt =
+      'Commercial Bank of Ethiopia\nVAT Invoice/ Customer Receipt\nCBEBirr\n' +
+      'VAT Invoice No:                  TIN (TAX ID):\n' +
+      'Order ID                         SYNTHCBE001\n' +
+      'Reference                        :\n' +
+      'Receipt Number     Transaction Date     Amount\n' +
+      'SYNTHCBE001       2026-10-29 02:17    109.00';
+    expect(reduceTelegramAutoReceiverSmsProofInput(receipt, 'pdf_text')).toEqual({
+      kind: 'candidate',
+      providerCode: 'cbe_birr',
+      transactionReference: 'SYNTHCBE001',
+    });
+  });
+
+  it('reads the TeleBirr invoice row from an image-only PDF OCR result', () => {
+    const receipt =
+      'telebirr Transaction information\nInvoice details\n' +
+      'Amharic/Invoice No. /Payment date /Settled Amount\n' +
+      'SYNTHB1234 28-10-2026 21:59:23 2,000 Birr';
+    expect(reduceTelegramAutoReceiverSmsProofInput(receipt, 'pdf_text')).toEqual({
+      kind: 'candidate',
+      providerCode: 'telebirr',
+      transactionReference: 'SYNTHB1234',
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsMediaSubmission({
+        ...metadata,
+        caption: 'Transaction ID: OTHERB1234',
+        extractedText: receipt,
+        sourceKind: 'pdf_text',
+        replyToMessage: undefined,
+      }),
+    ).toEqual({ kind: 'selection_required' });
+  });
+
   it('does not choose a method for conflicting or malformed payment information', () => {
     expect(
       reduceTelegramAutoReceiverSmsProofInput('Transaction ID: TB12345678. Txn ID: CBE12345678.'),

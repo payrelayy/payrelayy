@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '781fa538102a5b7d490438d75d285882a71a8e68'/gu)].length,
+  [...workflow.matchAll(/status '82b0ccc7c618c201e77d452967132e5bc23367f9'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='781fa538102a5b7d490438d75d285882a71a8e68'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='82b0ccc7c618c201e77d452967132e5bc23367f9'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2006,7 +2006,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='781fa538102a5b7d490438d75d285882a71a8e68'",
   "readonly PREDECESSOR_SHA256='e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='002766a2e8e8736bf21e7361ce33c3ef8686a55d0d27e72f870365f0e8979349'",
   "readonly SOURCE_REVIEW='review-notice-bot-release-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2019,7 +2019,7 @@ assert.doesNotMatch(reviewNoticeBotHelperRotation, /\b(?:docker|psql|rm|sed|chmo
 for (const value of [
   '781fa538102a5b7d490438d75d285882a71a8e68',
   'e9496ec77d38ad36ab3645e18e2ecccb0cd584db686f2b70693e03d98c9aa000',
-  helperDigest,
+  '002766a2e8e8736bf21e7361ce33c3ef8686a55d0d27e72f870365f0e8979349',
   'ROTATE EXACT PRODUCTION V2 REVIEW NOTICE BOT HELPER V1',
 ]) {
   assert.ok(reviewNoticeBotReleaseRunbook.includes(value));
@@ -2031,6 +2031,42 @@ assert.match(
 assert.match(
   quality,
   /bash -n infra\/operations\/fetanagent-production-v2-review-notice-bot-helper-rotation-v1\.sh/u,
+);
+const pdfReceiptReferenceHelperRotation = await read(
+  'infra/operations/fetanagent-production-v2-pdf-receipt-reference-helper-rotation-v1.sh',
+);
+const pdfReceiptReferenceReleaseRunbook = await read(
+  'infra/operations/production-pdf-receipt-reference-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='82b0ccc7c618c201e77d452967132e5bc23367f9'",
+  "readonly PREDECESSOR_SHA256='002766a2e8e8736bf21e7361ce33c3ef8686a55d0d27e72f870365f0e8979349'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='pdf-receipt-reference-release-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 PDF RECEIPT REFERENCE HELPER V1',
+]) {
+  assert.ok(pdfReceiptReferenceHelperRotation.includes(value));
+}
+assert.doesNotMatch(pdfReceiptReferenceHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '82b0ccc7c618c201e77d452967132e5bc23367f9',
+  '002766a2e8e8736bf21e7361ce33c3ef8686a55d0d27e72f870365f0e8979349',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 PDF RECEIPT REFERENCE HELPER V1',
+]) {
+  assert.ok(pdfReceiptReferenceReleaseRunbook.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-pdf-receipt-reference-helper-rotation-v1\.sh/u,
+);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-pdf-receipt-reference-helper-rotation-v1\.sh/u,
 );
 assert.match(
   workflow,

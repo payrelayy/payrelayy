@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 import { TELEBIRR_CANDIDATE_EXTRACTION_MAX_INPUT_BYTES } from '@fetanagent/telebirr-verification-foundation/candidate-extraction';
 
-import { reduceTelegramDepositProofInput } from './telegram-deposit-proof-input.js';
+import { reduceTelegramAutoReceiverSmsProofInput } from './telegram-deposit-proof-input.js';
 
 const runFile = promisify(execFile);
 
@@ -286,7 +286,7 @@ export async function recognizeTelegramProofMedia(
     // Text PDFs are common. An image-only PDF uses the bounded raster/OCR fallback below.
     if (
       embeddedText.trim().length > 0 &&
-      reduceTelegramDepositProofInput('telebirr', embeddedText, 'pdf_text').kind !== 'invalid_input'
+      reduceTelegramAutoReceiverSmsProofInput(embeddedText, 'pdf_text').kind !== 'invalid_input'
     ) {
       return boundedExtractedText(embeddedText);
     }

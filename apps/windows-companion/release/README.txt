@@ -80,9 +80,11 @@ matches. Repeated page events do not extend the fixed one-job pilot deadline; th
 session has an overall twelve-hour-ten-minute cap. Routine mode has no client-renewed testing
 window, but every command still requires the current server policy, certificate, account binding,
 runtime activation, one-use claim and fence. Losing any of those stops new work. In routine mode,
-the same guarded KemerBet page refreshes after seven idle minutes and the bound account is verified
-again before more Player work. The routine Chrome window does not close merely because twelve
-hours pass. If the bound account header is temporarily unavailable after a refresh, credit work
+the same guarded KemerBet page refreshes after seven minutes without Player work. Under frequent
+work, a refresh becomes due eight minutes after the last verified page load. It waits for any
+active Player lookup or deposit to finish, then verifies the bound account before more Player work.
+The routine Chrome window does not close merely because twelve hours pass. If the bound account
+header is temporarily unavailable after a refresh, credit work
 pauses and the same guarded window retries identity verification; a different account still fails
 closed. After the offline-queue migration, a missing signed worker leaves verified payments
 queued; only an explicit stop or incident can turn paid TeleBirr off. If

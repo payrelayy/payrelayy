@@ -55,6 +55,7 @@ const ACCOUNT_INFO_URL = 'https://admin-api.agt-digi.com/Account/Info';
 const DEPOSIT_URL = 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit';
 const TEN_MINUTES = 10 * 60 * 1_000;
 const SEVEN_MINUTES = 7 * 60 * 1_000;
+const EIGHT_MINUTES = 8 * 60 * 1_000;
 const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
 const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
@@ -559,6 +560,62 @@ describe('local KemerBet enrollment session', () => {
     await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(page.reload).toHaveBeenCalledTimes(2);
     expect(session.isSignedInVerified()).toBe(true);
+  });
+
+  it('restarts the idle clock after a Player lookup without passing the session-age cap', async () => {
+    const { page, session } = await start();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).resolves.toBe('found');
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES - 30_000);
+    expect(page.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(page.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('caps the idle preference at eight minutes after verified sign-in', async () => {
+    const { page, session } = await start();
+
+    await vi.advanceTimersByTimeAsync(6 * 60 * 1_000);
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).resolves.toBe('found');
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1_000 - 1);
+    expect(page.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(page.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reloads during a routine deposit, even after the safety cap becomes due', async () => {
+    const { page, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    let finishDeposit!: () => void;
+    const depositWork = new Promise<void>((resolvePromise) => {
+      finishDeposit = resolvePromise;
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockImplementationOnce(async () => {
+      await depositWork;
+      return {
+        outcome: 'submission_attempted',
+        providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+        exactPlayerCreditMatch: true,
+      };
+    });
+
+    const pending = session.executeRoutineOneUseDeposit('12345678', 2500, async () => {
+      throw new Error('The timer test must not request a transfer fence.');
+    });
+    await settleIdentityVerification();
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(EIGHT_MINUTES);
+    expect(page.reload).not.toHaveBeenCalled();
+    finishDeposit();
+    await expect(pending).resolves.toMatchObject({ outcome: 'submission_attempted' });
+    expect(page.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000 - 1);
+    expect(page.reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(page.reload).toHaveBeenCalledTimes(1);
   });
 
   it('returns to manual login without resuming Player work if the reload loses provider auth', async () => {

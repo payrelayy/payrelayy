@@ -278,9 +278,7 @@ describe('private human /support routing', () => {
         fetchContact,
       }),
     ).toBe('handled');
-    expect(reply).toHaveBeenCalledWith(
-      'Contact support: https://t.me/help_team\nNever share your password or login code.',
-    );
+    expect(reply).toHaveBeenCalledWith('Contact support: https://t.me/help_team');
     expect(JSON.stringify(fetchContact.mock.calls)).not.toContain('123456789');
   });
 

@@ -5,7 +5,7 @@ const REQUEST_TIMEOUT_MS = 3000;
 
 export const TELEGRAM_SUPPORT_HELP_TEXT = 'Help: /support.';
 export const TELEGRAM_SUPPORT_UNAVAILABLE_TEXT =
-  'Support is unavailable right now. Please try again later.\nNever share your password or login code.';
+  'Support is unavailable right now. Please try again later.';
 
 interface SupportMessage {
   readonly text?: string | undefined;
@@ -168,9 +168,7 @@ export async function handleTelegramSupportMessage(
   }
   const contact = await loadTelegramSupportContact(url, dependencies.fetchContact);
   await dependencies.reply(
-    contact
-      ? `Contact support: ${contact}\nNever share your password or login code.`
-      : TELEGRAM_SUPPORT_UNAVAILABLE_TEXT,
+    contact ? `Contact support: ${contact}` : TELEGRAM_SUPPORT_UNAVAILABLE_TEXT,
   );
   return 'handled';
 }

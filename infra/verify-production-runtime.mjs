@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '0baab816c76f95c3a383cf7008d6cbbb77852561'/gu)].length,
+  [...workflow.matchAll(/status 'bc907f91cedd3f8e462bb3e2dd9db91c68428f04'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='0baab816c76f95c3a383cf7008d6cbbb77852561'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='bc907f91cedd3f8e462bb3e2dd9db91c68428f04'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2184,7 +2184,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='0baab816c76f95c3a383cf7008d6cbbb77852561'",
   "readonly PREDECESSOR_SHA256='306708f9fd01370b625112742d15bab503098db9749d21b2a41cf9117bb0d730'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='c231e0efd97001728f0ba73a47ac6344f115348ff9e0e812c7736298069aa6ff'",
   "readonly SOURCE_REVIEW='routine-companion-alert-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2197,7 +2197,7 @@ assert.doesNotMatch(routineCompanionAlertRotation, /\b(?:docker|psql|rm|sed|chmo
 for (const value of [
   '0baab816c76f95c3a383cf7008d6cbbb77852561',
   '306708f9fd01370b625112742d15bab503098db9749d21b2a41cf9117bb0d730',
-  helperDigest,
+  'c231e0efd97001728f0ba73a47ac6344f115348ff9e0e812c7736298069aa6ff',
   'ROTATE EXACT PRODUCTION V2 ROUTINE COMPANION ALERT HELPER V1',
 ]) {
   assert.ok(routineCompanionAlertRunbook.includes(value));
@@ -2206,6 +2206,40 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-routine-companion-alert-helper-rotation-v1\.sh/u,
+  );
+}
+const ownerStoppedCreditRotation = await read(
+  'infra/operations/fetanagent-production-v2-owner-stopped-credit-helper-rotation-v1.sh',
+);
+const ownerStoppedCreditRunbook = await read(
+  'infra/operations/production-owner-stopped-credit-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='bc907f91cedd3f8e462bb3e2dd9db91c68428f04'",
+  "readonly PREDECESSOR_SHA256='c231e0efd97001728f0ba73a47ac6344f115348ff9e0e812c7736298069aa6ff'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-stopped-credit-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER STOPPED CREDIT HELPER V1',
+]) {
+  assert.ok(ownerStoppedCreditRotation.includes(value));
+}
+assert.doesNotMatch(ownerStoppedCreditRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  'bc907f91cedd3f8e462bb3e2dd9db91c68428f04',
+  'c231e0efd97001728f0ba73a47ac6344f115348ff9e0e812c7736298069aa6ff',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 OWNER STOPPED CREDIT HELPER V1',
+]) {
+  assert.ok(ownerStoppedCreditRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-owner-stopped-credit-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

@@ -83,6 +83,7 @@ export type LocalKemerBetRoutineDepositDispatchOutcome =
 export type LocalKemerBetRoutinePreflightStage =
   | 'session_unavailable'
   | 'preflight_started'
+  | 'preflight_retry_in_place'
   | 'financial_actions_opened'
   | 'financial_actions_page_unavailable'
   | 'deposit_menu_unavailable'

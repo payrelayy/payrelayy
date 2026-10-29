@@ -284,6 +284,10 @@ export async function runWindowsCompanion(): Promise<void> {
     sessionJournal.record({ category: 'provider', state });
     reportProviderSessionDiagnostic(state);
   };
+  const reportPreflight = (stage: LocalKemerBetRoutinePreflightStage): void => {
+    sessionJournal.record({ category: 'preflight', state: stage });
+    reportRoutinePreflightDiagnostic(stage);
+  };
   const launchProofRequest = takeCompanionLaunchProofRequest(
     process.env,
     config.executionV2Enabled || config.routineDepositsEnabled,
@@ -308,7 +312,7 @@ export async function runWindowsCompanion(): Promise<void> {
       config,
       reportSession,
       reportProvider,
-      reportRoutinePreflightDiagnostic,
+      reportPreflight,
     );
   } catch (error) {
     sessionJournal.record({ category: 'process', state: 'exited' });

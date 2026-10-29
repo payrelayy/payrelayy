@@ -29,6 +29,10 @@ const CONTEXT_WHITESPACE_PATTERN = /[ \t\r\n]/u;
 // as part of the raw token and reject instead of truncating the customer's proposed reference.
 const LABEL_TOKEN_BOUNDARY_PATTERN = /[ \t\r\n.,;!?:()[\]{}"'<>]/u;
 const RECEIPT_TOKEN_BOUNDARY_PATTERN = /[ \t\r\n.,;!?#()[\]{}"'<>]/u;
+const VAT_INVOICE_PREFIX_PATTERN = /\bVAT[ \t]+$/iu;
+const INVOICE_TABLE_COLUMNS_PATTERN = /\bPayment[ \t]+date\b.*\bSettled[ \t]+Amount\b/iu;
+const INVOICE_TABLE_ROW_PATTERN =
+  /^[ \t]*([A-Za-z0-9]{8,32})[ \t]+(?:[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{4}|[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})[ \t]+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:[ \t]|$)/u;
 
 const requestKeys = ['contractVersion', 'sourceKind', 'text'] as const;
 const invalidResultKeys = [
@@ -161,6 +165,14 @@ function collectContextCandidates(
   candidates: string[],
   seen: Set<string>,
 ): boolean {
+  const appendCandidate = (rawCandidate: string): boolean => {
+    if (!RAW_REFERENCE_PATTERN.test(rawCandidate)) return false;
+    const candidate = rawCandidate.toUpperCase();
+    if (seen.has(candidate)) return true;
+    seen.add(candidate);
+    candidates.push(candidate);
+    return candidates.length <= TELEBIRR_CANDIDATE_EXTRACTION_MAX_CANDIDATES;
+  };
   pattern.lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
     let tokenStart = match.index + match[0].length;
@@ -171,6 +183,35 @@ function collectContextCandidates(
       ).at(-1);
       if (precedingCharacter && LABEL_CONTEXT_CONTINUATION_PATTERN.test(precedingCharacter)) {
         continue;
+      }
+      // A CBE receipt's VAT Invoice No is a tax field, not a payment reference.
+      if (
+        /^invoice/iu.test(match[0]) &&
+        VAT_INVOICE_PREFIX_PATTERN.test(text.slice(Math.max(0, match.index - 16), match.index))
+      ) {
+        continue;
+      }
+      // TeleBirr PDF receipts place Invoice No, Payment date, and Settled Amount in a
+      // table heading. The reference is in the dated row below, not after the label.
+      if (/^invoice/iu.test(match[0])) {
+        const lineEnd = text.indexOf('\n', match.index);
+        const heading = text.slice(match.index, lineEnd < 0 ? text.length : lineEnd);
+        if (INVOICE_TABLE_COLUMNS_PATTERN.test(heading)) {
+          if (lineEnd < 0) return false;
+          let foundRow = false;
+          for (const line of text.slice(lineEnd + 1).split(/\r?\n/u)) {
+            if (line.trim().length === 0) continue;
+            const row = INVOICE_TABLE_ROW_PATTERN.exec(line);
+            if (!row) {
+              if (!foundRow) return false;
+              break;
+            }
+            if (!appendCandidate(row[1]!)) return false;
+            foundRow = true;
+          }
+          if (!foundRow) return false;
+          continue;
+        }
       }
       if (!LABEL_SEPARATOR_PATTERN.test(text[tokenStart] ?? '')) return false;
       while (CONTEXT_WHITESPACE_PATTERN.test(text[tokenStart] ?? '')) tokenStart += 1;
@@ -189,13 +230,7 @@ function collectContextCandidates(
     let tokenEnd = tokenStart;
     while (tokenEnd < text.length && !tokenBoundary.test(text[tokenEnd] ?? '')) tokenEnd += 1;
     const rawCandidate = text.slice(tokenStart, tokenEnd);
-    if (!RAW_REFERENCE_PATTERN.test(rawCandidate)) return false;
-    const candidate = rawCandidate.toUpperCase();
-    if (seen.has(candidate)) continue;
-
-    seen.add(candidate);
-    candidates.push(candidate);
-    if (candidates.length > TELEBIRR_CANDIDATE_EXTRACTION_MAX_CANDIDATES) return false;
+    if (!appendCandidate(rawCandidate)) return false;
   }
 
   return true;

@@ -161,7 +161,7 @@ const screenshotRecognition = screenshotModelAccessKey
       })
   : undefined;
 const unreadableReferenceText =
-  'I couldn’t read the reference. Send a clearer image or type the reference.';
+  'I couldn’t read the reference. Send a clearer receipt or type the reference.';
 
 function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();

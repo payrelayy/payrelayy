@@ -49,9 +49,11 @@ import {
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
-// KemerBet's agent client can return to login after roughly ten minutes. Refresh the same
-// guarded page at an idle slot with a conservative margin, then verify the bound identity again.
-const KEMERBET_SIGNED_IN_RELOAD_MS = 7 * 60 * 1_000;
+// KemerBet's agent client can return to login after roughly ten minutes. Prefer seven
+// minutes without Player work, but make refresh due by eight minutes under frequent work.
+// The guarded page is reloaded only between operations and its bound identity is re-verified.
+const KEMERBET_IDLE_RELOAD_MS = 7 * 60 * 1_000;
+const KEMERBET_MAX_RELOAD_MS = 8 * 60 * 1_000;
 const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
 const KEMERBET_ROUTINE_IDENTITY_RETRY_MS = 15 * 1_000;
 
@@ -196,10 +198,13 @@ export async function startLocalKemerBetSession(
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
   let signedInReloadTimer: NodeJS.Timeout | undefined;
+  let signedInVerifiedAt: number | undefined;
+  let lastPlayerWorkCompletedAt: number | undefined;
   let identityRetryTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
   let observePage!: (candidate: Page) => Promise<void>;
+  let notePlayerWorkCompleted: () => void;
   let lock: SessionLock | undefined;
   let resolveDone!: () => void;
   let rejectDone!: (error: Error) => void;
@@ -410,6 +415,8 @@ export async function startLocalKemerBetSession(
           }
           expectedAgentIdentity = undefined;
           signedInVerified = true;
+          signedInVerifiedAt = Date.now();
+          lastPlayerWorkCompletedAt = signedInVerifiedAt;
           disarmIdentityRetry();
           settleVerified(true);
           report({
@@ -510,7 +517,7 @@ export async function startLocalKemerBetSession(
       }
     };
 
-    const armSignedInReload = (delayMs = KEMERBET_SIGNED_IN_RELOAD_MS): void => {
+    const armSignedInReload = (delayMs?: number): void => {
       disarmSignedInReload();
       if (
         terminal ||
@@ -520,6 +527,16 @@ export async function startLocalKemerBetSession(
         phase !== 'signed_in_read_only'
       )
         return;
+      const now = Date.now();
+      const scheduledDelay =
+        delayMs ??
+        Math.max(
+          0,
+          Math.min(
+            (lastPlayerWorkCompletedAt ?? now) + KEMERBET_IDLE_RELOAD_MS,
+            (signedInVerifiedAt ?? now) + KEMERBET_MAX_RELOAD_MS,
+          ) - now,
+        );
       signedInReloadTimer = setTimeout(() => {
         signedInReloadTimer = undefined;
         if (
@@ -552,8 +569,21 @@ export async function startLocalKemerBetSession(
             reportDiagnostic('guarded_page_reload_failed');
             return finish('failed', 'provider_request_failed');
           });
-      }, delayMs);
+      }, scheduledDelay);
       signedInReloadTimer.unref();
+    };
+
+    notePlayerWorkCompleted = (): void => {
+      if (!signedInVerified || phase !== 'signed_in_read_only') return;
+      const now = Date.now();
+      lastPlayerWorkCompletedAt = now;
+      // A busy operation can finish after the maximum refresh age. Keep the existing
+      // short retry so a queued Player action can start without an immediate reload.
+      if (signedInVerifiedAt !== undefined && now >= signedInVerifiedAt + KEMERBET_MAX_RELOAD_MS) {
+        if (signedInReloadTimer === undefined) armSignedInReload(KEMERBET_BUSY_RELOAD_RETRY_MS);
+        return;
+      }
+      armSignedInReload();
     };
 
     page.on('framenavigated', (frame) => {
@@ -726,6 +756,7 @@ export async function startLocalKemerBetSession(
       } finally {
         lookupAuthorization.clear();
         operationInProgress = false;
+        notePlayerWorkCompleted();
       }
     },
     async executeExactFiveLookup(playerIds: ExactFivePlayerIds) {
@@ -747,6 +778,7 @@ export async function startLocalKemerBetSession(
       } finally {
         lookupAuthorization.clear();
         operationInProgress = false;
+        notePlayerWorkCompleted();
       }
     },
     async executeExactOneUseDeposit(
@@ -778,6 +810,7 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         operationInProgress = false;
+        notePlayerWorkCompleted();
       }
     },
     async executeRoutineOneUseDeposit(
@@ -855,6 +888,7 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         operationInProgress = false;
+        notePlayerWorkCompleted();
       }
     },
     async scanRoutineDepositHistory(
@@ -895,6 +929,7 @@ export async function startLocalKemerBetSession(
           }
         } finally {
           operationInProgress = false;
+          notePlayerWorkCompleted();
         }
       }
     },
@@ -929,6 +964,7 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         operationInProgress = false;
+        notePlayerWorkCompleted();
       }
     },
     pauseForReview: () => {

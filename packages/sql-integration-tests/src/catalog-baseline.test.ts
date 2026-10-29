@@ -62,6 +62,7 @@ import { registerVerificationSettlementSqlTests } from './verification-settlemen
 import {
   fixturePaymentEvent,
   registerOwnerDuplicateCreditStatusSqlTests,
+  registerOwnerStoppedPreActionCreditSqlTests,
   registerPostCutoverReceiverSmsRangeSqlTests,
   registerReceiverSmsPaymentLedgerSqlTests,
 } from './receiver-sms-payment-ledger.suite.js';
@@ -193,6 +194,8 @@ const silenceAmbiguousReviewNoticesMigrationName =
   '20261028231519_silence_ambiguous_deposit_review_notices.sql';
 const ownerOperationalAlertFactsMigrationName = '20261029120352_owner_operational_alert_facts.sql';
 const ownerRoutineCompanionAlertMigrationName = '20261029130522_owner_routine_companion_alert.sql';
+const ownerStoppedPreActionCreditMigrationName =
+  '20261029143500_owner_stopped_pre_action_credit.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -678,7 +681,8 @@ describe('disposable SQL migration baseline', () => {
         name !== telegramDuplicateRuntimeGrantRestoreMigrationName &&
         name !== silenceAmbiguousReviewNoticesMigrationName &&
         name !== ownerOperationalAlertFactsMigrationName &&
-        name !== ownerRoutineCompanionAlertMigrationName,
+        name !== ownerRoutineCompanionAlertMigrationName &&
+        name !== ownerStoppedPreActionCreditMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10421,6 +10425,16 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerRoutineCompanionAlertMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerStoppedPreActionCreditMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerStoppedPreActionCreditMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10715,6 +10729,10 @@ describe('100 ETB production deposit policy cutover', () => {
     () => ownerAuthUserId,
   );
   registerOwnerDuplicateCreditStatusSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
+  registerOwnerStoppedPreActionCreditSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
   );

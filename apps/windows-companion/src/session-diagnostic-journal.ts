@@ -3,6 +3,7 @@ import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { LocalKemerBetSessionEvent } from './local-kemerbet-session.js';
+import type { LocalKemerBetRoutinePreflightStage } from './local-kemerbet-deposit.js';
 import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 
 const LOG_DIRECTORY = 'diagnostics';
@@ -66,6 +67,46 @@ const providerStates: Record<ProviderSessionDiagnosticEvent, true> = {
   guarded_page_reload_committed: true,
   guarded_page_reload_failed: true,
 };
+const preflightStates: Record<LocalKemerBetRoutinePreflightStage, true> = {
+  session_unavailable: true,
+  preflight_started: true,
+  preflight_retry_in_place: true,
+  financial_actions_opened: true,
+  financial_actions_page_unavailable: true,
+  deposit_menu_unavailable: true,
+  deposit_menu_ready: true,
+  deposit_menu_click_failed: true,
+  deposit_menu_selected: true,
+  player_tile_selected: true,
+  search_surface_ready: true,
+  player_lookup_started: true,
+  player_lookup_verified: true,
+  amount_fields_filled: true,
+  prepared_surface_verified: true,
+  prepared_root_unavailable: true,
+  prepared_controls_unavailable: true,
+  prepared_identity_unavailable: true,
+  prepared_identity_mismatch: true,
+  prepared_currency_mismatch: true,
+  prepared_amount_mismatch: true,
+  prepared_notes_mismatch: true,
+  prepared_transfer_disabled: true,
+  prepared_surface_unavailable: true,
+  amount_prepared: true,
+  no_money_rehearsal_completed: true,
+  final_action_requested: true,
+  final_action_fenced: true,
+  post_fence_surface_verified: true,
+  final_action_expired: true,
+  route_authorization_unavailable: true,
+  transfer_click_requested: true,
+  transfer_click_completed: true,
+  transfer_click_uncertain: true,
+  provider_route_submission_attempted: true,
+  provider_route_uncertain: true,
+  success_modal_confirmed: true,
+  success_modal_unavailable: true,
+};
 type ProcessState = 'started' | 'parent_disconnected' | 'stop_requested' | 'exited';
 const processStates: Record<ProcessState, true> = {
   started: true,
@@ -81,6 +122,7 @@ export type SessionDiagnosticJournalInput =
       readonly reason?: LocalKemerBetSessionEvent['reason'];
     }
   | { readonly category: 'provider'; readonly state: ProviderSessionDiagnosticEvent }
+  | { readonly category: 'preflight'; readonly state: LocalKemerBetRoutinePreflightStage }
   | {
       readonly category: 'process';
       readonly state: ProcessState;
@@ -170,6 +212,9 @@ export function createSessionDiagnosticJournal(options: {
       } else if (input.category === 'provider') {
         if (!Object.hasOwn(providerStates, input.state)) return;
         entry = { category: 'provider', state: input.state };
+      } else if (input.category === 'preflight') {
+        if (!Object.hasOwn(preflightStates, input.state)) return;
+        entry = { category: 'preflight', state: input.state };
       } else if (input.category === 'process') {
         if (!Object.hasOwn(processStates, input.state)) return;
         entry = { category: 'process', state: input.state };

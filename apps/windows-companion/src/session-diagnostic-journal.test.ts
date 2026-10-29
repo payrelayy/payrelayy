@@ -26,6 +26,7 @@ describe('local KemerBet session diagnostic journal', () => {
     });
     journal.record({ category: 'process', state: 'started' });
     journal.record({ category: 'provider', state: 'admin_socket_logout_received' });
+    journal.record({ category: 'preflight', state: 'preflight_retry_in_place' });
     journal.record({ category: 'session', state: 'login_required' });
     journal.record({
       category: 'provider',
@@ -36,6 +37,7 @@ describe('local KemerBet session diagnostic journal', () => {
       state: 'failed',
       reason: 'secret-account-number' as never,
     });
+    journal.record({ category: 'preflight', state: 'secret-player-id' as never });
     await journal.flush();
 
     const contents = await readFile(logPath, 'utf8');
@@ -43,10 +45,11 @@ describe('local KemerBet session diagnostic journal', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(4);
     expect(entries.map((entry) => `${entry.category}:${entry.state}`)).toEqual([
       'process:started',
       'provider:admin_socket_logout_received',
+      'preflight:preflight_retry_in_place',
       'session:login_required',
     ]);
     expect(entries.every((entry) => entry.launchId === entries[0]?.launchId)).toBe(true);
@@ -57,6 +60,7 @@ describe('local KemerBet session diagnostic journal', () => {
     );
     expect(contents).not.toContain('token-and-payment-reference');
     expect(contents).not.toContain('secret-account-number');
+    expect(contents).not.toContain('secret-player-id');
   });
 
   it('rotates an oversized journal while retaining its prior events', async () => {

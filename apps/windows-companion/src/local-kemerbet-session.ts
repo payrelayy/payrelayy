@@ -652,7 +652,7 @@ export async function startLocalKemerBetSession(
   const resetVerifiedAgentPage = async (page: Page): Promise<void> => {
     if (terminal || stopping || reviewPaused)
       throw new Error('The guarded session is unavailable.');
-    // A failed Find or amount preparation can leave a modal in an unknown state.
+    // A failed read-only Find can leave a modal in an unknown state.
     // Reload through the same guarded context, then verify the bound account again
     // before doing any more UI work. This never requests a financial fence.
     signedInVerified = false;
@@ -828,8 +828,27 @@ export async function startLocalKemerBetSession(
         try {
           return await prepareAndExecute();
         } catch (error) {
-          if (fenceRequested || terminal || stopping || reviewPaused) throw error;
-          await resetVerifiedAgentPage(page);
+          if (
+            fenceRequested ||
+            terminal ||
+            stopping ||
+            reviewPaused ||
+            !signedInVerified ||
+            phase !== 'signed_in_read_only' ||
+            classifyPageUrl(page.url()) !== 'authenticated_candidate'
+          )
+            throw error;
+          // A page navigation here forces KemerBet to refresh its session token while a
+          // deposit is being prepared. The provider has rejected that refresh and moved
+          // this otherwise verified browser to sign-in. Retry only the unfenced UI work
+          // in place; a second failure leaves the payment uncredited for review.
+          lookupAuthorization.clear();
+          depositAuthorization.clear();
+          try {
+            reportRoutinePreflight('preflight_retry_in_place');
+          } catch {
+            // Diagnostics must not change a deposit outcome.
+          }
           return await prepareAndExecute();
         }
       } finally {

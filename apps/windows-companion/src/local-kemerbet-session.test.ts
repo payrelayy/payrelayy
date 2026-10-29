@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WindowsCompanionConfig } from './config.js';
+import type { LocalKemerBetRoutinePreflightStage } from './local-kemerbet-deposit.js';
 import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 import {
   startLocalKemerBetSession,
@@ -227,6 +228,7 @@ async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
   const context = new FakeContext(order);
   const events: LocalKemerBetSessionEvent[] = [];
   const diagnostics: ProviderSessionDiagnosticEvent[] = [];
+  const preflight: LocalKemerBetRoutinePreflightStage[] = [];
   context.page.goto.mockImplementationOnce(async () => {
     order.push('page:goto');
     context.page.navigate(landingUrl);
@@ -240,11 +242,12 @@ async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
     sessionConfig,
     (event) => events.push(event),
     (event) => diagnostics.push(event),
+    (stage) => preflight.push(stage),
   );
   // Expected deadline failures are consumed before timers run, avoiding unhandled test promises.
   void session.done.catch(() => undefined);
   sessions.push(session);
-  return { context, diagnostics, events, order, page: context.page, session };
+  return { context, diagnostics, events, order, page: context.page, preflight, session };
 }
 
 async function settleIdentityVerification(): Promise<void> {
@@ -307,7 +310,10 @@ describe('local KemerBet enrollment session', () => {
   });
 
   it('retries one deposit preparation only before requesting a fence', async () => {
-    const { page, session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    const { page, preflight, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
     const acquireFinalAction = vi.fn(async () => ({
       playerId: '12345678',
       amountMinor: 2500,
@@ -330,10 +336,8 @@ describe('local KemerBet enrollment session', () => {
       session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
     ).resolves.toMatchObject({ outcome: 'submission_attempted' });
     expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
-    expect(page.goto).toHaveBeenCalledWith(AGENTS_URL, {
-      waitUntil: 'commit',
-      timeout: 15_000,
-    });
+    expect(page.goto).toHaveBeenCalledTimes(1);
+    expect(preflight).toContain('preflight_retry_in_place');
     expect(acquireFinalAction).toHaveBeenCalledOnce();
   });
 
@@ -358,7 +362,10 @@ describe('local KemerBet enrollment session', () => {
   });
 
   it('bounds repeated pre-fence preparation failures without requesting a fence', async () => {
-    const { session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    const { page, preflight, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
     const acquireFinalAction = vi.fn();
     dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockRejectedValue(
       new Error('Search surface unavailable'),
@@ -369,6 +376,29 @@ describe('local KemerBet enrollment session', () => {
     ).rejects.toThrow('Search surface unavailable');
     expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
     expect(acquireFinalAction).not.toHaveBeenCalled();
+    expect(page.goto).toHaveBeenCalledTimes(1);
+    expect(preflight.filter((stage) => stage === 'preflight_retry_in_place')).toHaveLength(1);
+  });
+
+  it('does not retry preparation after KemerBet returns to sign-in', async () => {
+    const { page, preflight, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    const acquireFinalAction = vi.fn();
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockImplementationOnce(async () => {
+      page.navigate(LOGIN_URL);
+      throw new Error('KemerBet session ended');
+    });
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).rejects.toThrow('KemerBet session ended');
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledOnce();
+    expect(acquireFinalAction).not.toHaveBeenCalled();
+    expect(page.goto).toHaveBeenCalledTimes(1);
+    expect(preflight).not.toContain('preflight_retry_in_place');
+    expect(session.isSignedInVerified()).toBe(false);
   });
 
   it('restores Chrome before fencing when it was minimized during preparation', async () => {

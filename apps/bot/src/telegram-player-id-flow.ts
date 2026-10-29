@@ -211,11 +211,9 @@ export function presentTelegramPlayerIdFlowResult(
       };
     }
     case 'deposit_reference_received':
-      return depositReply(
-        result.financialMode === 'live'
-          ? TELEGRAM_PAYMENT_RECEIVED_TEXT
-          : '🧪 Test reference received. No Player credit will be made.',
-      );
+      return result.financialMode === 'live'
+        ? { kind: 'message', text: TELEGRAM_PAYMENT_RECEIVED_TEXT }
+        : depositReply('🧪 Test reference received. No Player credit will be made.');
     case 'deposit_proof_received':
     case 'deposit_proof_status':
       return {
@@ -267,7 +265,7 @@ export function presentTelegramPlayerIdFlowResult(
       }
       // Interim Owner-review notices are silent. Acknowledge intake once so
       // these submissions are not left with no bot reply.
-      return depositReply(TELEGRAM_PAYMENT_RECEIVED_TEXT);
+      return { kind: 'message', text: TELEGRAM_PAYMENT_RECEIVED_TEXT };
     case 'telebirr_routine_candidate_already_used':
       return depositReply(TELEGRAM_PAYMENT_ALREADY_USED_TEXT);
     case 'telebirr_live_verification_queued':
@@ -280,7 +278,6 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Check status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
-            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA },
           ],
         },
       };

@@ -178,6 +178,16 @@ function replyOptions(keyboard?: InlineKeyboard, text?: string) {
   return entities.length > 0 ? { entities } : undefined;
 }
 
+async function depositActionOptions(): Promise<{ reply_markup: InlineKeyboard } | undefined> {
+  try {
+    const buttons = await availableMenuButtons(outcomeActions);
+    return buttons.length > 0 ? { reply_markup: inlineMenu(buttons) } : undefined;
+  } catch {
+    // A payment-method lookup failure must not hide the input guidance itself.
+    return undefined;
+  }
+}
+
 const temporaryMessageDependencies = {
   request: (action: TelegramPrivateActionEnvelope) => {
     if (!playerActions.enabled) throw new Error('Telegram player actions are disabled.');
@@ -414,6 +424,7 @@ bot.on('message', async (context) => {
             : config.receiverSmsCandidateEnabled
               ? 'Send a JPG, PNG or PDF, or type the payment reference.'
               : 'Send a JPG, PNG or PDF, or type the TeleBirr reference.',
+          await depositActionOptions(),
         );
         return;
       }
@@ -432,7 +443,10 @@ bot.on('message', async (context) => {
         });
       } catch {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
-        await context.reply('I couldn’t read that receipt. Try again or type the reference.');
+        await context.reply(
+          'I couldn’t read that receipt. Try again or type the reference.',
+          await depositActionOptions(),
+        );
         return;
       }
       if (extracted.kind !== 'text') {
@@ -445,6 +459,7 @@ bot.on('message', async (context) => {
               : extracted.kind === 'unreadable'
                 ? unreadableReferenceText
                 : 'I couldn’t read that receipt. Try again or type the reference.',
+          await depositActionOptions(),
         );
         return;
       }
@@ -482,6 +497,7 @@ bot.on('message', async (context) => {
           mediaSubmission?.kind === 'selection_required'
             ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
             : unreadableReferenceText,
+          await depositActionOptions(),
         );
       }
       return;
@@ -499,6 +515,7 @@ bot.on('message', async (context) => {
           autoSmsSubmission.kind === 'selection_required'
             ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
             : TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
+          await depositActionOptions(),
         );
       }
       return;
@@ -519,6 +536,7 @@ bot.on('message', async (context) => {
           cbeSmsSubmission.kind === 'selection_required'
             ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
             : TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
+          await depositActionOptions(),
         );
       }
       return;
@@ -536,6 +554,7 @@ bot.on('message', async (context) => {
           guidedSubmission.kind === 'selection_required'
             ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
             : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+          await depositActionOptions(),
         );
       }
       return;
@@ -561,6 +580,7 @@ bot.on('message', async (context) => {
           proofSubmission.kind === 'selection_required'
             ? telegramDepositReferenceSelectionText(config.receiverSmsCandidateEnabled)
             : telegramDepositHelpText(config.receiverSmsCandidateEnabled),
+          await depositActionOptions(),
         );
       }
       return;
@@ -573,7 +593,7 @@ bot.on('message', async (context) => {
       return;
     }
     if (isRecognizedTelegramDepositStatusCommand({ ...metadata, command: text })) {
-      await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
+      await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT, await depositActionOptions());
       return;
     }
     if (!config.receiverSmsCandidateEnabled && isCbeBirrReceiptText(text)) {
@@ -595,6 +615,7 @@ bot.on('message', async (context) => {
           savedProof.kind === 'selection_required'
             ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
             : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+          await depositActionOptions(),
         );
       }
       return;
@@ -712,7 +733,7 @@ if (playerActions.enabled) {
     }
     if (!action) {
       if (isRecognizedTelegramDepositProofStatusCallback(callbackMetadata)) {
-        await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
+        await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT, await depositActionOptions());
       }
       return;
     }

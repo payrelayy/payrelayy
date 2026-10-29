@@ -16,7 +16,11 @@ import {
   TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
   TELEGRAM_PAYMENT_RECEIVED_TEXT,
 } from './telegram-customer-copy.js';
-import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
+import {
+  renderPlayerRegistrationMenu,
+  renderTelegramOutcomeActions,
+  type PrivateTelegramMenu,
+} from './private-menu.js';
 import {
   buildTelegramTelebirrPaymentPrompt,
   buildTelegramCbeSmsPaymentPrompt,
@@ -58,6 +62,11 @@ function formatTelegramDepositStatus(status: CustomerDepositStatusProjection): s
             ? '⏳'
             : 'ℹ️';
   return `${icon} ${status.label}`;
+}
+
+/** Keep the next deposit action attached to every payment reply, including immediate repeats. */
+function depositReply(text: string): TelegramPlayerIdFlowPresentation {
+  return { kind: 'menu', menu: { text, buttons: renderTelegramOutcomeActions() } };
 }
 
 /**
@@ -202,13 +211,11 @@ export function presentTelegramPlayerIdFlowResult(
       };
     }
     case 'deposit_reference_received':
-      return {
-        kind: 'message',
-        text:
-          result.financialMode === 'live'
-            ? TELEGRAM_PAYMENT_RECEIVED_TEXT
-            : '🧪 Test reference received. No Player credit will be made.',
-      };
+      return depositReply(
+        result.financialMode === 'live'
+          ? TELEGRAM_PAYMENT_RECEIVED_TEXT
+          : '🧪 Test reference received. No Player credit will be made.',
+      );
     case 'deposit_proof_received':
     case 'deposit_proof_status':
       return {
@@ -223,19 +230,16 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Check status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
+            ...renderTelegramOutcomeActions(),
           ],
         },
       };
     case 'telebirr_shadow_verification_queued':
-      return {
-        kind: 'message',
-        text: '🧪 Test reference received. No Player credit will be made.',
-      };
+      return depositReply('🧪 Test reference received. No Player credit will be made.');
     case 'telebirr_routine_candidate_recorded_no_money':
-      return {
-        kind: 'message',
-        text: '🧪 Test reference received. No payment was verified or credited. Do not send money.',
-      };
+      return depositReply(
+        '🧪 Test reference received. No payment was verified or credited. Do not send money.',
+      );
     case 'telebirr_routine_candidate_recorded_paid_pending':
       // The signed phone result normally arrives quickly. A permanent acknowledgment
       // here would give an invalid reference two bot messages before its final result.
@@ -244,40 +248,28 @@ export function presentTelegramPlayerIdFlowResult(
       return { kind: 'deferred' };
     case 'receiver_sms_candidate_received':
       if (result.duplicateState === 'credited') {
-        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_CREDITED_TEXT };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_CREDITED_TEXT);
       }
       if (result.duplicateState === 'same_account_pending') {
-        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_SUBMITTED_WAIT_TEXT };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_SUBMITTED_WAIT_TEXT);
       }
       if (result.duplicateState === 'other_account_pending') {
-        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_SUBMITTED_OTHER_TEXT };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_SUBMITTED_OTHER_TEXT);
       }
       if (result.duplicateState === 'closed') {
-        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_CLOSED_TEXT);
       }
       if (result.duplicateState === 'recorded_elsewhere') {
-        return { kind: 'message', text: TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_RECORDED_TEXT);
       }
       if (result.matchStatus === 'already_used') {
-        return {
-          kind: 'message',
-          text: TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
-        };
+        return depositReply(TELEGRAM_PAYMENT_ALREADY_USED_TEXT);
       }
       // Interim Owner-review notices are silent. Acknowledge intake once so
       // these submissions are not left with no bot reply.
-      return {
-        kind: 'message',
-        text: TELEGRAM_PAYMENT_RECEIVED_TEXT,
-      };
+      return depositReply(TELEGRAM_PAYMENT_RECEIVED_TEXT);
     case 'telebirr_routine_candidate_already_used':
-      return {
-        kind: 'menu',
-        menu: {
-          text: TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
-          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA }],
-        },
-      };
+      return depositReply(TELEGRAM_PAYMENT_ALREADY_USED_TEXT);
     case 'telebirr_live_verification_queued':
       return {
         kind: 'menu',
@@ -313,20 +305,13 @@ export function presentTelegramPlayerIdFlowResult(
         },
       };
     case 'deposit_status':
-      return {
-        kind: 'message',
-        text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${formatTelegramDepositStatus(result.depositStatus)}.`,
-      };
+      return depositReply(
+        `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${formatTelegramDepositStatus(result.depositStatus)}.`,
+      );
     case 'deposit_input_invalid':
-      return {
-        kind: 'message',
-        text: telegramDepositHelpText(context.receiverSmsCandidateEnabled),
-      };
+      return depositReply(telegramDepositHelpText(context.receiverSmsCandidateEnabled));
     case 'deposit_status_unavailable':
-      return {
-        kind: 'message',
-        text: TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
-      };
+      return depositReply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
     case 'deposit_unavailable':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositUnavailable') };
     case 'invalid_player_id':

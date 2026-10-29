@@ -270,11 +270,21 @@ describe('Owner manual payment boundary', () => {
               paymentVerificationMode: 'live',
               depositExecutionMode: 'live',
               telebirrReceiptLookupMode: 'disabled',
+              paymentMethods: [
+                { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+                { providerCode: 'telebirr', ownerEnabled: true, readiness: 'ready' },
+              ],
               telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
               cbeSmsLastReceivedAt: null,
               openDepositJobs: 1,
+              readyDepositJobs: 1,
+              oldestReadyDepositJobAt: '2026-10-23T09:01:00Z',
+              leasedDepositJobs: 0,
+              overdueLeasedDepositJobs: 0,
               deadDepositJobs: 0,
               awaitingManualCredits: 2,
+              pendingPlayerValidations: 1,
+              oldestPendingPlayerValidationAt: '2026-10-23T09:02:00Z',
               checkedAt: '2026-10-23T09:05:00Z',
             },
           },
@@ -284,9 +294,45 @@ describe('Owner manual payment boundary', () => {
     expect(await service.systemOverview(actor)).toMatchObject({
       paymentVerificationMode: 'live',
       telebirrReceiptLookupMode: 'disabled',
+      paymentMethods: [
+        { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+        { providerCode: 'telebirr', ownerEnabled: true, readiness: 'ready' },
+      ],
       openDepositJobs: 1,
       awaitingManualCredits: 2,
+      pendingPlayerValidations: 1,
     });
+  });
+
+  it('rejects inconsistent work-age facts instead of showing a false healthy status', async () => {
+    const service = new PostgresOwnerManualPayments({
+      query: async () => ({
+        rows: [
+          {
+            overview: {
+              paymentVerificationMode: 'live',
+              depositExecutionMode: 'live',
+              telebirrReceiptLookupMode: 'disabled',
+              telebirrSmsLastReceivedAt: null,
+              cbeSmsLastReceivedAt: null,
+              openDepositJobs: 0,
+              readyDepositJobs: 1,
+              oldestReadyDepositJobAt: null,
+              leasedDepositJobs: 0,
+              overdueLeasedDepositJobs: 0,
+              deadDepositJobs: 0,
+              awaitingManualCredits: 0,
+              pendingPlayerValidations: 0,
+              oldestPendingPlayerValidationAt: null,
+              checkedAt: '2026-10-23T09:05:00Z',
+            },
+          },
+        ],
+      }),
+    });
+    await expect(service.systemOverview(actor)).rejects.toBeInstanceOf(
+      OwnerManualPaymentUnavailableError,
+    );
   });
 
   it('lists masked pending cases and reserves approval without an execution job', async () => {

@@ -533,11 +533,21 @@ describe('Owner workspace navigation', () => {
               paymentVerificationMode: 'live',
               depositExecutionMode: 'live',
               telebirrReceiptLookupMode: 'disabled',
+              paymentMethods: [
+                { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+                { providerCode: 'telebirr', ownerEnabled: true, readiness: 'ready' },
+              ],
               telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
               cbeSmsLastReceivedAt: null,
               openDepositJobs: 2,
+              readyDepositJobs: 2,
+              oldestReadyDepositJobAt: '2026-10-23T09:04:00Z',
+              leasedDepositJobs: 0,
+              overdueLeasedDepositJobs: 0,
               deadDepositJobs: 0,
               awaitingManualCredits: 1,
+              pendingPlayerValidations: 0,
+              oldestPendingPlayerValidationAt: null,
               checkedAt: '2026-10-23T09:05:00Z',
             })
           : undefined,
@@ -547,11 +557,20 @@ describe('Owner workspace navigation', () => {
     expect(facts).toContain('Separate TeleBirr receipt lookup');
     expect(facts).toContain('Off');
     expect(facts).toContain('Open deposit jobs');
-    expect(browser.element('#system-overview-attention').textContent).toContain(
-      '1 manual credit waiting',
+    expect(browser.element('#system-overview-attention').textContent).toContain('Owner attention');
+    expect(JSON.stringify(browser.element('#system-overview-alerts'))).toContain(
+      'Manual credit follow-up',
     );
-    expect(browser.element('#system-overview-attention').textContent).not.toContain('stopped');
     expect(browser.element('#system-overview-status').textContent).toContain('Ethiopia time');
+    const checksBeforeRefresh = browser.fetchCalls.filter(
+      ({ url }) => url === '/v1/owner/system-overview',
+    ).length;
+    browser.expireLatestTimer(30_000);
+    await vi.waitFor(() =>
+      expect(
+        browser.fetchCalls.filter(({ url }) => url === '/v1/owner/system-overview'),
+      ).toHaveLength(checksBeforeRefresh + 1),
+    );
     await browser.element('#system-overview-open-system').listeners.get('click')?.({
       preventDefault() {},
     });
@@ -559,6 +578,157 @@ describe('Owner workspace navigation', () => {
     await browser.call('signOut');
     expect(browser.element('#system-overview-attention').textContent).toBe(
       'Sign in to check work that needs attention.',
+    );
+  });
+
+  it('shows evidenced work alerts and clears them after recovery', async () => {
+    let overview: Record<string, unknown> = {
+      paymentVerificationMode: 'live',
+      depositExecutionMode: 'live',
+      telebirrReceiptLookupMode: 'disabled',
+      paymentMethods: [
+        { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+        { providerCode: 'telebirr', ownerEnabled: true, readiness: 'ready' },
+      ],
+      telebirrSmsLastReceivedAt: null,
+      cbeSmsLastReceivedAt: null,
+      openDepositJobs: 2,
+      readyDepositJobs: 1,
+      oldestReadyDepositJobAt: '2026-10-23T09:00:00Z',
+      leasedDepositJobs: 1,
+      overdueLeasedDepositJobs: 1,
+      deadDepositJobs: 1,
+      awaitingManualCredits: 1,
+      pendingPlayerValidations: 2,
+      oldestPendingPlayerValidationAt: '2026-10-23T09:00:00Z',
+      checkedAt: '2026-10-23T09:10:00Z',
+    };
+    let connection = {
+      pairedDeviceCount: 1,
+      validDeviceCount: 1,
+      connectedDeviceCount: 0,
+      lastSeenAt: '2026-10-23T09:00:00.000Z',
+      checkedAt: '2026-10-23T09:10:00.000Z',
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/system-overview'
+          ? response(200, overview)
+          : url === '/v1/owner/companion-connection'
+            ? response(200, { connection })
+            : undefined,
+    });
+    await browser.signIn();
+    const alerts = browser.element('#system-overview-alerts').children as FakeElement[];
+    expect(alerts).toHaveLength(4);
+    expect(JSON.stringify(alerts)).toContain('Deposit execution needs investigation');
+    expect(JSON.stringify(alerts)).toContain('Stopped deposit jobs');
+    expect(JSON.stringify(alerts)).toContain('Manual credit follow-up');
+    expect(JSON.stringify(alerts)).toContain('Player ID checks are delayed');
+    expect(JSON.stringify(alerts)).not.toContain('Companion check-in is missing');
+    expect(alerts[0]?.dataset.severity).toBe('critical');
+    const playerAlert = alerts.find((alert) =>
+      JSON.stringify(alert).includes('Player ID checks are delayed'),
+    );
+    const playerAction = playerAlert?.children.at(-1) as FakeElement | undefined;
+    await playerAction?.listeners.get('click')?.({ preventDefault() {} });
+    expect(browser.element('#kemerbet-companion-title').focused).toBe(true);
+
+    overview = {
+      ...overview,
+      openDepositJobs: 0,
+      readyDepositJobs: 0,
+      oldestReadyDepositJobAt: null,
+      leasedDepositJobs: 0,
+      overdueLeasedDepositJobs: 0,
+      deadDepositJobs: 0,
+      awaitingManualCredits: 0,
+      pendingPlayerValidations: 0,
+      oldestPendingPlayerValidationAt: null,
+    };
+    connection = {
+      ...connection,
+      connectedDeviceCount: 1,
+      lastSeenAt: '2026-10-23T09:09:50.000Z',
+    };
+    await browser.call('loadSystemOverview');
+    await browser.call('loadCompanionConnection');
+    expect(browser.element('#system-overview-alerts').children).toHaveLength(0);
+    expect(browser.element('#system-overview-attention').textContent).toContain(
+      'No issues detected in monitored work',
+    );
+  });
+
+  it('keeps intentional pauses quiet and reports a missing Companion check-in only after two minutes', async () => {
+    let overview = {
+      paymentVerificationMode: 'disabled',
+      depositExecutionMode: 'disabled',
+      telebirrReceiptLookupMode: 'disabled',
+      paymentMethods: [
+        { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'receiver_missing' },
+        { providerCode: 'telebirr', ownerEnabled: false, readiness: 'payments_paused' },
+      ],
+      telebirrSmsLastReceivedAt: null,
+      cbeSmsLastReceivedAt: null,
+      openDepositJobs: 1,
+      readyDepositJobs: 1,
+      oldestReadyDepositJobAt: '2026-10-23T09:00:00Z',
+      leasedDepositJobs: 0,
+      overdueLeasedDepositJobs: 0,
+      deadDepositJobs: 0,
+      awaitingManualCredits: 0,
+      pendingPlayerValidations: 0,
+      oldestPendingPlayerValidationAt: null,
+      checkedAt: '2026-10-23T09:10:00Z',
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/system-overview'
+          ? response(200, overview)
+          : url === '/v1/owner/companion-connection'
+            ? response(200, {
+                connection: {
+                  pairedDeviceCount: 1,
+                  validDeviceCount: 1,
+                  connectedDeviceCount: 0,
+                  lastSeenAt: '2026-10-23T09:00:00.000Z',
+                  checkedAt: '2026-10-23T09:10:00.000Z',
+                },
+              })
+            : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#system-overview-alerts').children).toHaveLength(0);
+    expect(browser.element('#system-overview-pauses').textContent).toContain(
+      'paused by the current settings',
+    );
+    expect(JSON.stringify(browser.element('#system-overview-facts'))).not.toContain(
+      'Needs attention',
+    );
+    overview = {
+      ...overview,
+      paymentVerificationMode: 'live',
+      depositExecutionMode: 'live',
+      paymentMethods: [
+        { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+        { providerCode: 'telebirr', ownerEnabled: true, readiness: 'ready' },
+      ],
+    };
+    await browser.call('loadSystemOverview');
+    const shown = JSON.stringify(browser.element('#system-overview-alerts'));
+    expect(shown).toContain('Deposit queue is delayed');
+    expect(shown).toContain('Companion check-in is missing');
+    expect(browser.element('#system-overview-pauses').textContent).toBe('');
+    overview = {
+      ...overview,
+      paymentMethods: [
+        { providerCode: 'cbe_birr', ownerEnabled: true, readiness: 'ready' },
+        { providerCode: 'telebirr', ownerEnabled: true, readiness: 'credit_worker_offline' },
+      ],
+    };
+    await browser.call('loadSystemOverview');
+    expect(JSON.stringify(browser.element('#system-overview-alerts'))).toContain(
+      'Automatic credit worker is offline',
     );
   });
 

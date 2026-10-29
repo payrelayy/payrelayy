@@ -7,6 +7,7 @@ import {
   openOwnerDepositProofReference,
   openReceiverSmsDisplayReference,
 } from '@fetanagent/deposit-reference-protection/owner-payment-display';
+import type { OwnerPaymentMethod } from './owner-payment-methods.js';
 
 export class OwnerManualPaymentRejectedError extends Error {}
 export class OwnerManualPaymentConflictError extends Error {}
@@ -88,11 +89,22 @@ export interface OwnerSystemOverview {
   readonly paymentVerificationMode: 'disabled' | 'dry_run' | 'live' | null;
   readonly depositExecutionMode: 'disabled' | 'dry_run' | 'live' | null;
   readonly telebirrReceiptLookupMode: 'disabled' | 'dry_run' | 'live' | null;
+  readonly paymentMethods: readonly {
+    readonly providerCode: 'telebirr' | 'cbe_birr';
+    readonly ownerEnabled: boolean;
+    readonly readiness: OwnerPaymentMethod['readiness'];
+  }[];
   readonly telebirrSmsLastReceivedAt: string | null;
   readonly cbeSmsLastReceivedAt: string | null;
   readonly openDepositJobs: number;
+  readonly readyDepositJobs: number;
+  readonly oldestReadyDepositJobAt: string | null;
+  readonly leasedDepositJobs: number;
+  readonly overdueLeasedDepositJobs: number;
   readonly deadDepositJobs: number;
   readonly awaitingManualCredits: number;
+  readonly pendingPlayerValidations: number;
+  readonly oldestPendingPlayerValidationAt: string | null;
   readonly checkedAt: string;
 }
 
@@ -187,6 +199,43 @@ function overviewCount(value: unknown): number {
   return value as number;
 }
 
+const OVERVIEW_METHOD_READINESS = new Set([
+  'ready',
+  'provider_unavailable',
+  'receiver_missing',
+  'receiver_not_protected',
+  'payments_paused',
+  'sms_route_paused',
+  'verification_paused',
+  'credit_worker_offline',
+  'credit_worker_paused',
+  'phone_not_paired',
+  'new_receiver_sms_not_seen',
+]);
+
+function overviewPaymentMethods(value: unknown): OwnerSystemOverview['paymentMethods'] {
+  if (!Array.isArray(value) || value.length !== 2) throw new OwnerManualPaymentUnavailableError();
+  const methods = value.map((candidate) => {
+    const method = object(candidate);
+    if (
+      Object.keys(method).sort().join(',') !== 'ownerEnabled,providerCode,readiness' ||
+      (method.providerCode !== 'telebirr' && method.providerCode !== 'cbe_birr') ||
+      typeof method.ownerEnabled !== 'boolean' ||
+      typeof method.readiness !== 'string' ||
+      !OVERVIEW_METHOD_READINESS.has(method.readiness)
+    )
+      throw new OwnerManualPaymentUnavailableError();
+    return {
+      providerCode: method.providerCode as 'telebirr' | 'cbe_birr',
+      ownerEnabled: method.ownerEnabled,
+      readiness: method.readiness as OwnerPaymentMethod['readiness'],
+    };
+  });
+  if (methods[0]?.providerCode !== 'cbe_birr' || methods[1]?.providerCode !== 'telebirr')
+    throw new OwnerManualPaymentUnavailableError();
+  return methods;
+}
+
 function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String(error.code)
@@ -223,17 +272,37 @@ export class PostgresOwnerManualPayments {
       );
       if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();
       const value = object(object(result.rows[0]).overview);
-      return {
+      const overview: OwnerSystemOverview = {
         paymentVerificationMode: mode(value.paymentVerificationMode),
         depositExecutionMode: mode(value.depositExecutionMode),
         telebirrReceiptLookupMode: mode(value.telebirrReceiptLookupMode),
+        paymentMethods: overviewPaymentMethods(value.paymentMethods),
         telebirrSmsLastReceivedAt: overviewTime(value.telebirrSmsLastReceivedAt, true),
         cbeSmsLastReceivedAt: overviewTime(value.cbeSmsLastReceivedAt, true),
         openDepositJobs: overviewCount(value.openDepositJobs),
+        readyDepositJobs: overviewCount(value.readyDepositJobs),
+        oldestReadyDepositJobAt: overviewTime(value.oldestReadyDepositJobAt, true),
+        leasedDepositJobs: overviewCount(value.leasedDepositJobs),
+        overdueLeasedDepositJobs: overviewCount(value.overdueLeasedDepositJobs),
         deadDepositJobs: overviewCount(value.deadDepositJobs),
         awaitingManualCredits: overviewCount(value.awaitingManualCredits),
+        pendingPlayerValidations: overviewCount(value.pendingPlayerValidations),
+        oldestPendingPlayerValidationAt: overviewTime(value.oldestPendingPlayerValidationAt, true),
         checkedAt: overviewTime(value.checkedAt)!,
       };
+      if (
+        overview.readyDepositJobs + overview.leasedDepositJobs > overview.openDepositJobs ||
+        overview.overdueLeasedDepositJobs > overview.leasedDepositJobs ||
+        overview.readyDepositJobs > 0 !== (overview.oldestReadyDepositJobAt !== null) ||
+        overview.pendingPlayerValidations > 0 !==
+          (overview.oldestPendingPlayerValidationAt !== null) ||
+        (overview.oldestReadyDepositJobAt !== null &&
+          Date.parse(overview.oldestReadyDepositJobAt) > Date.parse(overview.checkedAt)) ||
+        (overview.oldestPendingPlayerValidationAt !== null &&
+          Date.parse(overview.oldestPendingPlayerValidationAt) > Date.parse(overview.checkedAt))
+      )
+        throw new OwnerManualPaymentUnavailableError();
+      return overview;
     } catch (error) {
       translate(error);
     }

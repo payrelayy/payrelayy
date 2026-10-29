@@ -323,8 +323,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="system-overview-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See payment switches, recorded SMS activity, and deposit-job counts. This page does not currently measure bot or receiver-phone connectivity. A recent SMS is activity, not proof that the phone is online.</p>
+          <p class="receipt-label">Live work and settings are checked here. A Companion check-in does not prove KemerBet is signed in, and a recent SMS does not prove the receiver phone is online.</p>
           <p class="owner-attention" id="system-overview-attention" role="status" aria-live="polite">Sign in to check work that needs attention.</p>
+          <div class="owner-alert-list" id="system-overview-alerts"></div>
+          <p class="request-meta" id="system-overview-pauses"></p>
           <dl class="overview-grid" id="system-overview-facts"></dl>
           <p class="request-meta">Windows Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
@@ -1133,6 +1135,13 @@ section[aria-labelledby="deposit-intake-title"] { order: 5; }
 .owner-control-effect { color: #075f55; font-size: .76rem; font-weight: 800; }
 .owner-control-description { color: #51656d; font-size: .83rem; font-weight: 500; line-height: 1.45; }
 .owner-attention { border-left: 4px solid #087d71; border-radius: 8px; background: #f0f9f6; padding: 12px 14px; color: #173039; font-weight: 700; line-height: 1.5; }
+.owner-alert-list { display: grid; gap: 10px; margin-top: 12px; }
+.owner-alert { border: 1px solid #e7d29b; border-left: 4px solid #bb7619; border-radius: 10px; background: #fffaf0; padding: 12px 14px; }
+.owner-alert[data-severity="critical"] { border-color: #ebc5c5; border-left-color: #b83a43; background: #fff5f5; }
+.owner-alert h3 { margin: 0 0 4px; font-size: 1rem; }
+.owner-alert p { margin: 0; color: #435960; line-height: 1.45; }
+.owner-alert .request-meta { margin-top: 7px; }
+.owner-alert button { margin-top: 10px; padding: 8px 11px; font-size: .85rem; }
 form { display: grid; gap: 10px; }
 label { color: #2d4951; font-size: 0.9rem; font-weight: 700; }
 input, select { width: 100%; border: 1px solid #c8d6db; border-radius: 10px; color: #173039; background: #fff; padding: 12px 14px; }
@@ -1321,10 +1330,17 @@ const ownerSessionStatus = document.querySelector('#owner-session-status');
 const systemOverviewRefresh = document.querySelector('#system-overview-refresh');
 const systemOverviewStatus = document.querySelector('#system-overview-status');
 const systemOverviewAttention = document.querySelector('#system-overview-attention');
+const systemOverviewAlerts = document.querySelector('#system-overview-alerts');
+const systemOverviewPauses = document.querySelector('#system-overview-pauses');
 const systemOverviewFacts = document.querySelector('#system-overview-facts');
 const systemOverviewCompanion = document.querySelector('#system-overview-companion');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
 let systemOverviewLoadGeneration = 0;
+let systemOverviewPollTimer;
+let latestSystemOverview;
+let latestCompanionConnection;
+let companionConnectionKnown = false;
+let companionConnectionChecked = false;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
 const transactionsFilters = document.querySelector('#transactions-filters');
 const transactionsStatusFilter = document.querySelector('#transactions-status-filter');
@@ -3397,6 +3413,8 @@ function clearPendingCompanionLookupRequestId() {
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
+  window.clearTimeout(systemOverviewPollTimer);
+  systemOverviewPollTimer = undefined;
   clearPersistedOwnerSession();
   accessToken = undefined;
   refreshToken = undefined;
@@ -3467,7 +3485,10 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxStatus.textContent = 'Sign in to load received payments.';
   receiverSmsInboxMore.hidden = true;
   systemOverviewLoadGeneration += 1;
+  latestSystemOverview = undefined;
   systemOverviewFacts.replaceChildren();
+  systemOverviewAlerts.replaceChildren();
+  systemOverviewPauses.textContent = '';
   systemOverviewAttention.textContent = 'Sign in to check work that needs attention.';
   systemOverviewStatus.textContent = 'Sign in to load system status.';
   manualPaymentMore.hidden = true;
@@ -5345,7 +5366,11 @@ function clearCompanionConnection() {
   companionConnectionPollTimer = undefined;
   companionConnectionExpiryTimer = undefined;
   companionConnectionStatus.textContent = 'Sign in to check the companion connection.';
+  latestCompanionConnection = undefined;
+  companionConnectionKnown = false;
+  companionConnectionChecked = false;
   syncCompanionOverview();
+  renderOwnerAlerts();
   companionConnectionDetail.textContent = '';
   companionConnectionGuidance.textContent = '';
   companionConnectionRefresh.disabled = true;
@@ -5389,6 +5414,9 @@ async function loadCompanionConnection() {
     if (!payload || Object.keys(payload).join(',') !== 'connection' ||
         !validCompanionConnection(payload.connection)) throw new Error('invalid_connection_status');
     const connection = payload.connection;
+    latestCompanionConnection = connection;
+    companionConnectionKnown = true;
+    companionConnectionChecked = true;
     const freshnessRemaining = connection.lastSeenAt === null ? 0 :
       60_000 - (Date.parse(connection.checkedAt) - Date.parse(connection.lastSeenAt)) - Math.max(0, Date.now() - startedAt);
     companionConnectionDetail.textContent =
@@ -5417,6 +5445,9 @@ async function loadCompanionConnection() {
     }
   } catch (error) {
     if (current() && !isSignedOutError(error)) {
+      latestCompanionConnection = undefined;
+      companionConnectionKnown = false;
+      companionConnectionChecked = true;
       companionConnectionStatus.textContent = 'Connection status unavailable';
       companionConnectionDetail.textContent = '';
       companionConnectionGuidance.textContent = 'The server check did not complete. Refresh to try again; this does not mean the companion is signed out.';
@@ -5424,6 +5455,7 @@ async function loadCompanionConnection() {
   } finally {
     if (current()) {
       syncCompanionOverview();
+      renderOwnerAlerts();
       companionConnectionLoading = false;
       companionConnectionRefresh.disabled = false;
       companionConnectionPollTimer = window.setTimeout(() => void loadCompanionConnection(), 20_000);
@@ -5437,7 +5469,13 @@ document.addEventListener('visibilitychange', () => {
   if (accessToken) {
     companionConnectionStatus.textContent = 'Connection status needs refresh';
     syncCompanionOverview();
-    if (!document.hidden) void loadCompanionConnection();
+    if (!document.hidden) {
+      void loadCompanionConnection();
+      void loadSystemOverview();
+    } else {
+      window.clearTimeout(systemOverviewPollTimer);
+      systemOverviewPollTimer = undefined;
+    }
   }
 });
 
@@ -6518,16 +6556,36 @@ function validSmsInboxPayment(value) {
 
 function validSystemOverview(value) {
   const modes = ['disabled', 'dry_run', 'live', null];
+  const readiness = ['ready','provider_unavailable','receiver_missing',
+    'receiver_not_protected','payments_paused','sms_route_paused',
+    'verification_paused','credit_worker_offline','credit_worker_paused',
+    'phone_not_paired','new_receiver_sms_not_seen'];
   const validTime = (time) => time === null ||
     (typeof time === 'string' && Number.isFinite(Date.parse(time)));
+  const methods = value?.paymentMethods;
   return value && typeof value === 'object' &&
     modes.includes(value.paymentVerificationMode) &&
     modes.includes(value.depositExecutionMode) &&
     modes.includes(value.telebirrReceiptLookupMode) &&
+    Array.isArray(methods) && methods.length === 2 &&
+    methods[0]?.providerCode === 'cbe_birr' &&
+    methods[1]?.providerCode === 'telebirr' &&
+    methods.every((method) => method && typeof method === 'object' &&
+      Object.keys(method).sort().join(',') === 'ownerEnabled,providerCode,readiness' &&
+      typeof method.ownerEnabled === 'boolean' && readiness.includes(method.readiness)) &&
     validTime(value.telebirrSmsLastReceivedAt) &&
     validTime(value.cbeSmsLastReceivedAt) &&
-    ['openDepositJobs','deadDepositJobs','awaitingManualCredits'].every((key) =>
+    validTime(value.oldestReadyDepositJobAt) &&
+    validTime(value.oldestPendingPlayerValidationAt) &&
+    ['openDepositJobs','readyDepositJobs','leasedDepositJobs',
+      'overdueLeasedDepositJobs','deadDepositJobs','awaitingManualCredits',
+      'pendingPlayerValidations'].every((key) =>
       Number.isSafeInteger(value[key]) && value[key] >= 0) &&
+    value.readyDepositJobs + value.leasedDepositJobs <= value.openDepositJobs &&
+    value.overdueLeasedDepositJobs <= value.leasedDepositJobs &&
+    (value.readyDepositJobs > 0) === (value.oldestReadyDepositJobAt !== null) &&
+    (value.pendingPlayerValidations > 0) ===
+      (value.oldestPendingPlayerValidationAt !== null) &&
     typeof value.checkedAt === 'string' && Number.isFinite(Date.parse(value.checkedAt));
 }
 
@@ -6541,13 +6599,169 @@ function systemOverviewFact(label, detail) {
   systemOverviewFacts.append(item);
 }
 
+function renderOwnerAlerts() {
+  systemOverviewAlerts.replaceChildren();
+  systemOverviewPauses.textContent = '';
+  const value = latestSystemOverview;
+  if (!value) {
+    systemOverviewAttention.textContent = accessToken
+      ? 'Operational status could not be checked. Refresh to try again.'
+      : 'Sign in to check work that needs attention.';
+    return;
+  }
+  const alerts = [];
+  const add = (title, detail, severity, since, view, section, action) =>
+    alerts.push({ title, detail, severity, since, view, section, action });
+  const settingsKnown = value.paymentVerificationMode !== null &&
+    value.depositExecutionMode !== null;
+  const depositsLive = value.paymentVerificationMode === 'live' &&
+    value.depositExecutionMode === 'live';
+  const paused = [];
+  if (!settingsKnown) {
+    add('Deposit settings cannot be confirmed',
+      'A required payment setting is missing. Check the processing policy before accepting deposits.',
+      'critical', null, 'system', 'routine-processing-title', 'Open System');
+  } else if (!depositsLive) {
+    paused.push('Deposit processing is paused by the current settings');
+  }
+  const methodLabels = { telebirr: 'TeleBirr', cbe_birr: 'CBE Birr' };
+  const methodReasons = {
+    provider_unavailable: 'The payment provider is unavailable.',
+    receiver_missing: 'No active receiving account is configured.',
+    receiver_not_protected: 'The receiving account needs protection review.',
+    phone_not_paired: 'The receiving phone is not paired for this account.',
+    new_receiver_sms_not_seen: 'The new receiving account has not recorded a signed SMS yet.',
+  };
+  const methodPauseReasons = ['payments_paused','sms_route_paused',
+    'verification_paused','credit_worker_paused'];
+  const offlineMethods = value.paymentMethods.filter((method) =>
+    depositsLive && method.ownerEnabled && method.readiness === 'credit_worker_offline');
+  if (offlineMethods.length > 0) {
+    add('Automatic credit worker is offline',
+      offlineMethods.map((method) => methodLabels[method.providerCode]).join(' and ') +
+        ' deposits cannot be processed automatically. Check the processing service.',
+      'critical', null, 'system', 'routine-processing-title', 'Open System');
+  }
+  for (const method of value.paymentMethods) {
+    const label = methodLabels[method.providerCode];
+    if (!method.ownerEnabled) {
+      paused.push(label + ' is off by Owner setting');
+    } else if (!depositsLive || methodPauseReasons.includes(method.readiness)) {
+      paused.push(label + ' is paused by current settings');
+    } else if (method.readiness !== 'ready' &&
+        method.readiness !== 'credit_worker_offline') {
+      add(label + ' deposits need attention',
+        methodReasons[method.readiness] || 'This payment method is not ready.',
+        'critical', null, 'methods', 'payment-methods-title', 'Open payment methods');
+    }
+  }
+  systemOverviewPauses.textContent = paused.length > 0 ? paused.join(' · ') + '.' : '';
+  if (value.overdueLeasedDepositJobs > 0) {
+    add('Deposit execution needs investigation',
+      value.overdueLeasedDepositJobs + ' deposit execution lease(s) are overdue. ' +
+        'Check the exact payment outcome before any manual credit.',
+      'critical', null, 'submitted', 'receiver-sms-old-title', 'Open payments');
+  }
+  if (value.deadDepositJobs > 0) {
+    add('Stopped deposit jobs',
+      value.deadDepositJobs + ' deposit job(s) stopped without a confirmed automatic credit. ' +
+        'Review the payment before taking action.',
+      'critical', null, 'submitted', 'receiver-sms-old-title', 'Open payments');
+  }
+  if (value.awaitingManualCredits > 0) {
+    add('Manual credit follow-up',
+      value.awaitingManualCredits + ' payment(s) await Owner confirmation of an outside credit.',
+      'warning', null, 'submitted', 'receiver-sms-old-title', 'Open payments');
+  }
+  const readyAge = value.oldestReadyDepositJobAt === null ? 0 :
+    Date.parse(value.checkedAt) - Date.parse(value.oldestReadyDepositJobAt);
+  if (depositsLive && value.readyDepositJobs > 0 && value.leasedDepositJobs === 0 &&
+      readyAge >= 120_000) {
+    add('Deposit queue is delayed',
+      value.readyDepositJobs + ' ready payment(s) are waiting, with no deposit currently leased. ' +
+        'Check the Companion and processing policy.',
+      'warning', value.oldestReadyDepositJobAt,
+      'advanced', 'kemerbet-companion-title', 'Open Companion');
+  }
+  const validationAge = value.oldestPendingPlayerValidationAt === null ? 0 :
+    Date.parse(value.checkedAt) - Date.parse(value.oldestPendingPlayerValidationAt);
+  if (value.pendingPlayerValidations > 0 && validationAge >= 300_000) {
+    add('Player ID checks are delayed',
+      value.pendingPlayerValidations + ' Player ID check(s) are pending. ' +
+        'Credits take the Companion queue first; check its connection and KemerBet session.',
+      'warning', value.oldestPendingPlayerValidationAt,
+      'advanced', 'kemerbet-companion-title', 'Open Companion');
+  }
+  if (depositsLive || value.pendingPlayerValidations > 0) {
+    const connection = latestCompanionConnection;
+    if (!companionConnectionChecked) {
+      // An initial check is in flight; absence of a result is not an outage.
+    } else if (!companionConnectionKnown || !connection) {
+      add('Companion status cannot be checked',
+        'The Owner page could not confirm the Companion check-in. Refresh its connection status.',
+        'warning', null, 'advanced', 'kemerbet-companion-title', 'Open Companion');
+    } else if (connection.pairedDeviceCount === 0 || connection.validDeviceCount === 0) {
+      add('Companion setup needs attention',
+        connection.pairedDeviceCount === 0
+          ? 'No Companion is paired for automatic deposits or Player ID Find.'
+          : 'No valid Companion pairing is available for automatic deposits or Player ID Find.',
+        'critical', null, 'advanced', 'kemerbet-companion-title', 'Open Companion');
+    } else {
+      const lastSeenAge = connection.lastSeenAt === null ? Infinity :
+        Date.parse(connection.checkedAt) - Date.parse(connection.lastSeenAt);
+      if (connection.connectedDeviceCount === 0 && lastSeenAge >= 120_000 &&
+          value.leasedDepositJobs === 0) {
+        add('Companion check-in is missing',
+          'No authenticated check-in for at least two minutes. Deposits and Player ID checks ' +
+            'may be delayed. Check the Companion window and KemerBet sign-in.',
+          'warning', connection.lastSeenAt,
+          'advanced', 'kemerbet-companion-title', 'Open Companion');
+      }
+    }
+  }
+  alerts.sort((a, b) => (a.severity === 'critical' ? -1 : 1) -
+    (b.severity === 'critical' ? -1 : 1));
+  for (const alert of alerts) {
+    const card = document.createElement('article');
+    card.className = 'owner-alert';
+    card.dataset.severity = alert.severity;
+    const title = document.createElement('h3');
+    title.textContent = alert.title;
+    const detail = document.createElement('p');
+    detail.textContent = alert.detail;
+    card.append(title, detail);
+    const evidenceTime = document.createElement('p');
+    evidenceTime.className = 'request-meta';
+    evidenceTime.textContent = (alert.since ? 'Evidence from ' : 'Detected at check ') +
+      transactionDate(alert.since || value.checkedAt) + ' · Ethiopia time';
+    card.append(evidenceTime);
+    const button = document.createElement('button');
+    button.className = 'secondary';
+    button.type = 'button';
+    button.textContent = alert.action;
+    button.addEventListener('click', () => openOwnerControl(alert.view, alert.section));
+    card.append(button);
+    systemOverviewAlerts.append(card);
+  }
+  systemOverviewAttention.textContent = alerts.length > 0
+    ? alerts.length + (alerts.length === 1 ? ' issue needs' : ' issues need') +
+        ' Owner attention. Alerts clear when the next check confirms recovery.'
+    : !companionConnectionChecked && (depositsLive || value.pendingPlayerValidations > 0)
+      ? 'Checking the Companion. Receiver-phone and bot connectivity are not directly monitored here.'
+      : 'No issues detected in monitored work. Receiver-phone and bot connectivity ' +
+          'are not directly monitored here.';
+}
+
 async function loadSystemOverview() {
   if (!accessToken) return;
   const generation = ownerAuthGeneration;
   const loadGeneration = ++systemOverviewLoadGeneration;
+  window.clearTimeout(systemOverviewPollTimer);
+  systemOverviewPollTimer = undefined;
   systemOverviewRefresh.disabled = true;
   systemOverviewStatus.textContent = 'Loading system status…';
-  systemOverviewAttention.textContent = 'Checking work that needs attention…';
+  if (!latestSystemOverview)
+    systemOverviewAttention.textContent = 'Checking work that needs attention…';
   try {
     const response = await ownerRequest('/v1/owner/system-overview',
       { method: 'GET', headers: {} });
@@ -6556,40 +6770,47 @@ async function loadSystemOverview() {
     if (!validSystemOverview(value)) throw new Error('system_overview');
     if (generation !== ownerAuthGeneration || loadGeneration !== systemOverviewLoadGeneration ||
         !accessToken) return;
+    latestSystemOverview = value;
     const modeLabel = (mode) => mode === 'live' ? 'Live' :
       mode === 'dry_run' ? 'Dry run' : mode === 'disabled' ? 'Off' : 'Unknown';
     systemOverviewFacts.replaceChildren();
     systemOverviewFact('Payment verification',modeLabel(value.paymentVerificationMode));
     systemOverviewFact('Deposit execution',modeLabel(value.depositExecutionMode));
+    for (const method of value.paymentMethods) {
+      const label = method.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr';
+      const paused = value.paymentVerificationMode !== 'live' ||
+        value.depositExecutionMode !== 'live' ||
+        ['payments_paused','sms_route_paused','verification_paused',
+          'credit_worker_paused'].includes(method.readiness);
+      systemOverviewFact(label + ' deposits', method.ownerEnabled
+        ? (paused ? 'Paused' : method.readiness === 'ready' ? 'Ready' : 'Needs attention') : 'Off');
+    }
     systemOverviewFact('Separate TeleBirr receipt lookup',modeLabel(value.telebirrReceiptLookupMode));
     systemOverviewFact('Open deposit jobs',String(value.openDepositJobs));
+    systemOverviewFact('Ready deposit jobs',String(value.readyDepositJobs));
+    systemOverviewFact('Player ID checks waiting',String(value.pendingPlayerValidations));
     systemOverviewFact('TeleBirr · last payment SMS',value.telebirrSmsLastReceivedAt ?
       transactionDate(value.telebirrSmsLastReceivedAt) : 'None recorded');
     systemOverviewFact('CBE Birr · last payment SMS',value.cbeSmsLastReceivedAt ?
       transactionDate(value.cbeSmsLastReceivedAt) : 'None recorded');
     systemOverviewFact('Dead deposit jobs',String(value.deadDepositJobs));
     systemOverviewFact('Awaiting manual credit',String(value.awaitingManualCredits));
-    const attention = [];
-    if (value.awaitingManualCredits > 0) attention.push(value.awaitingManualCredits +
-      (value.awaitingManualCredits === 1 ? ' manual credit' : ' manual credits') +
-      ' waiting for Owner follow-up');
-    if (value.deadDepositJobs > 0) attention.push(value.deadDepositJobs +
-      (value.deadDepositJobs === 1 ? ' stopped deposit job' : ' stopped deposit jobs') +
-      ' needing investigation');
-    systemOverviewAttention.textContent = attention.length > 0
-      ? attention.join(' · ') + '.'
-      : 'No manual credits are waiting and no stopped deposit jobs were reported at this check.';
+    renderOwnerAlerts();
     systemOverviewStatus.textContent = 'Checked ' + transactionDate(value.checkedAt) +
       ' · Ethiopia time';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration &&
         !isSignedOutError(error)) {
+      latestSystemOverview = undefined;
+      renderOwnerAlerts();
       systemOverviewStatus.textContent = 'System status is unavailable. Refresh to try again.';
-      systemOverviewAttention.textContent = 'Work needing attention could not be checked. Refresh to try again.';
     }
   } finally {
-    if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration)
+    if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration) {
       systemOverviewRefresh.disabled = false;
+      if (accessToken && !document.hidden)
+        systemOverviewPollTimer = window.setTimeout(() => void loadSystemOverview(), 30_000);
+    }
   }
 }
 

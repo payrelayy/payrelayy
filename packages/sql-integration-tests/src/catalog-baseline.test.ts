@@ -188,6 +188,7 @@ const telegramDuplicateRuntimeGrantRestoreMigrationName =
   '20261028202030_telegram_duplicate_runtime_grant_restore.sql';
 const silenceAmbiguousReviewNoticesMigrationName =
   '20261028231519_silence_ambiguous_deposit_review_notices.sql';
+const ownerOperationalAlertFactsMigrationName = '20261029120352_owner_operational_alert_facts.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -671,7 +672,8 @@ describe('disposable SQL migration baseline', () => {
         name !== telegramDuplicateSubmissionMigrationName &&
         name !== telegramDuplicateRuntimeCompatibilityRevokeMigrationName &&
         name !== telegramDuplicateRuntimeGrantRestoreMigrationName &&
-        name !== silenceAmbiguousReviewNoticesMigrationName,
+        name !== silenceAmbiguousReviewNoticesMigrationName &&
+        name !== ownerOperationalAlertFactsMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10394,6 +10396,16 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [silenceAmbiguousReviewNoticesMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerOperationalAlertFactsMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerOperationalAlertFactsMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10439,6 +10451,40 @@ describe('100 ETB production deposit policy cutover', () => {
         (select count(*)::text from app.routine_telebirr_runtime_events) as events`,
     );
     expect(transport.rows).toEqual([{ active: false, events: '0' }]);
+  });
+
+  it('returns only read-only operational facts to the active Owner runtime', async () => {
+    const privileges = await postCutoverClient.query<{ private_execution: boolean }>(`
+      select not pg_catalog.has_function_privilege('public',
+               'app.get_owner_system_overview(uuid)', 'EXECUTE')
+         and not pg_catalog.has_function_privilege('anon',
+               'app.get_owner_system_overview(uuid)', 'EXECUTE')
+         and not pg_catalog.has_function_privilege('authenticated',
+               'app.get_owner_system_overview(uuid)', 'EXECUTE')
+         as private_execution
+    `);
+    expect(privileges.rows).toEqual([{ private_execution: true }]);
+    await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+    try {
+      const result = await postCutoverClient.query<{ overview: Record<string, unknown> }>(
+        'select app.get_owner_system_overview($1::uuid) as overview',
+        [ownerAuthUserId],
+      );
+      expect(result.rows[0]?.overview).toMatchObject({
+        readyDepositJobs: 0,
+        oldestReadyDepositJobAt: null,
+        leasedDepositJobs: 0,
+        overdueLeasedDepositJobs: 0,
+        pendingPlayerValidations: 0,
+        oldestPendingPlayerValidationAt: null,
+      });
+      expect(result.rows[0]?.overview.paymentMethods).toEqual([
+        expect.objectContaining({ providerCode: 'cbe_birr', ownerEnabled: true }),
+        expect.objectContaining({ providerCode: 'telebirr', ownerEnabled: true }),
+      ]);
+    } finally {
+      await postCutoverClient.query('reset session authorization');
+    }
   });
 
   it('runs the SMS broker catalog SQL against PostgreSQL with the display grant present', async () => {

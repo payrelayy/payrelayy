@@ -8,6 +8,12 @@ import {
   telegramDepositReferenceSelectionText,
 } from './telegram-player-id-flow.js';
 
+const depositButton = { text: '💰 Deposit', callbackData: 'gd1.deposit' };
+const depositMenu = (text: string) => ({
+  kind: 'menu',
+  menu: { text, buttons: [depositButton] },
+});
+
 describe('Telegram Player-ID flow presentation', () => {
   it('presents an opaque CBE Birr staging token without payable details', () => {
     const presentation = presentTelegramPlayerIdFlowResult(
@@ -130,8 +136,18 @@ describe('Telegram Player-ID flow presentation', () => {
     ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
-    expect(presentation.kind).toBe('message');
-    if (presentation.kind === 'message') expect(presentation.text).toContain(expected);
+    expect(JSON.stringify(presentation)).toContain(expected);
+    if (outcome === 'deposit_unavailable') {
+      expect(presentation.kind).toBe('message');
+    } else {
+      expect(presentation).toEqual(
+        depositMenu(
+          expected === TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT
+            ? expected
+            : telegramDepositHelpText(),
+        ),
+      );
+    }
   });
 
   it('renders live instructions and customer-safe reference/status updates', () => {
@@ -163,7 +179,7 @@ describe('Telegram Player-ID flow presentation', () => {
         depositStatus: { label: 'Checking payment', tone: 'working' },
         financialMode: 'live',
       }),
-    ).toEqual({ kind: 'message', text: '⏳ Payment details received. We’ll update you here.' });
+    ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
     expect(
       presentTelegramPlayerIdFlowResult({
         version: 1,
@@ -172,7 +188,7 @@ describe('Telegram Player-ID flow presentation', () => {
         currencyCode: 'ETB',
         depositStatus: { label: 'Preparing deposit', tone: 'working' },
       }),
-    ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — ⏳ Preparing deposit.' });
+    ).toEqual(depositMenu('Deposit 25.00 ETB — ⏳ Preparing deposit.'));
   });
 
   it.each([
@@ -193,10 +209,7 @@ describe('Telegram Player-ID flow presentation', () => {
       currencyCode: 'ETB',
       depositStatus: { label, tone },
     });
-    expect(presentation).toEqual({
-      kind: 'message',
-      text: `Deposit 25.00 ETB — ${icon} ${label}.`,
-    });
+    expect(presentation).toEqual(depositMenu(`Deposit 25.00 ETB — ${icon} ${label}.`));
   });
 
   it('does not invite payment to a disabled receiver', () => {
@@ -331,7 +344,10 @@ describe('Telegram Player-ID flow presentation', () => {
             '🧪 Test reference received. No Player credit will be made.',
             'Status: /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
           ].join('\n'),
-          buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
+          buttons: [
+            { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
+            depositButton,
+          ],
         },
       });
       expect(JSON.stringify(presentation)).not.toMatch(/Amount:|PLAYER-DEMO-42/i);
@@ -348,10 +364,9 @@ describe('Telegram Player-ID flow presentation', () => {
       verificationMode: 'shadow_no_money',
     });
 
-    expect(presentation).toEqual({
-      kind: 'message',
-      text: '🧪 Test reference received. No Player credit will be made.',
-    });
+    expect(presentation).toEqual(
+      depositMenu('🧪 Test reference received. No Player credit will be made.'),
+    );
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER-DEMO-42|SYNTB|token|uuid|amount/iu);
     expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
   });
@@ -366,10 +381,11 @@ describe('Telegram Player-ID flow presentation', () => {
       verificationMode: 'not_started_no_money',
     });
 
-    expect(presentation).toEqual({
-      kind: 'message',
-      text: '🧪 Test reference received. No payment was verified or credited. Do not send money.',
-    });
+    expect(presentation).toEqual(
+      depositMenu(
+        '🧪 Test reference received. No payment was verified or credited. Do not send money.',
+      ),
+    );
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|FETANTEST|uuid|token|amount/iu);
   });
 
@@ -398,10 +414,7 @@ describe('Telegram Player-ID flow presentation', () => {
           providerName: 'TeleBirr',
           matchStatus,
         }),
-      ).toEqual({
-        kind: 'message',
-        text: '⏳ Payment details received. We’ll update you here.',
-      });
+      ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
     },
   );
 
@@ -414,10 +427,7 @@ describe('Telegram Player-ID flow presentation', () => {
         providerName: 'CBE Birr',
         matchStatus: 'pending_sms',
       }),
-    ).toEqual({
-      kind: 'message',
-      text: '⏳ Payment details received. We’ll update you here.',
-    });
+    ).toEqual(depositMenu('⏳ Payment details received. We’ll update you here.'));
   });
 
   it.each(['telebirr', 'cbe_birr'] as const)(
@@ -449,7 +459,7 @@ describe('Telegram Player-ID flow presentation', () => {
             matchStatus: 'already_used',
             duplicateState,
           }),
-        ).toEqual({ kind: 'message', text });
+        ).toEqual(depositMenu(text));
       }
     },
   );
@@ -463,10 +473,9 @@ describe('Telegram Player-ID flow presentation', () => {
         providerName: 'CBE Birr',
         matchStatus: 'already_used',
       }),
-    ).toEqual({
-      kind: 'message',
-      text: '❌ This payment reference has already been used. It can’t be submitted again.',
-    });
+    ).toEqual(
+      depositMenu('❌ This payment reference has already been used. It can’t be submitted again.'),
+    );
   });
 
   it('immediately explains a same-customer completed duplicate without exposing the reference', () => {

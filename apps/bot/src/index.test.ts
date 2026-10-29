@@ -890,6 +890,47 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('attaches Deposit to an immediate duplicate rejection and routes the button to the deposit flow', async () => {
+    await loadComposition(false, true, true, false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      matchStatus: 'already_used',
+      duplicateState: 'credited',
+    };
+    const context = messageContext('CBE12345678');
+    let keyboard: { buttons: { text: string; callbackData: string }[] } | undefined;
+    await runtime.messageHandler!({
+      ...context,
+      reply: async (text: string, options?: { reply_markup: typeof keyboard }) => {
+        context.replies.push(text);
+        keyboard = options?.reply_markup;
+      },
+    });
+    expect(context.replies).toEqual([
+      '❌ This payment was already credited. It can’t be credited again.',
+    ]);
+    expect(keyboard?.buttons).toEqual([{ text: '💰 Deposit', callbackData: 'gd1.deposit' }]);
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        transactionReference: 'CBE12345678',
+      }),
+    ]);
+    runtime.actionDeliveries = [];
+    runtime.actionResult = { version: 1, outcome: 'player_selection_missing' };
+    await runtime.callbackHandler!({
+      ...context,
+      callbackQuery: { data: keyboard?.buttons[0]?.callbackData },
+      answerCallbackQuery: async () => {},
+    });
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({ kind: 'saved_combined_destination_command' }),
+    ]);
+  });
+
   it('routes a pasted CBE SMS and a captioned PDF with an unrelated feedback link', async () => {
     await loadComposition(false, true, true, false, true);
     const reference = 'SYNTHCBE001';
@@ -938,9 +979,17 @@ describe('Telegram admission, private action, and ingress composition', () => {
   it('asks for one reference when a live SMS proof contains two methods', async () => {
     await loadComposition(false, true, true, false, true);
     const context = messageContext('Txn ID: TB12345678. Txn ID: CBE12345678.');
-    await runtime.messageHandler!(context);
+    let keyboard: { buttons: { text: string; callbackData: string }[] } | undefined;
+    await runtime.messageHandler!({
+      ...context,
+      reply: async (text: string, options?: { reply_markup: typeof keyboard }) => {
+        context.replies.push(text);
+        keyboard = options?.reply_markup;
+      },
+    });
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(context.replies).toEqual([expect.stringContaining('more than one reference')]);
+    expect(keyboard?.buttons).toEqual([{ text: '💰 Deposit', callbackData: 'gd1.deposit' }]);
     expect(JSON.stringify(context.replies)).not.toMatch(/TB12345678|CBE12345678/);
   });
 
@@ -1401,6 +1450,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     });
     expect(keyboard?.buttons).toEqual([
       { text: 'Check status', callbackData: `dps1.${proofToken}` },
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
     ]);
     expect(context.replies[0]).toContain(`/deposit_status p1.${proofToken}`);
     runtime.actionResult = { ...(runtime.actionResult as object), outcome: 'deposit_proof_status' };

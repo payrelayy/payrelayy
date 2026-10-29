@@ -161,6 +161,21 @@ describe('Telegram deposit outcome notifier', () => {
     ]);
   });
 
+  it.each(['rejected', 'already_used', 'wrong_receiver'] as const)(
+    'keeps Deposit available after a final %s notice',
+    async (outcomeCode) => {
+      const send = vi.fn(async (_chatId: number, text: string, showDepositButton: boolean) => {
+        expect(text).toMatch(/^❌/u);
+        expect(showDepositButton).toBe(true);
+        return { message_id: 48 };
+      });
+      await processOneTelegramDepositOutcome(
+        dependencies({ ...delivery, outcomeCode, amountMinor: null }, send, []),
+      );
+      expect(send).toHaveBeenCalledOnce();
+    },
+  );
+
   it('does not send when there is no final outcome', async () => {
     const actions: TelegramPrivateActionEnvelope[] = [];
     let sends = 0;

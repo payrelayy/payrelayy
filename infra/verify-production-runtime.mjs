@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'/gu)].length,
+  [...workflow.matchAll(/status '0c354ea06ff48c98122181c703467b442b52c1ca'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='0c354ea06ff48c98122181c703467b442b52c1ca'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1398,7 +1398,7 @@ assert.match(helper, /LEGACY_TELEBIRR_PROJECT='fetanagent-telebirr-device-pilot'
 assert.match(helper, /finalize\)/u);
 assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);
 
-const helperDigest = createHash('sha256').update(helper).digest('hex');
+const helperDigest = createHash('sha256').update(helper.replace(/\r\n/gu, '\n')).digest('hex');
 assert.match(
   cbeStoppedHelperRotation,
   /readonly PREDECESSOR_SHA256='08fb54031bf6f1e11306c3ad1cd1f067fe39c6928b8baf944fdea60c0fdefe64'/u,
@@ -2114,7 +2114,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732'",
   "readonly PREDECESSOR_SHA256='2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='37bfde8ed339a6ca911342458d0e954122d1e62fcc528b31b8b8fb2460575108'",
   "readonly SOURCE_REVIEW='payment-intake-ack-release-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2127,7 +2127,7 @@ assert.doesNotMatch(paymentIntakeAckRotation, /\b(?:docker|psql|rm|sed|chmod|cho
 for (const value of [
   '7d17b2c56f0583f96dbc2bacb15c2e0a54fa7732',
   '2c6d86b14144149b75acb1bb46718b92bda4813e8351f94086f1fec5d44dc47c',
-  helperDigest,
+  '37bfde8ed339a6ca911342458d0e954122d1e62fcc528b31b8b8fb2460575108',
   'ROTATE EXACT PRODUCTION V2 PAYMENT INTAKE ACK HELPER V1',
 ]) {
   assert.ok(paymentIntakeAckRunbook.includes(value));
@@ -2140,6 +2140,40 @@ assert.match(
   quality,
   /bash -n infra\/operations\/fetanagent-production-v2-payment-intake-ack-helper-rotation-v1\.sh/u,
 );
+const ownerHealthGuardRotation = await read(
+  'infra/operations/fetanagent-production-v2-owner-health-release-guard-helper-rotation-v1.sh',
+);
+const ownerHealthGuardRunbook = await read(
+  'infra/operations/production-owner-health-release-guard.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='0c354ea06ff48c98122181c703467b442b52c1ca'",
+  "readonly PREDECESSOR_SHA256='37bfde8ed339a6ca911342458d0e954122d1e62fcc528b31b8b8fb2460575108'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-health-release-guard-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER HEALTH RELEASE GUARD HELPER V1',
+]) {
+  assert.ok(ownerHealthGuardRotation.includes(value));
+}
+assert.doesNotMatch(ownerHealthGuardRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '0c354ea06ff48c98122181c703467b442b52c1ca',
+  '37bfde8ed339a6ca911342458d0e954122d1e62fcc528b31b8b8fb2460575108',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 OWNER HEALTH RELEASE GUARD HELPER V1',
+]) {
+  assert.ok(ownerHealthGuardRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-owner-health-release-guard-helper-rotation-v1\.sh/u,
+  );
+}
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,

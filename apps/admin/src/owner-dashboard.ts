@@ -328,7 +328,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <div class="owner-alert-list" id="system-overview-alerts"></div>
           <p class="request-meta" id="system-overview-pauses"></p>
           <dl class="overview-grid" id="system-overview-facts"></dl>
-          <p class="request-meta">Windows Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
+          <p class="request-meta">Automatic Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
         </section>
@@ -690,7 +690,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               command can authorize exactly five find-only Player-ID lookups.
             </p>
             <div class="device-pairing" aria-labelledby="companion-connection-title">
-              <h3 id="companion-connection-title">Companion connection</h3>
+              <h3 id="companion-connection-title">Read-only lookup Companion connection</h3>
+              <p>This older lookup-channel check is separate from the automatic Companion check-in on Home.</p>
               <p id="companion-connection-status" role="status" aria-live="polite">Sign in to check the companion connection.</p>
               <p id="companion-connection-detail"></p>
               <p id="companion-connection-guidance"></p>
@@ -1338,9 +1339,6 @@ const systemOverviewOpenSystem = document.querySelector('#system-overview-open-s
 let systemOverviewLoadGeneration = 0;
 let systemOverviewPollTimer;
 let latestSystemOverview;
-let latestCompanionConnection;
-let companionConnectionKnown = false;
-let companionConnectionChecked = false;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
 const transactionsFilters = document.querySelector('#transactions-filters');
 const transactionsStatusFilter = document.querySelector('#transactions-status-filter');
@@ -3486,6 +3484,7 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxMore.hidden = true;
   systemOverviewLoadGeneration += 1;
   latestSystemOverview = undefined;
+  systemOverviewCompanion.textContent = 'Sign in to check.';
   systemOverviewFacts.replaceChildren();
   systemOverviewAlerts.replaceChildren();
   systemOverviewPauses.textContent = '';
@@ -5354,8 +5353,20 @@ function renderCompanionLookup(status) {
   renderPilotCandidates(eligiblePilotPlayers);
 }
 
-function syncCompanionOverview() {
-  systemOverviewCompanion.textContent = companionConnectionStatus.textContent;
+function syncRoutineCompanionOverview() {
+  const overview = latestSystemOverview;
+  if (!overview) {
+    systemOverviewCompanion.textContent = accessToken ? 'Status unavailable' : 'Sign in to check.';
+    return;
+  }
+  const lastSeen = overview.routineCompanionLastSeenAt;
+  const age = lastSeen === null ? Infinity :
+    Date.parse(overview.checkedAt) - Date.parse(lastSeen);
+  systemOverviewCompanion.textContent = lastSeen === null
+    ? 'No authenticated routine request recorded'
+    : age < 120_000
+      ? 'Recent authenticated routine request'
+      : 'No recent authenticated routine request';
 }
 
 function clearCompanionConnection() {
@@ -5366,11 +5377,6 @@ function clearCompanionConnection() {
   companionConnectionPollTimer = undefined;
   companionConnectionExpiryTimer = undefined;
   companionConnectionStatus.textContent = 'Sign in to check the companion connection.';
-  latestCompanionConnection = undefined;
-  companionConnectionKnown = false;
-  companionConnectionChecked = false;
-  syncCompanionOverview();
-  renderOwnerAlerts();
   companionConnectionDetail.textContent = '';
   companionConnectionGuidance.textContent = '';
   companionConnectionRefresh.disabled = true;
@@ -5414,9 +5420,6 @@ async function loadCompanionConnection() {
     if (!payload || Object.keys(payload).join(',') !== 'connection' ||
         !validCompanionConnection(payload.connection)) throw new Error('invalid_connection_status');
     const connection = payload.connection;
-    latestCompanionConnection = connection;
-    companionConnectionKnown = true;
-    companionConnectionChecked = true;
     const freshnessRemaining = connection.lastSeenAt === null ? 0 :
       60_000 - (Date.parse(connection.checkedAt) - Date.parse(connection.lastSeenAt)) - Math.max(0, Date.now() - startedAt);
     companionConnectionDetail.textContent =
@@ -5435,7 +5438,6 @@ async function loadCompanionConnection() {
       companionConnectionExpiryTimer = window.setTimeout(() => {
         if (!current()) return;
         companionConnectionStatus.textContent = 'Connection status needs refresh';
-        syncCompanionOverview();
         companionConnectionGuidance.textContent = 'The last displayed check-in is no longer recent. Refresh to check again.';
         void loadCompanionConnection();
       }, freshnessRemaining);
@@ -5445,17 +5447,12 @@ async function loadCompanionConnection() {
     }
   } catch (error) {
     if (current() && !isSignedOutError(error)) {
-      latestCompanionConnection = undefined;
-      companionConnectionKnown = false;
-      companionConnectionChecked = true;
       companionConnectionStatus.textContent = 'Connection status unavailable';
       companionConnectionDetail.textContent = '';
       companionConnectionGuidance.textContent = 'The server check did not complete. Refresh to try again; this does not mean the companion is signed out.';
     }
   } finally {
     if (current()) {
-      syncCompanionOverview();
-      renderOwnerAlerts();
       companionConnectionLoading = false;
       companionConnectionRefresh.disabled = false;
       companionConnectionPollTimer = window.setTimeout(() => void loadCompanionConnection(), 20_000);
@@ -5468,7 +5465,6 @@ document.addEventListener('visibilitychange', () => {
   clearCompanionConnection();
   if (accessToken) {
     companionConnectionStatus.textContent = 'Connection status needs refresh';
-    syncCompanionOverview();
     if (!document.hidden) {
       void loadCompanionConnection();
       void loadSystemOverview();
@@ -6575,6 +6571,7 @@ function validSystemOverview(value) {
       typeof method.ownerEnabled === 'boolean' && readiness.includes(method.readiness)) &&
     validTime(value.telebirrSmsLastReceivedAt) &&
     validTime(value.cbeSmsLastReceivedAt) &&
+    validTime(value.routineCompanionLastSeenAt) &&
     validTime(value.oldestReadyDepositJobAt) &&
     validTime(value.oldestPendingPlayerValidationAt) &&
     ['openDepositJobs','readyDepositJobs','leasedDepositJobs',
@@ -6600,6 +6597,7 @@ function systemOverviewFact(label, detail) {
 }
 
 function renderOwnerAlerts() {
+  syncRoutineCompanionOverview();
   systemOverviewAlerts.replaceChildren();
   systemOverviewPauses.textContent = '';
   const value = latestSystemOverview;
@@ -6692,31 +6690,17 @@ function renderOwnerAlerts() {
       'warning', value.oldestPendingPlayerValidationAt,
       'advanced', 'kemerbet-companion-title', 'Open Companion');
   }
-  if (depositsLive || value.pendingPlayerValidations > 0) {
-    const connection = latestCompanionConnection;
-    if (!companionConnectionChecked) {
-      // An initial check is in flight; absence of a result is not an outage.
-    } else if (!companionConnectionKnown || !connection) {
-      add('Companion status cannot be checked',
-        'The Owner page could not confirm the Companion check-in. Refresh its connection status.',
-        'warning', null, 'advanced', 'kemerbet-companion-title', 'Open Companion');
-    } else if (connection.pairedDeviceCount === 0 || connection.validDeviceCount === 0) {
-      add('Companion setup needs attention',
-        connection.pairedDeviceCount === 0
-          ? 'No Companion is paired for automatic deposits or Player ID Find.'
-          : 'No valid Companion pairing is available for automatic deposits or Player ID Find.',
-        'critical', null, 'advanced', 'kemerbet-companion-title', 'Open Companion');
-    } else {
-      const lastSeenAge = connection.lastSeenAt === null ? Infinity :
-        Date.parse(connection.checkedAt) - Date.parse(connection.lastSeenAt);
-      if (connection.connectedDeviceCount === 0 && lastSeenAge >= 120_000 &&
-          value.leasedDepositJobs === 0) {
-        add('Companion check-in is missing',
-          'No authenticated check-in for at least two minutes. Deposits and Player ID checks ' +
-            'may be delayed. Check the Companion window and KemerBet sign-in.',
-          'warning', connection.lastSeenAt,
-          'advanced', 'kemerbet-companion-title', 'Open Companion');
-      }
+  if ((depositsLive || value.pendingPlayerValidations > 0) &&
+      value.leasedDepositJobs === 0) {
+    const lastSeen = value.routineCompanionLastSeenAt;
+    const lastSeenAge = lastSeen === null ? Infinity :
+      Date.parse(value.checkedAt) - Date.parse(lastSeen);
+    if (lastSeenAge >= 120_000) {
+      add('Automatic Companion check-in is missing',
+        'No authenticated routine request in the past two minutes. Deposits and Player ID ' +
+          'checks may be delayed. Check the Companion window and KemerBet sign-in.',
+        'warning', lastSeen,
+        'advanced', 'kemerbet-companion-title', 'Open Companion');
     }
   }
   alerts.sort((a, b) => (a.severity === 'critical' ? -1 : 1) -
@@ -6746,10 +6730,8 @@ function renderOwnerAlerts() {
   systemOverviewAttention.textContent = alerts.length > 0
     ? alerts.length + (alerts.length === 1 ? ' issue needs' : ' issues need') +
         ' Owner attention. Alerts clear when the next check confirms recovery.'
-    : !companionConnectionChecked && (depositsLive || value.pendingPlayerValidations > 0)
-      ? 'Checking the Companion. Receiver-phone and bot connectivity are not directly monitored here.'
-      : 'No issues detected in monitored work. Receiver-phone and bot connectivity ' +
-          'are not directly monitored here.';
+    : 'No issues detected in monitored work. Receiver-phone and bot connectivity ' +
+        'are not directly monitored here.';
 }
 
 async function loadSystemOverview() {

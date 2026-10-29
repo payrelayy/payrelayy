@@ -1177,6 +1177,7 @@ describe('Owner-control HTTP boundary', () => {
             ],
             telebirrSmsLastReceivedAt: null,
             cbeSmsLastReceivedAt: null,
+            routineCompanionLastSeenAt: null,
             openDepositJobs: 0,
             readyDepositJobs: 0,
             oldestReadyDepositJobAt: null,

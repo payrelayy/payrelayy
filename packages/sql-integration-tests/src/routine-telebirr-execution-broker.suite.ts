@@ -22,7 +22,7 @@ interface CertificateFixture {
   readonly signerKeyId: string;
 }
 
-async function activeCertificate(
+export async function activeCertificate(
   client: Client,
   ownerAdminId: string,
 ): Promise<CertificateFixture> {

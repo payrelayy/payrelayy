@@ -1,8 +1,8 @@
 # Owner operational alerts
 
 The Owner Home page checks its read-only system overview every 30 seconds while
-the page is visible. The existing authenticated Companion connection check runs
-every 20 seconds. Each alert links to the relevant Owner section and disappears
+the page is visible. The separate historical read-only lookup connection check
+runs every 20 seconds in Advanced tools. Each alert links to the relevant Owner section and disappears
 when the next successful check no longer finds the condition. This release sends
 no Telegram or other external alert.
 
@@ -20,8 +20,12 @@ no Telegram or other external alert.
 - A Player ID request still pending after five minutes is delayed. Deposits have
   priority over read-only Player ID Find, so this is not proof of a KemerBet
   outage.
-- A paired Companion with no authenticated check-in for at least two minutes
-  needs attention when deposits are live or Player ID work is pending. The
+- The active automatic Companion with no authenticated routine-deposit lease
+  request for at least two minutes needs attention when deposits are live or
+  Player ID work is pending. This uses the latest request from a currently valid
+  Owner-paired certificate and the existing per-certificate lease index. It does
+  not use the older read-only lookup channel, which can be idle while automatic
+  deposits are working. The
   missing-check-in alert is suppressed while a deposit job is leased because a
   long browser action can defer the next poll. A check-in alone does not prove
   that the KemerBet page is signed in.

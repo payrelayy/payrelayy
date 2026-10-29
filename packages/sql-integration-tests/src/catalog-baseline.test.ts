@@ -17,7 +17,10 @@ import { registerDepositExecutionCommandSqlTests } from './deposit-execution-com
 import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
 import { registerRoutineTelebirrPaidIntentSnapshotSqlTests } from './routine-telebirr-paid-intent-snapshot.suite.js';
 import { registerTelegramDepositOutcomeNotificationsSqlTests } from './telegram-deposit-outcome-notifications.suite.js';
-import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
+import {
+  activeCertificate,
+  registerRoutineTelebirrExecutionBrokerSqlTests,
+} from './routine-telebirr-execution-broker.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
 import { registerRoutineTelebirrRotatedInstructionReviewSqlTests } from './routine-telebirr-rotated-instruction-review.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
@@ -189,6 +192,7 @@ const telegramDuplicateRuntimeGrantRestoreMigrationName =
 const silenceAmbiguousReviewNoticesMigrationName =
   '20261028231519_silence_ambiguous_deposit_review_notices.sql';
 const ownerOperationalAlertFactsMigrationName = '20261029120352_owner_operational_alert_facts.sql';
+const ownerRoutineCompanionAlertMigrationName = '20261029130522_owner_routine_companion_alert.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -673,7 +677,8 @@ describe('disposable SQL migration baseline', () => {
         name !== telegramDuplicateRuntimeCompatibilityRevokeMigrationName &&
         name !== telegramDuplicateRuntimeGrantRestoreMigrationName &&
         name !== silenceAmbiguousReviewNoticesMigrationName &&
-        name !== ownerOperationalAlertFactsMigrationName,
+        name !== ownerOperationalAlertFactsMigrationName &&
+        name !== ownerRoutineCompanionAlertMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10406,6 +10411,16 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerOperationalAlertFactsMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerRoutineCompanionAlertMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerRoutineCompanionAlertMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10477,6 +10492,7 @@ describe('100 ETB production deposit policy cutover', () => {
         overdueLeasedDepositJobs: 0,
         pendingPlayerValidations: 0,
         oldestPendingPlayerValidationAt: null,
+        routineCompanionLastSeenAt: null,
       });
       expect(result.rows[0]?.overview.paymentMethods).toEqual([
         expect.objectContaining({ providerCode: 'cbe_birr', ownerEnabled: true }),
@@ -10484,6 +10500,41 @@ describe('100 ETB production deposit policy cutover', () => {
       ]);
     } finally {
       await postCutoverClient.query('reset session authorization');
+    }
+  });
+
+  it('shows an authenticated routine lease from a valid Owner-paired Companion', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      const owner = await postCutoverClient.query<{ id: string }>(
+        'select id from app.admin_users where auth_user_id = $1::uuid',
+        [ownerAuthUserId],
+      );
+      const certificate = await activeCertificate(postCutoverClient, owner.rows[0]!.id);
+      const digest = () => `sha256:${randomUUID().replaceAll('-', '').repeat(2)}`;
+      const request = await postCutoverClient.query<{ completed_at: string }>(
+        `insert into app.routine_telebirr_broker_requests (
+          request_id,http_replay_identity,http_request_body_digest,command_digest,
+          certificate_id,operation,command_body,result_body,assessed_at
+        ) values (
+          $1::uuid,$2::text,$3::text,$4::text,$5::uuid,'lease','{}'::jsonb,
+          'null'::jsonb,pg_catalog.clock_timestamp()
+        ) returning completed_at::text as completed_at`,
+        [randomUUID(), digest(), digest(), digest(), certificate.certificateId],
+      );
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      try {
+        const overview = await postCutoverClient.query<{ matches: boolean }>(
+          `select (app.get_owner_system_overview($1::uuid)
+            ->> 'routineCompanionLastSeenAt')::timestamptz = $2::timestamptz as matches`,
+          [ownerAuthUserId, request.rows[0]!.completed_at],
+        );
+        expect(overview.rows).toEqual([{ matches: true }]);
+      } finally {
+        await postCutoverClient.query('reset session authorization');
+      }
+    } finally {
+      await postCutoverClient.query('rollback');
     }
   });
 

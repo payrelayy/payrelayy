@@ -440,6 +440,12 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
             to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)')::oid,
             'execute'), false)::integer
         + (to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)') is not null)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.owner_can_record_stopped_credit(uuid,uuid)')::oid,
+            'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.record_owner_stopped_credit(uuid,uuid,boolean)')::oid,
+            'execute'), false)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user,
             to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid,
@@ -516,6 +522,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.list_owner_provider_deposit_controls_sensitive(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_receiver_accounts_sensitive(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.owner_can_record_stopped_credit(uuid,uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.record_owner_stopped_credit(uuid,uuid,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)

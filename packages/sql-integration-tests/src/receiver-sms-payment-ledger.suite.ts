@@ -2436,10 +2436,20 @@ export function registerOwnerStoppedPreActionCreditSqlTests(
         }>(`select * from app.finalize_receiver_sms_match($1::uuid)`, [candidate]);
         expect(finalized.rows).toHaveLength(1);
         const workerId = randomUUID();
+        // Create the stopped-before-action ledger in this rollback-only fixture. The
+        // production lease is separately bound to a signed Companion authority.
+        await client.query(
+          `alter table app.deposit_jobs
+            disable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
         const lease = await client.query<{
           execution_attempt_id: string;
           lease_token: string;
         }>(`select * from app.lease_next_deposit_execution($1::uuid,300)`, [workerId]);
+        await client.query(
+          `alter table app.deposit_jobs
+            enable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
         expect(lease.rows).toHaveLength(1);
         await client.query('set session authorization fetanagent_owner_control_runtime');
         expect(

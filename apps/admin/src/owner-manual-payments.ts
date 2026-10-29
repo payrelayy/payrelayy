@@ -64,6 +64,7 @@ export interface OwnerSubmittedPayment {
   readonly completedAt: string | null;
   readonly canApprove: boolean;
   readonly canReject: boolean;
+  readonly canRecordStoppedCredit: boolean;
 }
 
 export interface OwnerReceiverSmsInboxItem {
@@ -399,11 +400,13 @@ export class PostgresOwnerManualPayments {
                 amount_minor::text as amount_minor, receiver_account_id,
                 receiver_account_masked, player_id, payment_status, status_detail,
                 owner_case_status, rejection_reason, decided_at, completed_at,
-                can_approve, can_reject${
-                  this.displaySecrets
-                    ? ', reference_ciphertext, reference_fingerprint, receiver_ciphertext, receiver_fingerprint'
-                    : ''
-                }
+                can_approve, can_reject,
+                app.owner_can_record_stopped_credit($1::uuid,candidate_id)
+                  as can_record_stopped_credit${
+                    this.displaySecrets
+                      ? ', reference_ciphertext, reference_fingerprint, receiver_ciphertext, receiver_fingerprint'
+                      : ''
+                  }
            from app.${
              this.displaySecrets
                ? 'list_owner_submitted_payments_sensitive'
@@ -426,7 +429,14 @@ export class PostgresOwnerManualPayments {
             )) ||
           typeof row.can_approve !== 'boolean' ||
           typeof row.can_reject !== 'boolean' ||
+          typeof row.can_record_stopped_credit !== 'boolean' ||
           (row.can_approve && (status !== 'pending' || !row.can_reject)) ||
+          (row.can_record_stopped_credit &&
+            (status !== 'pending' ||
+              row.candidate_id === null ||
+              row.payment_event_id === null ||
+              row.can_approve ||
+              row.can_reject)) ||
           (row.rejection_reason !== null && typeof row.rejection_reason !== 'string')
         )
           throw new OwnerManualPaymentUnavailableError();
@@ -479,6 +489,7 @@ export class PostgresOwnerManualPayments {
           completedAt: date(row.completed_at, true),
           canApprove: row.can_approve,
           canReject: row.can_reject,
+          canRecordStoppedCredit: row.can_record_stopped_credit,
         };
       });
     } catch (error) {
@@ -520,6 +531,25 @@ export class PostgresOwnerManualPayments {
       );
       if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();
       const row = object(object(result.rows[0]).approved);
+      if (row.status !== 'manually_credited') throw new OwnerManualPaymentUnavailableError();
+      return { caseId: uuid(row.caseId)!, status: 'manually_credited' };
+    } catch (error) {
+      translate(error);
+    }
+  }
+
+  async recordStoppedCredit(
+    actor: string,
+    candidateId: string,
+  ): Promise<{ readonly caseId: string; readonly status: 'manually_credited' }> {
+    if (!UUID.test(actor) || !UUID.test(candidateId)) throw new OwnerManualPaymentRejectedError();
+    try {
+      const result = await this.database.query(
+        `select app.record_owner_stopped_credit($1::uuid,$2::uuid,$3::boolean) as completed`,
+        [actor, candidateId, true],
+      );
+      if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();
+      const row = object(object(result.rows[0]).completed);
       if (row.status !== 'manually_credited') throw new OwnerManualPaymentUnavailableError();
       return { caseId: uuid(row.caseId)!, status: 'manually_credited' };
     } catch (error) {

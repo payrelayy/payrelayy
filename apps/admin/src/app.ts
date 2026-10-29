@@ -2985,6 +2985,48 @@ export function buildOwnerControlApp(
   });
 
   app.post<{ Params: { candidateId: string } }>(
+    '/v1/owner/stopped-credits/:candidateId/record',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['playerCreditedConfirmed', 'requestId']);
+        if (
+          !body ||
+          !UUID_V4_PATTERN.test(request.params.candidateId) ||
+          body.playerCreditedConfirmed !== true ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          Object.keys(request.query as object).length !== 0 ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            'owner-manual-payment-v1' ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments?.recordStoppedCredit)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const completed = await dependencies.runtime.manualPayments.recordStoppedCredit(
+          actor,
+          request.params.candidateId,
+        );
+        return reply.code(200).send({ completed });
+      } catch (error) {
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerManualPaymentConflictError)
+          return reply.code(409).send({ error: 'payment_not_ready' });
+        request.log.warn('Owner stopped-credit record is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { candidateId: string } }>(
     '/v1/owner/telebirr-old-payments/:candidateId/decision',
     async (request, reply) => {
       try {

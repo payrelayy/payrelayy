@@ -1148,6 +1148,72 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('requires Owner identity and an explicit outside-credit attestation for a stopped attempt', async () => {
+    const candidateId = '22222222-2222-4222-8222-222222222222';
+    const caseId = '33333333-3333-4333-8333-333333333333';
+    const requestId = '77777777-7777-4777-8777-777777777777';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        manualPayments: {
+          listCases: async () => [],
+          listSms: async () => [],
+          decide: async () => ({ caseId, status: 'rejected' as const }),
+          complete: async () => ({ caseId, status: 'manually_credited' as const }),
+          recordStoppedCredit: async (actor, candidate) => {
+            calls.push([actor, candidate]);
+            return { caseId, status: 'manually_credited' as const };
+          },
+        },
+      }),
+    });
+    try {
+      const url = `/v1/owner/stopped-credits/${candidateId}/record`;
+      const payload = { playerCreditedConfirmed: true, requestId };
+      const headers = {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-fetanagent-owner-csrf': 'owner-manual-payment-v1',
+        'x-idempotency-key': requestId,
+      };
+      expect((await app.inject({ method: 'POST', url, payload })).statusCode).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            payload: {
+              ...payload,
+              playerCreditedConfirmed: false,
+            },
+            headers,
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            payload,
+            headers: {
+              ...headers,
+              authorization: 'Bearer invalid',
+            },
+          })
+        ).statusCode,
+      ).toBe(403);
+      const recorded = await app.inject({ method: 'POST', url, payload, headers });
+      expect(recorded.statusCode).toBe(200);
+      expect(recorded.json()).toEqual({ completed: { caseId, status: 'manually_credited' } });
+      expect(calls).toEqual([[authUserId, candidateId]]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('validates Owner SMS search filters before querying the read-only inbox', async () => {
     const calls: unknown[] = [];
     const app = buildOwnerControlApp(config(false, false, 'staging'), {

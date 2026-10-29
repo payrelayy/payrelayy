@@ -6109,7 +6109,11 @@ function validManualPaymentCase(value) {
     typeof value.statusDetail === 'string' && value.statusDetail.length <= 160 &&
     [null,'awaiting_manual_credit','manually_credited','rejected'].includes(value.ownerCaseStatus) &&
     typeof value.canApprove === 'boolean' && typeof value.canReject === 'boolean' &&
+    typeof value.canRecordStoppedCredit === 'boolean' &&
     (!value.canApprove || (value.status === 'pending' && value.canReject)) &&
+    (!value.canRecordStoppedCredit ||
+      (value.status === 'pending' && value.candidateId !== null &&
+        value.paymentEventId !== null && !value.canApprove && !value.canReject)) &&
     Number.isFinite(Date.parse(value.submittedAt)) &&
     (value.paymentAt === null || Number.isFinite(Date.parse(value.paymentAt))) &&
     (value.decidedAt === null || Number.isFinite(Date.parse(value.decidedAt))) &&
@@ -6340,6 +6344,33 @@ async function completeManualPayment(value, form, oneClickSms, button) {
   }
 }
 
+async function recordStoppedCredit(value, button) {
+  if (!accessToken || receiverSmsOldBusy || !value.canRecordStoppedCredit || !value.candidateId)
+    return;
+  receiverSmsOldBusy = true;
+  button.disabled = true;
+  button.textContent = 'Recording…';
+  const requestId = crypto.randomUUID();
+  try {
+    const response = await ownerRequest(
+      '/v1/owner/stopped-credits/' + encodeURIComponent(value.candidateId) + '/record', {
+        method: 'POST', headers: manualPaymentHeaders(requestId),
+        body: JSON.stringify({ playerCreditedConfirmed: true, requestId }),
+      });
+    if (!response.ok) throw new Error('stopped_credit');
+    manualPaymentStatusFilter.value = 'approved';
+    setNotice('Outside credit recorded. The customer will receive Deposit complete.');
+  } catch (error) {
+    if (!isSignedOutError(error))
+      setNotice('The credit record could not be confirmed. Refresh before acting again.');
+  } finally {
+    receiverSmsOldBusy = false;
+    button.disabled = false;
+    button.textContent = 'Record outside credit';
+    if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
+  }
+}
+
 function manualCompletionForm(value, oneClickSms = false) {
   const form = document.createElement('form');
   form.className = 'manual-completion-form';
@@ -6450,6 +6481,15 @@ function renderManualPaymentCase(value) {
     note.className = 'request-meta';
     note.textContent = 'This case was approved under the earlier process. Record the completed manual credit below.';
     card.append(note,manualCompletionForm(value));
+  } else if (value.canRecordStoppedCredit) {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'Automatic credit stopped before the final action. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.';
+    const record = document.createElement('button');
+    record.type = 'button';
+    record.textContent = 'Record outside credit';
+    record.addEventListener('click',() => void recordStoppedCredit(value,record));
+    card.append(note,record);
   } else if (value.status === 'pending') {
     const actions = document.createElement('div');
     actions.className = 'submitted-payment-actions';

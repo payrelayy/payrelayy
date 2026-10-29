@@ -48,7 +48,10 @@ export interface OwnerControlPostgresRuntime {
         Partial<
           Pick<
             PostgresOwnerManualPayments,
-            'systemOverview' | 'listSubmittedPayments' | 'approveForImmediateCredit'
+            | 'systemOverview'
+            | 'listSubmittedPayments'
+            | 'approveForImmediateCredit'
+            | 'recordStoppedCredit'
           >
         >)
     | undefined;

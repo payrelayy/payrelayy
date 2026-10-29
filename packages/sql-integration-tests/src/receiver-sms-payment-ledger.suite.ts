@@ -1331,6 +1331,131 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
+    it('records an outside credit only after a receiver-SMS attempt stops before action', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [candidate],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'queued' }]);
+        const finalized = await client.query<{
+          deposit_intent_id: string;
+          execution_job_id: string;
+        }>(`select * from app.finalize_receiver_sms_match($1::uuid)`, [candidate]);
+        expect(finalized.rows).toHaveLength(1);
+        const workerId = randomUUID();
+        const lease = await client.query<{
+          execution_attempt_id: string;
+          lease_token: string;
+        }>(`select * from app.lease_next_deposit_execution($1::uuid,300)`, [workerId]);
+        expect(lease.rows).toHaveLength(1);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        expect(
+          (
+            await client.query<{ allowed: boolean }>(
+              `select app.owner_can_record_stopped_credit($1::uuid,$2::uuid) as allowed`,
+              [getOwner(), candidate],
+            )
+          ).rows,
+        ).toEqual([{ allowed: false }]);
+        await client.query('reset session authorization');
+        await client.query(
+          `select * from app.cancel_deposit_execution_before_action(
+            $1::uuid,$2::uuid,'preparation_failed')`,
+          [lease.rows[0]!.execution_attempt_id, lease.rows[0]!.lease_token],
+        );
+        expect(
+          (
+            await client.query<{ disposition: string }>(
+              `select app.route_routine_deposit_uncertainty_to_review(
+            $1::uuid,$2::uuid,'execution_uncertain') as disposition`,
+              [lease.rows[0]!.execution_attempt_id, workerId],
+            )
+          ).rows,
+        ).toEqual([{ disposition: 'owner_review' }]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        expect(
+          (
+            await client.query<{ allowed: boolean }>(
+              `select app.owner_can_record_stopped_credit($1::uuid,$2::uuid) as allowed`,
+              [getOwner(), candidate],
+            )
+          ).rows,
+        ).toEqual([{ allowed: true }]);
+        const recorded = await client.query<{ result: { caseId: string; status: string } }>(
+          `select app.record_owner_stopped_credit($1::uuid,$2::uuid,true) as result`,
+          [getOwner(), candidate],
+        );
+        expect(recorded.rows[0]!.result.status).toBe('manually_credited');
+        expect(
+          (
+            await client.query<{ result: { caseId: string; status: string } }>(
+              `select app.record_owner_stopped_credit($1::uuid,$2::uuid,true) as result`,
+              [getOwner(), candidate],
+            )
+          ).rows,
+        ).toEqual(recorded.rows);
+        await client.query('reset session authorization');
+        const state = await client.query<{
+          job_status: string;
+          attempt_status: string;
+          review_status: string;
+          owner_status: string;
+          notices: string;
+        }>(
+          `select job.status::text as job_status,
+            attempt.status::text as attempt_status,
+            review.status::text as review_status,
+            owner_case.status as owner_status,
+            (select count(*)::text from app.telegram_deposit_outcome_deliveries delivery
+              where delivery.candidate_id=$1::uuid and delivery.notification_stage='manual_final'
+                and delivery.outcome_code='credited') as notices
+           from app.receiver_sms_settlement_lineages lineage
+           join app.deposit_jobs job on job.id=lineage.execution_job_id
+           join app.deposit_execution_attempts attempt on attempt.deposit_job_id=job.id
+           join app.deposit_review_cases review on review.deposit_intent_id=lineage.deposit_intent_id
+           join app.owner_manual_payment_cases owner_case on owner_case.candidate_id=lineage.candidate_id
+           where lineage.candidate_id=$1::uuid`,
+          [candidate],
+        );
+        expect(state.rows).toEqual([
+          {
+            job_status: 'cancelled',
+            attempt_status: 'cancelled_before_action',
+            review_status: 'resolved',
+            owner_status: 'manually_credited',
+            notices: '1',
+          },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('uses the CBE Birr SMS amount for its one protected claim and job', async () => {
       const client = getClient();
       await client.query('begin');

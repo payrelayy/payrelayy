@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='0c354ea06ff48c98122181c703467b442b52c1ca'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='0baab816c76f95c3a383cf7008d6cbbb77852561'"),
 );
 for (const value of [
   unifiedPredecessor,

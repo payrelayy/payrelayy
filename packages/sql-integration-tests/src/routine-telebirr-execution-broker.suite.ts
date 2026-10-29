@@ -395,6 +395,22 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
             )
           ).rows,
         ).toEqual([{ count: 1 }]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const overview = await client.query<{
+            snapshot: { checkedAt: string; routineCompanionLastSeenAt: string | null };
+          }>('select app.get_owner_system_overview($1::uuid) as snapshot', [getOwnerAuthUserId()]);
+          const lastSeen = overview.rows[0]!.snapshot.routineCompanionLastSeenAt;
+          expect(lastSeen).not.toBeNull();
+          expect(Date.parse(lastSeen!)).toBeLessThanOrEqual(
+            Date.parse(overview.rows[0]!.snapshot.checkedAt),
+          );
+          expect(
+            Date.parse(overview.rows[0]!.snapshot.checkedAt) - Date.parse(lastSeen!),
+          ).toBeLessThan(120_000);
+        } finally {
+          await client.query('reset session authorization');
+        }
         expect(
           (
             await client.query<{ configuration: { executionEnabled: boolean } }>(

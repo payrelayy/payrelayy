@@ -96,6 +96,7 @@ export interface OwnerSystemOverview {
   }[];
   readonly telebirrSmsLastReceivedAt: string | null;
   readonly cbeSmsLastReceivedAt: string | null;
+  readonly routineCompanionLastSeenAt: string | null;
   readonly openDepositJobs: number;
   readonly readyDepositJobs: number;
   readonly oldestReadyDepositJobAt: string | null;
@@ -279,6 +280,7 @@ export class PostgresOwnerManualPayments {
         paymentMethods: overviewPaymentMethods(value.paymentMethods),
         telebirrSmsLastReceivedAt: overviewTime(value.telebirrSmsLastReceivedAt, true),
         cbeSmsLastReceivedAt: overviewTime(value.cbeSmsLastReceivedAt, true),
+        routineCompanionLastSeenAt: overviewTime(value.routineCompanionLastSeenAt, true),
         openDepositJobs: overviewCount(value.openDepositJobs),
         readyDepositJobs: overviewCount(value.readyDepositJobs),
         oldestReadyDepositJobAt: overviewTime(value.oldestReadyDepositJobAt, true),
@@ -299,7 +301,9 @@ export class PostgresOwnerManualPayments {
         (overview.oldestReadyDepositJobAt !== null &&
           Date.parse(overview.oldestReadyDepositJobAt) > Date.parse(overview.checkedAt)) ||
         (overview.oldestPendingPlayerValidationAt !== null &&
-          Date.parse(overview.oldestPendingPlayerValidationAt) > Date.parse(overview.checkedAt))
+          Date.parse(overview.oldestPendingPlayerValidationAt) > Date.parse(overview.checkedAt)) ||
+        (overview.routineCompanionLastSeenAt !== null &&
+          Date.parse(overview.routineCompanionLastSeenAt) > Date.parse(overview.checkedAt))
       )
         throw new OwnerManualPaymentUnavailableError();
       return overview;

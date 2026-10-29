@@ -276,6 +276,7 @@ describe('Owner manual payment boundary', () => {
               ],
               telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
               cbeSmsLastReceivedAt: null,
+              routineCompanionLastSeenAt: '2026-10-23T09:04:59Z',
               openDepositJobs: 1,
               readyDepositJobs: 1,
               oldestReadyDepositJobAt: '2026-10-23T09:01:00Z',
@@ -301,6 +302,7 @@ describe('Owner manual payment boundary', () => {
       openDepositJobs: 1,
       awaitingManualCredits: 2,
       pendingPlayerValidations: 1,
+      routineCompanionLastSeenAt: '2026-10-23T09:04:59Z',
     });
   });
 
@@ -315,6 +317,7 @@ describe('Owner manual payment boundary', () => {
               telebirrReceiptLookupMode: 'disabled',
               telebirrSmsLastReceivedAt: null,
               cbeSmsLastReceivedAt: null,
+              routineCompanionLastSeenAt: null,
               openDepositJobs: 0,
               readyDepositJobs: 1,
               oldestReadyDepositJobAt: null,

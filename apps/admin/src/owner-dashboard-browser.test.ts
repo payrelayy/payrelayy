@@ -539,6 +539,7 @@ describe('Owner workspace navigation', () => {
               ],
               telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
               cbeSmsLastReceivedAt: null,
+              routineCompanionLastSeenAt: '2026-10-23T09:04:59Z',
               openDepositJobs: 2,
               readyDepositJobs: 2,
               oldestReadyDepositJobAt: '2026-10-23T09:04:00Z',
@@ -557,6 +558,9 @@ describe('Owner workspace navigation', () => {
     expect(facts).toContain('Separate TeleBirr receipt lookup');
     expect(facts).toContain('Off');
     expect(facts).toContain('Open deposit jobs');
+    expect(browser.element('#system-overview-companion').textContent).toBe(
+      'Recent authenticated routine request',
+    );
     expect(browser.element('#system-overview-attention').textContent).toContain('Owner attention');
     expect(JSON.stringify(browser.element('#system-overview-alerts'))).toContain(
       'Manual credit follow-up',
@@ -592,6 +596,7 @@ describe('Owner workspace navigation', () => {
       ],
       telebirrSmsLastReceivedAt: null,
       cbeSmsLastReceivedAt: null,
+      routineCompanionLastSeenAt: '2026-10-23T09:00:00Z',
       openDepositJobs: 2,
       readyDepositJobs: 1,
       oldestReadyDepositJobAt: '2026-10-23T09:00:00Z',
@@ -603,7 +608,7 @@ describe('Owner workspace navigation', () => {
       oldestPendingPlayerValidationAt: '2026-10-23T09:00:00Z',
       checkedAt: '2026-10-23T09:10:00Z',
     };
-    let connection = {
+    const connection = {
       pairedDeviceCount: 1,
       validDeviceCount: 1,
       connectedDeviceCount: 0,
@@ -625,7 +630,7 @@ describe('Owner workspace navigation', () => {
     expect(JSON.stringify(alerts)).toContain('Stopped deposit jobs');
     expect(JSON.stringify(alerts)).toContain('Manual credit follow-up');
     expect(JSON.stringify(alerts)).toContain('Player ID checks are delayed');
-    expect(JSON.stringify(alerts)).not.toContain('Companion check-in is missing');
+    expect(JSON.stringify(alerts)).not.toContain('Automatic Companion check-in is missing');
     expect(alerts[0]?.dataset.severity).toBe('critical');
     const playerAlert = alerts.find((alert) =>
       JSON.stringify(alert).includes('Player ID checks are delayed'),
@@ -645,15 +650,16 @@ describe('Owner workspace navigation', () => {
       awaitingManualCredits: 0,
       pendingPlayerValidations: 0,
       oldestPendingPlayerValidationAt: null,
+      routineCompanionLastSeenAt: '2026-10-23T09:09:50Z',
     };
-    connection = {
-      ...connection,
-      connectedDeviceCount: 1,
-      lastSeenAt: '2026-10-23T09:09:50.000Z',
-    };
+    // The legacy read-only lookup channel can be stale while routine deposits
+    // are checking in. It must not create a Home outage alert.
     await browser.call('loadSystemOverview');
     await browser.call('loadCompanionConnection');
     expect(browser.element('#system-overview-alerts').children).toHaveLength(0);
+    expect(browser.element('#system-overview-companion').textContent).toBe(
+      'Recent authenticated routine request',
+    );
     expect(browser.element('#system-overview-attention').textContent).toContain(
       'No issues detected in monitored work',
     );
@@ -670,6 +676,7 @@ describe('Owner workspace navigation', () => {
       ],
       telebirrSmsLastReceivedAt: null,
       cbeSmsLastReceivedAt: null,
+      routineCompanionLastSeenAt: '2026-10-23T09:00:00Z',
       openDepositJobs: 1,
       readyDepositJobs: 1,
       oldestReadyDepositJobAt: '2026-10-23T09:00:00Z',
@@ -717,7 +724,7 @@ describe('Owner workspace navigation', () => {
     await browser.call('loadSystemOverview');
     const shown = JSON.stringify(browser.element('#system-overview-alerts'));
     expect(shown).toContain('Deposit queue is delayed');
-    expect(shown).toContain('Companion check-in is missing');
+    expect(shown).toContain('Automatic Companion check-in is missing');
     expect(browser.element('#system-overview-pauses').textContent).toBe('');
     overview = {
       ...overview,
@@ -2584,16 +2591,14 @@ describe('Owner dashboard browser authentication boundary', () => {
       });
       await browser.signIn();
       expect(browser.element('#companion-connection-status').textContent).toBe(label);
-      expect(browser.element('#system-overview-companion').textContent).toBe(label);
+      expect(browser.element('#system-overview-companion').textContent).toBe('Status unavailable');
       expect(browser.element('#companion-connection-refresh').disabled).toBe(false);
       fail = true;
       await browser.call('loadCompanionConnection');
       expect(browser.element('#companion-connection-status').textContent).toBe(
         'Connection status unavailable',
       );
-      expect(browser.element('#system-overview-companion').textContent).toBe(
-        'Connection status unavailable',
-      );
+      expect(browser.element('#system-overview-companion').textContent).toBe('Status unavailable');
       expect(browser.element('#companion-connection-detail').textContent).toBe('');
     },
   );
@@ -2629,9 +2634,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(browser.element('#companion-connection-status').textContent).toBe(
       'Connection status needs refresh',
     );
-    expect(browser.element('#system-overview-companion').textContent).toBe(
-      'Connection status needs refresh',
-    );
+    expect(browser.element('#system-overview-companion').textContent).toBe('Status unavailable');
     browser.evaluate('document.hidden = false');
     await browser.element('#companion-connection-refresh').listeners.get('click')?.({
       preventDefault() {},

@@ -36,6 +36,7 @@ const [
   financialStopWorkflow,
   qualityWorkflow,
   migration,
+  modalMigration,
   financialBoundaryMigration,
   workerLivenessMigration,
   offlineQueueMigration,
@@ -77,6 +78,7 @@ const [
   read('.github/workflows/production-routine-financial-stop.yml'),
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
+  read('supabase/migrations/20261030011403_routine_success_modal_confirmation.sql'),
   read('supabase/migrations/20261009200332_routine_telebirr_financial_activation_boundary.sql'),
   read('supabase/migrations/20261010012000_routine_telebirr_worker_liveness_stop.sql'),
   read('supabase/migrations/20261013103229_routine_telebirr_offline_verified_queue.sql'),
@@ -146,6 +148,7 @@ assert.match(windowsStore, /redirect: 'error'/u);
 assert.match(windowsStore, /It never retries a fence or/u);
 assert.match(windowsStore, /requestBody = JSON\.stringify/u);
 assert.match(windowsStore, /value\.operation === 'record_dispatch' \|\|/u);
+assert.match(windowsStore, /value\.operation === 'confirm_modal' \|\|/u);
 assert.match(windowsStore, /value\.operation === 'reconcile' \|\|/u);
 assert.match(windowsStore, /value\.operation === 'complete'/u);
 assert.match(windowsStore, /attempt <= \(replayable \? 2 : 1\)/u);
@@ -160,7 +163,16 @@ assert.match(
 );
 assert.match(localDeposit, /exactPlayerCreditMatch: true/u);
 assert.match(worker, /dispatch\.exactPlayerCreditMatch !== true/u);
-assert.match(worker, /await options\.store\.completeConfirmed/u);
+assert.match(worker, /await options\.store\.confirmModal/u);
+assert.doesNotMatch(worker, /await options\.session\.scanRoutineDepositHistory/u);
+assert.doesNotMatch(worker, /await options\.store\.completeConfirmed/u);
+assert.match(bridgeRuntime, /execute_agent_platform_routine_deposit_modal_confirmation/u);
+assert.match(
+  modalMigration,
+  /create function app\.execute_agent_platform_routine_deposit_modal_confirmation/u,
+);
+assert.match(modalMigration, /agent_transfer_success_modal_confirmed/u);
+assert.match(modalMigration, /dispatch\.recorded_at >= cutover\.recorded_at/u);
 
 assert.match(bridgeConfig, /COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE/u);
 assert.match(bridgeConfig, /COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE/u);

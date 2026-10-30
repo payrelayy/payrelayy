@@ -30,6 +30,7 @@ describe('automatic routine queue loop', () => {
         leaseNext: vi.fn(),
         fenceFinalAction: vi.fn(),
         recordDispatch: vi.fn(),
+        confirmModal: vi.fn(),
         reconcile: vi.fn(),
         confirmHistory: vi.fn(),
         completeConfirmed: vi.fn(),

@@ -27,7 +27,14 @@ const MAXIMUM_AMOUNT_MINOR = 2_500_000;
 type UnknownRecord = Record<string, unknown>;
 
 export type RoutineDepositOperation =
-  'lease' | 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete' | 'pause';
+  | 'lease'
+  | 'fence'
+  | 'record_dispatch'
+  | 'confirm_modal'
+  | 'reconcile'
+  | 'confirm_history'
+  | 'complete'
+  | 'pause';
 
 export interface RoutineDepositHistoryObservation {
   readonly transactionId: string;
@@ -132,7 +139,7 @@ export type RoutineDepositCommand =
       readonly expectedPlatformAgentAccountId: string;
     })
   | (RoutineDepositCommandBase & {
-      readonly operation: 'fence' | 'reconcile';
+      readonly operation: 'fence' | 'confirm_modal' | 'reconcile';
       readonly binding: RoutineDepositProtocolBinding;
     })
   | (RoutineDepositCommandBase & {
@@ -234,6 +241,7 @@ function base(candidate: UnknownRecord): RoutineDepositCommandBase | undefined {
     (candidate.operation !== 'lease' &&
       candidate.operation !== 'fence' &&
       candidate.operation !== 'record_dispatch' &&
+      candidate.operation !== 'confirm_modal' &&
       candidate.operation !== 'reconcile' &&
       candidate.operation !== 'confirm_history' &&
       candidate.operation !== 'complete' &&
@@ -401,7 +409,11 @@ export function decodeRoutineDepositCommand(candidate: unknown): RoutineDepositC
     });
   }
   if (!binding) return undefined;
-  if (common.operation === 'fence' || common.operation === 'reconcile') {
+  if (
+    common.operation === 'fence' ||
+    common.operation === 'confirm_modal' ||
+    common.operation === 'reconcile'
+  ) {
     if (
       !exactKeys(candidate, [
         'contractVersion',
@@ -542,6 +554,7 @@ function decodeResult(
 ): RoutineDepositResponseResult | undefined {
   if (operation === 'pause') return candidate === null ? null : undefined;
   if (operation === 'lease' && candidate === null) return null;
+  if (operation === 'confirm_modal' && candidate === null) return null;
   if (operation === 'reconcile' || operation === 'confirm_history') {
     if (
       plainRecord(candidate) &&
@@ -747,6 +760,7 @@ export function decodeRoutineDepositResponseBody(
     (candidate.operation !== 'lease' &&
       candidate.operation !== 'fence' &&
       candidate.operation !== 'record_dispatch' &&
+      candidate.operation !== 'confirm_modal' &&
       candidate.operation !== 'reconcile' &&
       candidate.operation !== 'confirm_history' &&
       candidate.operation !== 'complete' &&

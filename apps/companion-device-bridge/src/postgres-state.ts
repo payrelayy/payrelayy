@@ -336,6 +336,14 @@ export const CONFIRM_ROUTINE_DEPOSIT_HISTORY_SQL = `
   ) as result
 `;
 
+export const CONFIRM_ROUTINE_DEPOSIT_MODAL_SQL = `
+  select app.execute_agent_platform_routine_deposit_modal_confirmation(
+    $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,
+    $7::timestamptz, $8::timestamptz, $9::timestamptz,
+    $10::text, $11::text, $12::text, $13::jsonb
+  ) as result
+`;
+
 export const PENDING_ROUTINE_HISTORY_WINDOW_SQL = `
   select app.routine_telebirr_pending_history_window(
     $1::uuid, $2::uuid
@@ -1142,7 +1150,9 @@ export class PostgresCompanionDeviceState {
       const result = await this.database.query(
         command.operation === 'confirm_history'
           ? CONFIRM_ROUTINE_DEPOSIT_HISTORY_SQL
-          : EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL,
+          : command.operation === 'confirm_modal'
+            ? CONFIRM_ROUTINE_DEPOSIT_MODAL_SQL
+            : EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL,
         [
           httpReplayIdentity,
           request.bodyDigest,

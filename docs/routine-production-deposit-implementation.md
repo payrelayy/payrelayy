@@ -1,23 +1,23 @@
-# Routine production TeleBirr deposits
+# Routine production deposits
 
 This repository contains the separately gated **execution path from an already verified, queued
-job** for FetanAgent routine TeleBirr deposits into KemerBet. It does not yet contain the
-non-pilot customer proof, Android verification, authoritative claim, and settlement path needed
-to create that job. The dormant first proof-ledger slice is described in
+job** for FetanAgent routine TeleBirr and CBE Birr deposits into KemerBet. The original dormant
+first proof-ledger slice is described in
 [routine-telebirr-proof-foundation.md](routine-telebirr-proof-foundation.md). The execution path implements the approved rules in
 [telebirr-deposit-product-contract.md](telebirr-deposit-product-contract.md), while keeping the
 fixed 25 ETB execution-v2 pilot unchanged.
 
-The implementation is dormant after deployment. Merging or applying its migration does not start
-the Windows companion, create a database password, enable the production overlay, lease a job, or
-move money. Production use requires all of the explicit activation inputs described below. No live
-payment was performed while implementing or testing this path.
+The original execution migration was dormant after deployment. Merging or applying the modal
+confirmation migration does not start the Windows companion, lease a job, or move money. Current
+production use still requires the active paired certificate, Owner policy, transport, and guarded
+Windows launch described below.
 
 ## Product rules
 
-- TeleBirr receipts, ETB, and KemerBet deposits only.
-- 25–25,000 ETB per deposit, inclusive, with valid cents. The credited amount is the verified
-  official receipt's Settled Amount, not a customer-entered value or the amount plus fees.
+- Verified TeleBirr or CBE Birr receipts, ETB, and KemerBet deposits only.
+- 100–25,000 ETB per deposit, inclusive, with valid cents. The credited amount comes from the
+  verified TeleBirr settled amount or signed receiver-phone SMS, never a customer-entered value
+  or the amount plus fees.
 - Any currently active, validated, deposit-eligible Player ID may be used. There is no five-Player
   allowlist and TeleBirr payer-to-Player ownership matching is not required.
 - There is no daily, lifetime, frequency, or successful-deposit quota. Every payment claim remains
@@ -35,7 +35,9 @@ The routine protocol is domain-separated from execution-v2:
 - protocol mode `windows_companion_routine_deposit_execution_v1`;
 - capability `kemerbet.deposit.submit.verified_receipt_amount.routine.v1`;
 - endpoint `/v3/companion/device/routine-deposits:command`;
-- operations `lease`, `fence`, `record_dispatch`, `reconcile`, `complete`, and `pause`.
+- operations `lease`, `fence`, `record_dispatch`, `confirm_modal`, `reconcile`, `complete`, and
+  `pause`. The current worker uses `confirm_modal`; older history commands remain for compatibility
+  while paired releases are upgraded.
 
 Every Windows request contains the current paired-device certificate and an exact signed HTTP
 request. The bridge validates those with the no-money certificate signer, executes one reviewed
@@ -49,13 +51,15 @@ forced-RLS runtime, request, dispatch-evidence, and pause ledgers. Its runtime r
 `NOLOGIN`, passwordless, and without capability membership. Only a `postgres` session can activate
 it, and activation binds one current Owner authorization, paired certificate, KemerBet agent
 account, no-money signer, and production execution signer. The runtime receives schema usage and
-EXECUTE on one security-definer broker function; it receives no table, sequence, or column access.
+EXECUTE only on hardened routine command functions; it receives no table, sequence, or column access.
 
 Lease and final-action state use the existing durable execution-attempt and KemerBet account-lane
 ledgers. A process restart cannot turn a fenced attempt into new executable work. Exact request,
-body, replay, and command digests are append-only and replay-safe. A provider response cannot
-complete an attempt: completion re-reads one durable `confirmed_executed` reconciliation with
-exact Player, amount, currency, history cardinality, and Player-credit evidence.
+body, replay, and command digests are append-only and replay-safe. An HTTP response alone cannot
+complete an attempt. After the fresh exact success result, the worker records its signed dispatch;
+`confirm_modal` binds that record to the one-use fenced attempt and writes a distinct
+`agent_transfer_success_modal_confirmed` ledger row. The row contains no invented history
+timestamp or transaction ID. A restart may finalize a recorded dispatch without another Transfer.
 
 The Windows routine worker remains sequential. It validates the policy and immutable
 job/intent/attempt/payment-claim/account/Player/amount binding, asks for the ten-second database
@@ -65,10 +69,12 @@ requires both exact visible provider messages:
 - `Transfer Successful!`
 - `Player Balance +<exact two-decimal amount> ETB Success`
 
-Those messages are dispatch evidence, not the durable completion decision. The worker records the
-dispatch and enters reconciliation. Pending reconciliation retains the account lane; uncertain or
-mismatched reconciliation pauses the worker. Local pause state is set before pause-notification
-I/O, so a database outage cannot make the worker continue.
+The newer three-row success table is also accepted when it identifies the selected recipient, the
+exact credit, the agent debit, and the PLAT row. The worker rejects a success result already
+visible before the new Transfer. Once the fresh result appears, it records dispatch and calls
+`confirm_modal`; it does not navigate to History or User Transactions. Missing, interrupted, or
+mismatched confirmation stays one-use and enters Owner review. Local pause state is set before
+pause-notification I/O, so a database outage cannot make the worker continue.
 
 ## Protected Windows launch
 

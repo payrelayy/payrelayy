@@ -8604,6 +8604,7 @@ describe('disposable SQL migration baseline', () => {
           'exact_currency_match',
           'exact_player_credit_match',
           'created_at',
+          'modal_provider_response_digest',
         ],
         table_name: 'execution_reconciliations',
       },

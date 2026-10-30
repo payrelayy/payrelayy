@@ -94,6 +94,11 @@ const delayedPreparedHtml = fixtureHtml.replace(
     surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
 );
 
+const staleSuccessHtml = fixtureHtml.replace(
+  '<button id="transfer">Transfer</button></div>',
+  '<h2>Transfer Successful!</h2><button id="transfer">Transfer</button></div>',
+);
+
 const directionMarkedAmountHtml = fixtureHtml.replace(
   `    document.getElementById('transfer').onclick = async () => {`,
   `    surface.querySelector('[data-placeholder="Enter Amount"] input').addEventListener('input', (event) => {
@@ -367,6 +372,26 @@ describe.skipIf(process.platform !== 'win32')(
       });
       expect(submitted).toEqual([{ playerId: 42, amount: 100, notes: null }]);
       expect(stages.at(-1)).toBe('success_modal_confirmed');
+    }, 15000);
+
+    it('rejects a success result already visible before the new Transfer', async () => {
+      const { page, lookup, deposit, submitted } = await startFixture(staleSuccessHtml);
+      let fences = 0;
+      await expect(
+        executeRoutineOneUseLocalKemerBetDeposit(
+          page,
+          PLAYER_ID,
+          10000,
+          lookup,
+          deposit,
+          async () => {
+            fences += 1;
+            return { playerId: PLAYER_ID, amountMinor: 10000, isFresh: () => true };
+          },
+        ),
+      ).rejects.toThrow();
+      expect(fences).toBe(0);
+      expect(submitted).toEqual([]);
     }, 15000);
 
     it('reports a post-fence UI mismatch without clicking Transfer or exposing identifiers', async () => {

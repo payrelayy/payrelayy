@@ -745,7 +745,7 @@ describe('Owner workspace navigation', () => {
     const areas = {
       home: ['owner-controls-title', 'system-overview-title'],
       sms: ['receiver-sms-inbox-title', 'receiver-change-review-title'],
-      submitted: ['receiver-sms-old-title', 'transactions-title', 'telebirr-fast-alert-title'],
+      submitted: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
       methods: ['payment-methods-title', 'receiver-title'],
       players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
       system: ['routine-processing-title', 'support-contact-title'],
@@ -775,6 +775,18 @@ describe('Owner workspace navigation', () => {
     }
     expect(browser.element('#owner-view-title').textContent).toBe('Advanced tools');
     expect(browser.element('#owner-view-title').focused).toBe(true);
+  });
+
+  it('removes the duplicate masked transaction list from Submitted payments', async () => {
+    const html = ownerDashboardHtml({
+      deploymentTarget: 'production',
+    } as Parameters<typeof ownerDashboardHtml>[0]);
+    expect(html).not.toContain('id="transactions-title"');
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+    expect(browser.fetchCalls.some(({ url }) => url.startsWith('/v1/owner/transactions?'))).toBe(
+      false,
+    );
   });
 
   it('lists every existing Owner section and opens the exact control without executing it', async () => {
@@ -867,111 +879,6 @@ describe('read-only TeleBirr receiver-change review queue', () => {
     );
     await loading;
     expect(browser.element('#receiver-change-review-list').children).toHaveLength(0);
-  });
-});
-
-describe('Owner Transactions page', () => {
-  const oldPayment = {
-    candidateId: '22222222-2222-4222-8222-222222222222',
-    submittedAt: '2026-10-20T10:00:00Z',
-    paymentAt: '2026-10-20T08:59:00Z',
-    amountMinor: '2500',
-    referenceMasked: '***AB12',
-    playerMasked: '***5678',
-    statusGroup: 'pending',
-    statusDetail: 'waiting_approval',
-    reason: 'Payment older than 1 hour',
-    decidedBy: null,
-    decidedAt: null,
-    canDecide: true,
-  };
-
-  it('shows a waiting badge, masked rows and asks for confirmation before a decision', async () => {
-    let decisionCalls = 0;
-    const browser = ownerBrowserHarness(503, {
-      confirm: false,
-      fetchOverride: (url) => {
-        if (url.startsWith('/v1/owner/transactions?'))
-          return response(200, {
-            rows: [oldPayment],
-            total: 1,
-            pending: 1,
-            credited: 0,
-            rejected: 0,
-            waitingCount: 1,
-          });
-        if (url.includes('/telebirr-old-payments/') && url.endsWith('/decision')) {
-          decisionCalls += 1;
-          return response(200, { decision: { decision: 'approved' } });
-        }
-        return undefined;
-      },
-    });
-    await browser.signIn();
-    const list = browser.element('#transactions-list');
-    expect(list.children).toHaveLength(1);
-    expect(browser.element('#transactions-badge').textContent).toBe('1 waiting');
-    const card = list.children[0] as FakeElement;
-    expect(JSON.stringify(card)).toContain('Available in Submitted payments');
-    expect(decisionCalls).toBe(0);
-    expect(JSON.stringify(list)).not.toContain('FULL_REFERENCE');
-  });
-
-  it('keeps held and checking rows read-only and clears history on sign-out', async () => {
-    const browser = ownerBrowserHarness(503, {
-      fetchOverride: (url) =>
-        url.startsWith('/v1/owner/transactions?')
-          ? response(200, {
-              rows: [
-                {
-                  ...oldPayment,
-                  statusDetail: 'held_review',
-                  reason: 'Payment check could not finish',
-                  canDecide: false,
-                },
-              ],
-              total: 1,
-              pending: 1,
-              credited: 0,
-              rejected: 0,
-              waitingCount: 1,
-            })
-          : undefined,
-    });
-    await browser.signIn();
-    const card = browser.element('#transactions-list').children[0] as FakeElement;
-    expect((card.children.at(-1) as FakeElement).textContent).toContain('verified signed receipt');
-    await browser.call('signOut');
-    expect(browser.element('#transactions-list').children).toHaveLength(0);
-    expect(browser.element('#transactions-badge').hidden).toBe(true);
-  });
-
-  it('shows the manual outcome in older TeleBirr history', async () => {
-    const browser = ownerBrowserHarness(503, {
-      fetchOverride: (url) =>
-        url.startsWith('/v1/owner/transactions?')
-          ? response(200, {
-              rows: [
-                {
-                  ...oldPayment,
-                  statusGroup: 'credited',
-                  statusDetail: 'manually_credited',
-                  canDecide: false,
-                  reason: 'Owner marked manually credited',
-                  decidedBy: 'Owner',
-                  decidedAt: '2026-10-20T10:05:00Z',
-                },
-              ],
-              total: 1,
-              pending: 0,
-              credited: 1,
-              rejected: 0,
-              waitingCount: 0,
-            })
-          : undefined,
-    });
-    await browser.signIn();
-    expect(JSON.stringify(browser.element('#transactions-list'))).toContain('Manually credited');
   });
 });
 
@@ -1228,7 +1135,9 @@ describe('Owner manual payment review', () => {
     await browser.call('loadManualPaymentCases', true);
     const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
     const rendered = JSON.stringify(card);
-    expect(rendered).toContain('Automatic credit never started');
+    expect(rendered).toContain('Automatic credit expired.');
+    expect(rendered).toContain('expired-payment-actions');
+    expect(rendered).not.toContain('Automatic credit stopped before the final action');
     expect(rendered).toContain('Record outside credit');
     expect(rendered).toContain('Approve');
     expect(rendered).toContain('Reject');

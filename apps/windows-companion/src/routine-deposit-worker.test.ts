@@ -76,6 +76,7 @@ function fixture(lease = makeLease()) {
     pause: vi.fn(async () => undefined),
   } satisfies RoutineDepositExecutionStore;
   const session = {
+    dismissSettledRoutineSuccess: vi.fn(async () => undefined),
     executeRoutineOneUseDeposit: vi.fn(
       async (
         _player: string,
@@ -154,9 +155,29 @@ describe('routine production serial deposit worker', () => {
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch).toHaveBeenCalledTimes(1);
     expect(store.confirmModal).toHaveBeenCalledTimes(1);
+    expect(session.dismissSettledRoutineSuccess).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
       store.confirmModal.mock.invocationCallOrder[0]!,
     );
+    expect(store.confirmModal.mock.invocationCallOrder[0]).toBeLessThan(
+      session.dismissSettledRoutineSuccess.mock.invocationCallOrder[0]!,
+    );
+    expect(store.pause).not.toHaveBeenCalled();
+  });
+
+  it('holds the queue locally if the settled success dialog cannot be dismissed', async () => {
+    const { worker, store, session } = fixture();
+    session.dismissSettledRoutineSuccess.mockRejectedValueOnce(new Error('dialog obstructed'));
+    expect(await worker.runOnce()).toEqual({
+      status: 'paused',
+      reason: 'result_modal_unavailable',
+    });
+    expect(await worker.runOnce()).toEqual({
+      status: 'paused',
+      reason: 'result_modal_unavailable',
+    });
+    expect(store.confirmModal).toHaveBeenCalledTimes(1);
+    expect(store.leaseNext).toHaveBeenCalledTimes(1);
     expect(store.pause).not.toHaveBeenCalled();
   });
 
@@ -171,6 +192,9 @@ describe('routine production serial deposit worker', () => {
     expect(store.pause).toHaveBeenCalledWith(
       expect.objectContaining({ attemptId: lease.attemptId }),
       'reconciliation_uncertain',
+    );
+    expect(store.pause.mock.invocationCallOrder[0]).toBeLessThan(
+      session.dismissSettledRoutineSuccess.mock.invocationCallOrder[0]!,
     );
     expect(await worker.runOnce()).toEqual({ status: 'idle' });
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);

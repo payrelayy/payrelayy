@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isProxy } from 'node:util/types';
 
 import {
@@ -24,6 +25,11 @@ const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const PILOT_AMOUNT_MINOR = 2500 as const;
 const TIMEOUT_MS = 30_000;
 const DEPOSIT_URL = `${KEMERBET_AGENT_API_ORIGIN}${KEMERBET_DEPOSIT_PATH}`;
+const verifiedRoutineSuccessResults = new WeakMap<Page, string>();
+
+function successResultDigest(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
 
 const selectors = Object.freeze({
   financialActionsTrigger: '.rt--header-right .rt--header-actions-content-icon:has(.icon-transfer)',
@@ -727,6 +733,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   const expectedCredits = exactAmountRenderings(amountMinor).map(
     (amount) => `Player Balance +${amount} ETB Success`,
   );
+  let verifiedResultText: string | undefined;
   try {
     await waitUntil(async () => {
       await requireAuthenticatedAgentPage(page);
@@ -752,13 +759,11 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
             creditFound = true;
           }
         }
+        const dialogText = await dialog.innerText();
         matched =
           creditFound ||
-          exactKemerBetSuccessTableMatches(
-            await dialog.innerText(),
-            privatePlayerIdentities,
-            amountMinor,
-          );
+          exactKemerBetSuccessTableMatches(dialogText, privatePlayerIdentities, amountMinor);
+        if (matched) verifiedResultText = dialogText;
       }
       return matched;
     });
@@ -769,8 +774,39 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       providerResponseDigest: outcome.providerResponseDigest,
     });
   }
+  if (verifiedResultText === undefined) unavailable();
+  verifiedRoutineSuccessResults.set(page, successResultDigest(verifiedResultText));
   reportPreflight(diagnostic, 'success_modal_confirmed');
   return Object.freeze({ ...outcome, exactPlayerCreditMatch: true });
+}
+
+/** Dismiss only the result that was already verified and durably settled by the worker. */
+export async function dismissRoutineSuccessModal(page: Page): Promise<void> {
+  await requireAuthenticatedAgentPage(page);
+  const expectedDigest = verifiedRoutineSuccessResults.get(page);
+  if (!expectedDigest) unavailable();
+  const dialogs = page.locator('.ant-modal-content');
+  const count = await dialogs.count();
+  if (count > 20) unavailable();
+  let successDialog: Locator | undefined;
+  for (let index = 0; index < count; index += 1) {
+    const dialog = dialogs.nth(index);
+    if (!(await dialog.isVisible())) continue;
+    if (await exactlyOneVisible(dialog.getByText('Transfer Successful!', { exact: true }))) {
+      if (successDialog) unavailable();
+      successDialog = dialog;
+    }
+  }
+  if (!successDialog) unavailable();
+  if (successResultDigest(await successDialog.innerText()) !== expectedDigest) unavailable();
+  const close = await requireEnabled(
+    successDialog.getByRole('button', { name: 'Close', exact: true }),
+  );
+  await close.click({ timeout: 3_000 });
+  await successDialog
+    .getByText('Transfer Successful!', { exact: true })
+    .waitFor({ state: 'hidden', timeout: 3_000 });
+  verifiedRoutineSuccessResults.delete(page);
 }
 
 async function executeLocalDepositForAmount(

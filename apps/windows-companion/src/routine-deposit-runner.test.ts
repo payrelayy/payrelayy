@@ -19,6 +19,7 @@ describe('automatic routine queue loop', () => {
     const session = {
       stop: vi.fn(async () => undefined),
       pauseForReview: vi.fn(),
+      dismissSettledRoutineSuccess: vi.fn(async () => undefined),
       executeRoutineOneUseDeposit: vi.fn(),
       scanRoutineDepositHistory: vi.fn(),
       isSignedInVerified: vi.fn(() => true),

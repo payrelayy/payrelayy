@@ -2,7 +2,10 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WindowsCompanionConfig } from './config.js';
-import type { LocalKemerBetRoutinePreflightStage } from './local-kemerbet-deposit.js';
+import {
+  LocalKemerBetDepositError,
+  type LocalKemerBetRoutinePreflightStage,
+} from './local-kemerbet-deposit.js';
 import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 import {
   startLocalKemerBetSession,
@@ -370,6 +373,71 @@ describe('local KemerBet enrollment session', () => {
       isFresh: () => true,
     }));
     expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers a failed Close click by reloading only after settlement', async () => {
+    const { page, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockResolvedValue({
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+      exactPlayerCreditMatch: true,
+    });
+    dependencies.dismissRoutineSuccessModal.mockRejectedValueOnce(new Error('Close timed out'));
+    await session.executeRoutineOneUseDeposit('12345678', 10000, async () => ({
+      playerId: '12345678',
+      amountMinor: 10000,
+      isFresh: () => true,
+    }));
+    await expect(session.dismissSettledRoutineSuccess()).resolves.toBeUndefined();
+    expect(page.goto).toHaveBeenCalledWith(AGENTS_URL, {
+      waitUntil: 'commit',
+      timeout: 15_000,
+    });
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
+  it('holds a changed success result without resetting or leasing another credit', async () => {
+    const { page, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockResolvedValue({
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+      exactPlayerCreditMatch: true,
+    });
+    dependencies.dismissRoutineSuccessModal.mockRejectedValueOnce(new LocalKemerBetDepositError());
+    await session.executeRoutineOneUseDeposit('12345678', 10000, async () => ({
+      playerId: '12345678',
+      amountMinor: 10000,
+      isFresh: () => true,
+    }));
+    await expect(session.dismissSettledRoutineSuccess()).rejects.toThrow(LocalKemerBetDepositError);
+    expect(page.goto).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for sign-in if KemerBet navigates to login after the settled result', async () => {
+    const { page, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockResolvedValue({
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+      exactPlayerCreditMatch: true,
+    });
+    await session.executeRoutineOneUseDeposit('12345678', 10000, async () => ({
+      playerId: '12345678',
+      amountMinor: 10000,
+      isFresh: () => true,
+    }));
+    page.navigate(LOGIN_URL);
+    await expect(session.dismissSettledRoutineSuccess()).resolves.toBeUndefined();
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(dependencies.dismissRoutineSuccessModal).not.toHaveBeenCalled();
   });
 
   it('never retries after a deposit has requested the final fence', async () => {

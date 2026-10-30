@@ -2682,6 +2682,79 @@ export function registerExpiredReceiverSmsQueueOwnerHandoffSqlTests(
             )
           ).rows,
         ).toEqual([{ attempts: '0' }]);
+
+        const rejectedFingerprint = hexDigest();
+        const rejectedCandidate = await fixtureCandidate(
+          client,
+          rejectedFingerprint,
+          new Date().toISOString(),
+        );
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [rejectedCandidate],
+        );
+        await fixturePaymentEvent(client, rejectedFingerprint, new Date().toISOString());
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'queued' }]);
+        expect(
+          (
+            await client.query(`select * from app.finalize_receiver_sms_match($1::uuid)`, [
+              rejectedCandidate,
+            ])
+          ).rows,
+        ).toHaveLength(1);
+        await client.query(
+          `alter table app.receiver_sms_payment_matches
+            disable trigger receiver_sms_payment_matches_immutable`,
+        );
+        await client.query(
+          `update app.receiver_sms_payment_matches
+            set matched_at = pg_catalog.clock_timestamp() - interval '61 minutes'
+            where candidate_id = $1::uuid`,
+          [rejectedCandidate],
+        );
+        await client.query(
+          `alter table app.receiver_sms_payment_matches
+            enable trigger receiver_sms_payment_matches_immutable`,
+        );
+        expect(
+          (
+            await client.query<{ count: number }>(
+              `select app.move_expired_receiver_sms_jobs_to_owner_review() as count`,
+            )
+          ).rows,
+        ).toEqual([{ count: 1 }]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const rejected = await client.query<{ result: { status: string } }>(
+          `select app.decide_owner_manual_payment_case(
+            $1::uuid,$2::uuid,'reject',
+            'Owner rejected this submitted payment after review.') as result`,
+          [getOwner(), rejectedCandidate],
+        );
+        expect(rejected.rows[0]!.result.status).toBe('rejected');
+        await client.query('reset session authorization');
+        expect(
+          (
+            await client.query<{ status: string; attempts: string }>(
+              `select owner_case.status,
+            (select count(*)::text from app.deposit_execution_attempts attempt
+              where attempt.deposit_intent_id = lineage.deposit_intent_id) as attempts
+           from app.owner_manual_payment_cases owner_case
+           join app.receiver_sms_settlement_lineages lineage
+             on lineage.candidate_id = owner_case.candidate_id
+           where owner_case.candidate_id = $1::uuid`,
+              [rejectedCandidate],
+            )
+          ).rows,
+        ).toEqual([{ status: 'rejected', attempts: '0' }]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
         await client.query('rollback');

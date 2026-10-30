@@ -36,13 +36,6 @@ export const OWNER_CONTROL_GROUPS = [
         section: 'receiver-sms-inbox-title',
       },
       {
-        label: 'Transaction history',
-        description: 'Search older TeleBirr payments and their recorded outcomes.',
-        effect: 'Review only',
-        view: 'submitted',
-        section: 'transactions-title',
-      },
-      {
         label: 'Receiver-change cases',
         description:
           'Inspect payments fenced because the receiving wallet changed during an instruction.',
@@ -331,46 +324,6 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <p class="request-meta">Automatic Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
-        </section>
-        <section class="review-section transactions-section" aria-labelledby="transactions-title">
-          <div class="panel-heading">
-            <div>
-              <p class="status-ok">TeleBirr deposits</p>
-              <h2 id="transactions-title">Transactions <span class="waiting-badge" id="transactions-badge" hidden></span></h2>
-            </div>
-            <button class="secondary" id="transactions-refresh" type="button">Refresh</button>
-          </div>
-          <p class="receipt-label">Search older TeleBirr transactions and their recorded outcomes.</p>
-          <form id="transactions-filters" class="transactions-filters" autocomplete="off">
-            <div>
-              <label for="transactions-status-filter">Status</label>
-              <select id="transactions-status-filter">
-                <option value="all">All transactions</option>
-                <option value="pending">Pending</option>
-                <option value="credited">Approved and credited</option>
-                <option value="rejected">Rejected</option>
-              </select>
-            </div>
-            <div>
-              <label for="transactions-from">Submitted from</label>
-              <input id="transactions-from" type="date" />
-            </div>
-            <div>
-              <label for="transactions-to">Submitted through</label>
-              <input id="transactions-to" type="date" />
-            </div>
-            <div>
-              <label for="transactions-last4">Reference last 4</label>
-              <input id="transactions-last4" type="text" maxlength="4" pattern="[A-Za-z0-9]{4}" placeholder="AB12" spellcheck="false" autocapitalize="characters" />
-            </div>
-            <div class="transactions-filter-actions">
-              <button type="submit">Apply filters</button>
-              <button class="secondary" id="transactions-clear" type="button">Clear</button>
-            </div>
-          </form>
-          <p class="request-meta" id="transactions-summary" role="status" aria-live="polite">Sign in to load transactions.</p>
-          <div class="request-list" id="transactions-list"></div>
-          <button class="secondary transactions-more" id="transactions-more" type="button" hidden>Show older transactions</button>
         </section>
         <section class="review-section" aria-labelledby="receiver-sms-old-title">
           <div class="panel-heading">
@@ -1115,7 +1068,6 @@ section[aria-labelledby="receiver-sms-old-title"],
 section[aria-labelledby="receiver-sms-inbox-title"],
 section[aria-labelledby="execution-readiness-title"] { order: 1; }
 section[aria-labelledby="telebirr-fast-alert-title"],
-section[aria-labelledby="transactions-title"],
 section[aria-labelledby="execution-approvals-title"],
 section[aria-labelledby="receiver-title"] { order: 2; }
 section[aria-labelledby="receiver-change-review-title"],
@@ -1162,20 +1114,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .overview-grid dt { color: #60757e; font-size: .76rem; line-height: 1.35; }
 .overview-grid dd { margin: 6px 0 0; color: #173039; font-weight: 800; overflow-wrap: anywhere; }
 .waiting-badge { display: inline-block; margin-left: 8px; border-radius: 99px; background: #fcd34d; color: #211b0e; padding: 3px 9px; font-size: .72rem; vertical-align: middle; letter-spacing: 0; }
-.transactions-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
-.transactions-filters > div { display: grid; gap: 6px; }
-.transactions-filter-actions { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
-.transactions-filter-actions button { margin-top: 0; }
 .sms-inbox-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 10px; margin-top: 14px; }
 .sms-inbox-filters > div { display: grid; gap: 6px; min-width: 0; }
 .sms-inbox-filters button { margin-top: 0; white-space: nowrap; }
-.transactions-summary { margin-top: 16px; }
-.transaction-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.transaction-heading h3 { margin: 0; }
-.transaction-status { border-radius: 99px; padding: 4px 10px; font-size: .76rem; font-weight: 800; background: #eaf1f2; color: #29444b; }
-.transaction-status.pending { color: #fde68a; background: #3b2a12; }
-.transaction-status.credited { color: #86efac; background: #123323; }
-.transaction-status.rejected { color: #fecaca; background: #3f171b; }
 .transaction-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 12px; margin: 12px 0 0; font-size: .86rem; }
 .transaction-facts dt { color: #60757e; }
 .transaction-facts dd { margin: 0; overflow-wrap: anywhere; }
@@ -1186,6 +1127,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .submitted-payment-actions { display: grid; gap: 10px; margin-top: 14px; }
 .submitted-payment-actions .manual-completion-form { margin-top: 0; }
 .submitted-payment-actions > button { justify-self: start; }
+.expired-payment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.expired-payment-actions .manual-completion-form { display: block; margin: 0; padding: 0; border: 0; background: none; }
+.expired-payment-actions button, .expired-payment-actions .manual-completion-form button { margin: 0; padding: 10px 12px; font-size: .83rem; }
 .manual-completion-form { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #b8ded6; border-radius: 10px; background: #f0f9f6; }
 .manual-completion-form > label:not(.confirmation-row) { display: grid; gap: 6px; }
 .manual-completion-form button { justify-self: start; }
@@ -1235,7 +1179,7 @@ footer { margin-top: 30px; font-size: 0.85rem; }
   .review-section { padding: 16px; }
   .owner-control-grid { grid-template-columns: 1fr; }
   .owner-control-link { min-height: 0; }
-  .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions, .sms-inbox-filters { grid-template-columns: 1fr; }
+  .actions, .review-actions, .companion-actions, .sms-inbox-filters { grid-template-columns: 1fr; }
   .panel-heading { gap: 12px; }
   .panel-heading .secondary { flex: 0 0 auto; }
 }
@@ -1260,7 +1204,7 @@ const ownerViews = {
   submitted: {
     title: 'Submitted payments',
     description: 'Review customer submissions, copy the Player ID, and see pending, approved, and rejected outcomes.',
-    sections: ['receiver-sms-old-title', 'transactions-title', 'telebirr-fast-alert-title'],
+    sections: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
   },
   methods: {
     title: 'Payment methods',
@@ -1340,17 +1284,6 @@ let systemOverviewLoadGeneration = 0;
 let systemOverviewPollTimer;
 let latestSystemOverview;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
-const transactionsFilters = document.querySelector('#transactions-filters');
-const transactionsStatusFilter = document.querySelector('#transactions-status-filter');
-const transactionsFrom = document.querySelector('#transactions-from');
-const transactionsTo = document.querySelector('#transactions-to');
-const transactionsLast4 = document.querySelector('#transactions-last4');
-const transactionsClear = document.querySelector('#transactions-clear');
-const transactionsRefresh = document.querySelector('#transactions-refresh');
-const transactionsBadge = document.querySelector('#transactions-badge');
-const transactionsSummary = document.querySelector('#transactions-summary');
-const transactionsList = document.querySelector('#transactions-list');
-const transactionsMore = document.querySelector('#transactions-more');
 const receiverSmsOldBadge = document.querySelector('#receiver-sms-old-badge');
 const receiverSmsOldStatus = document.querySelector('#receiver-sms-old-status');
 const receiverSmsOldList = document.querySelector('#receiver-sms-old-list');
@@ -1365,8 +1298,6 @@ const receiverSmsInboxClear = document.querySelector('#receiver-sms-inbox-clear'
 const receiverSmsInboxStatus = document.querySelector('#receiver-sms-inbox-status');
 const receiverSmsInboxList = document.querySelector('#receiver-sms-inbox-list');
 const receiverSmsInboxMore = document.querySelector('#receiver-sms-inbox-more');
-let transactionsLoadGeneration = 0;
-let transactionsOffset = 0;
 let receiverSmsOldLoadGeneration = 0;
 let receiverSmsOldBusy = false;
 let manualPaymentOffset = 0;
@@ -3460,12 +3391,6 @@ function signOut(message = 'Signed out.') {
   clearExecutionApprovals();
   clearDepositIntake();
   clearReceiverChangeReviews();
-  transactionsLoadGeneration += 1;
-  transactionsOffset = 0;
-  transactionsList.replaceChildren();
-  transactionsBadge.hidden = true;
-  transactionsBadge.textContent = '';
-  transactionsSummary.textContent = 'Sign in to load transactions.';
   receiverSmsOldLoadGeneration += 1;
   receiverSmsOldList.replaceChildren();
   receiverSmsOldBadge.hidden = true;
@@ -5939,144 +5864,12 @@ function transactionDate(value) {
   }) : 'Not verified';
 }
 
-function validTransaction(value) {
-  if (!value || typeof value !== 'object' ||
-      typeof value.candidateId !== 'string' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.candidateId) ||
-      typeof value.submittedAt !== 'string' || !Number.isFinite(Date.parse(value.submittedAt)) ||
-      (value.paymentAt !== null &&
-        (typeof value.paymentAt !== 'string' || !Number.isFinite(Date.parse(value.paymentAt)))) ||
-      (value.amountMinor !== null &&
-        (typeof value.amountMinor !== 'string' || !/^[1-9][0-9]*$/.test(value.amountMinor))) ||
-      typeof value.referenceMasked !== 'string' || !/^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) ||
-      typeof value.playerMasked !== 'string' || !/^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked) ||
-      !['pending', 'credited', 'rejected'].includes(value.statusGroup) ||
-      !['waiting_approval', 'held_review', 'checking', 'credited', 'rejected',
-        'awaiting_manual_credit', 'manually_credited'].includes(value.statusDetail) ||
-      (value.reason !== null && typeof value.reason !== 'string') ||
-      (value.decidedBy !== null && typeof value.decidedBy !== 'string') ||
-      (value.decidedAt !== null &&
-        (typeof value.decidedAt !== 'string' || !Number.isFinite(Date.parse(value.decidedAt)))) ||
-      typeof value.canDecide !== 'boolean' ||
-      (value.canDecide && (value.statusDetail !== 'waiting_approval' || value.statusGroup !== 'pending'))) {
-    return false;
-  }
-  return true;
-}
-
 function transactionFact(list, label, value) {
   const name = document.createElement('dt');
   name.textContent = label;
   const detail = document.createElement('dd');
   detail.textContent = value;
   list.append(name, detail);
-}
-
-function renderTransaction(value) {
-  const card = document.createElement('article');
-  card.className = 'request-card';
-  const heading = document.createElement('div');
-  heading.className = 'transaction-heading';
-  const title = document.createElement('h3');
-  title.textContent = 'Reference ' + value.referenceMasked;
-  const status = document.createElement('span');
-  status.className = 'transaction-status ' + value.statusGroup;
-  status.textContent = ({
-    waiting_approval: 'Waiting for your approval',
-    held_review: 'Held for review',
-    checking: 'Checking',
-    credited: 'Approved and credited',
-    awaiting_manual_credit: 'Awaiting manual credit',
-    manually_credited: 'Manually credited',
-    rejected: 'Rejected',
-  })[value.statusDetail];
-  heading.append(title, status);
-  card.append(heading);
-  const facts = document.createElement('dl');
-  facts.className = 'transaction-facts';
-  transactionFact(facts, 'Submitted', transactionDate(value.submittedAt));
-  transactionFact(facts, 'Payment time', transactionDate(value.paymentAt));
-  transactionFact(facts, 'Amount', value.amountMinor === null
-    ? 'Not verified' : (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
-  transactionFact(facts, 'Player', value.playerMasked);
-  if (value.reason) transactionFact(facts, 'Reason', value.reason);
-  if (value.decidedBy && value.decidedAt) {
-    transactionFact(facts, 'Decision', value.decidedBy + ' · ' + transactionDate(value.decidedAt));
-  }
-  card.append(facts);
-  if (value.canDecide) {
-    const note = document.createElement('p');
-    note.className = 'request-meta';
-    note.textContent = 'Available in Submitted payments for a manual decision.';
-    card.append(note);
-  } else if (value.statusDetail === 'held_review') {
-    const note = document.createElement('p');
-    note.className = 'request-meta';
-    note.textContent = 'A verified signed receipt is required before approval. Contact support to review this payment.';
-    card.append(note);
-  }
-  return card;
-}
-
-async function loadTransactions(reset) {
-  if (!accessToken) return;
-  const generation = ownerAuthGeneration;
-  const loadGeneration = ++transactionsLoadGeneration;
-  const status = transactionsStatusFilter.value;
-  const from = transactionsFrom.value;
-  const to = transactionsTo.value;
-  const last4 = transactionsLast4.value.trim().toUpperCase();
-  if (last4 && !/^[A-Z0-9]{4}$/.test(last4)) {
-    transactionsSummary.textContent = 'Enter exactly four letters or digits for the reference search.';
-    return;
-  }
-  if (from && to && from > to) {
-    transactionsSummary.textContent = 'The first date must be on or before the last date.';
-    return;
-  }
-  const offset = reset ? 0 : transactionsOffset;
-  transactionsRefresh.disabled = true;
-  transactionsMore.disabled = true;
-  transactionsSummary.textContent = 'Loading transactions…';
-  const query = '?status=' + encodeURIComponent(status) +
-    '&limit=25&offset=' + offset +
-    (from ? '&from=' + encodeURIComponent(from) : '') +
-    (to ? '&to=' + encodeURIComponent(to) : '') +
-    (last4 ? '&last4=' + encodeURIComponent(last4) : '');
-  try {
-    const response = await ownerRequest('/v1/owner/transactions' + query, {
-      method: 'GET', headers: {},
-    });
-    if (!response.ok) throw new Error('transactions');
-    const page = await response.json();
-    if (!page || !Array.isArray(page.rows) || page.rows.length > 25 ||
-        !page.rows.every(validTransaction) ||
-        ![page.total, page.pending, page.credited, page.rejected, page.waitingCount]
-          .every((count) => Number.isSafeInteger(count) && count >= 0))
-      throw new Error('transactions');
-    if (generation !== ownerAuthGeneration || loadGeneration !== transactionsLoadGeneration ||
-        !accessToken) return;
-    if (reset) transactionsList.replaceChildren();
-    for (const value of page.rows) transactionsList.append(renderTransaction(value));
-    transactionsOffset = offset + page.rows.length;
-    transactionsBadge.hidden = page.waitingCount === 0;
-    transactionsBadge.textContent = page.waitingCount + ' waiting';
-    transactionsSummary.textContent = page.pending + ' pending · ' + page.credited +
-      ' approved and credited · ' + page.rejected + ' rejected. ' +
-      (page.total === 0 ? 'No matching transactions.' :
-        'Showing ' + transactionsOffset + ' of ' + page.total + ' matching transactions.');
-    transactionsMore.hidden = transactionsOffset >= page.total;
-  } catch (error) {
-    if (generation === ownerAuthGeneration && loadGeneration === transactionsLoadGeneration &&
-        accessToken && !isSignedOutError(error)) {
-      transactionsSummary.textContent = 'Transactions are temporarily unavailable. Refresh to try again.';
-    }
-  } finally {
-    if (generation === ownerAuthGeneration && loadGeneration === transactionsLoadGeneration) {
-      transactionsRefresh.disabled = false;
-      transactionsMore.disabled = false;
-    }
-  }
 }
 
 function validManualPaymentCase(value) {
@@ -6484,51 +6277,64 @@ function renderManualPaymentCase(value) {
     note.className = 'request-meta';
     note.textContent = 'This case was approved under the earlier process. Record the completed manual credit below.';
     card.append(note,manualCompletionForm(value));
-  } else {
-    if (value.canRecordStoppedCredit) {
-      const note = document.createElement('p');
-      note.className = 'request-meta';
-      note.textContent = value.statusDetail === 'Automatic window expired; Owner decision needed'
-        ? 'Automatic credit never started. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.'
-        : 'Automatic credit stopped before the final action. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.';
-      const record = document.createElement('button');
-      record.type = 'button';
-      record.textContent = 'Record outside credit';
-      record.addEventListener('click',() => void recordStoppedCredit(value,record));
-      card.append(note,record);
+  } else if (value.statusDetail === 'Automatic window expired; Owner decision needed' &&
+             value.canRecordStoppedCredit && value.canApprove && value.canReject) {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'Automatic credit expired. Approve, then credit in KemerBet; or record a credit already made outside FetanAgent.';
+    const actions = document.createElement('div');
+    actions.className = 'expired-payment-actions';
+    const reject = document.createElement('button');
+    reject.type = 'button';
+    reject.className = 'danger';
+    reject.textContent = 'Reject';
+    reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
+    const record = document.createElement('button');
+    record.type = 'button';
+    record.className = 'secondary';
+    record.textContent = 'Record outside credit';
+    record.addEventListener('click',() => void recordStoppedCredit(value,record));
+    actions.append(manualApprovalForm(value),reject,record);
+    card.append(note,actions);
+  } else if (value.canRecordStoppedCredit) {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'Automatic credit stopped before the final action. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.';
+    const record = document.createElement('button');
+    record.type = 'button';
+    record.textContent = 'Record outside credit';
+    record.addEventListener('click',() => void recordStoppedCredit(value,record));
+    card.append(note,record);
+  } else if (value.status === 'pending') {
+    const actions = document.createElement('div');
+    actions.className = 'submitted-payment-actions';
+    if (value.canApprove) {
+      const guidance = document.createElement('p');
+      guidance.className = 'request-meta';
+      guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
+      actions.append(guidance,manualApprovalForm(value));
     }
-    if (value.status === 'pending' &&
-        (!value.canRecordStoppedCredit || value.canApprove || value.canReject)) {
-      const actions = document.createElement('div');
-      actions.className = 'submitted-payment-actions';
-      if (value.canApprove) {
-        const guidance = document.createElement('p');
-        guidance.className = 'request-meta';
-        guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
-        actions.append(guidance,manualApprovalForm(value));
-      }
-      else {
-        const approve = document.createElement('button');
-        approve.type = 'button';
-        approve.textContent = 'Approve';
-        approve.disabled = true;
-        actions.append(approve);
-      }
-      const reject = document.createElement('button');
-      reject.type = 'button';
-      reject.className = 'danger';
-      reject.textContent = 'Reject';
-      reject.disabled = !value.canReject;
-      if (value.canReject)
-        reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
-      actions.append(reject);
-      card.append(actions);
-    } else if (value.ownerCaseStatus === 'rejected') {
-      const note = document.createElement('p');
-      note.className = 'request-meta';
-      note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
-      card.append(note,manualCompletionForm(value));
+    else {
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.textContent = 'Approve';
+      approve.disabled = true;
+      actions.append(approve);
     }
+    const reject = document.createElement('button');
+    reject.type = 'button';
+    reject.className = 'danger';
+    reject.textContent = 'Reject';
+    reject.disabled = !value.canReject;
+    if (value.canReject)
+      reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
+    actions.append(reject);
+    card.append(actions);
+  } else if (value.ownerCaseStatus === 'rejected') {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
+    card.append(note,manualCompletionForm(value));
   }
   return card;
 }
@@ -6944,20 +6750,6 @@ receiverSmsInboxClear.addEventListener('click', () => {
   receiverSmsInboxStatusFilter.value = 'all';
   void loadReceiverSmsInbox(true);
 });
-
-transactionsFilters.addEventListener('submit', (event) => {
-  event.preventDefault();
-  void loadTransactions(true);
-});
-transactionsClear.addEventListener('click', () => {
-  transactionsStatusFilter.value = 'all';
-  transactionsFrom.value = '';
-  transactionsTo.value = '';
-  transactionsLast4.value = '';
-  void loadTransactions(true);
-});
-transactionsRefresh.addEventListener('click', () => void loadTransactions(true));
-transactionsMore.addEventListener('click', () => void loadTransactions(false));
 
 function scheduleTelebirrFastAlertRefresh() {
   window.setTimeout(() => {
@@ -7787,7 +7579,6 @@ async function loadOwnerPlayerQueues() {
       loadDepositIntake(),
       loadReceiverChangeReviews(),
       loadTelebirrFastAlerts(),
-      loadTransactions(true),
       loadManualPaymentCases(true),
       loadCurrentPilot(),
       loadExecutionReadiness(),

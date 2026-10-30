@@ -435,8 +435,12 @@ export class PostgresOwnerManualPayments {
             (status !== 'pending' ||
               row.candidate_id === null ||
               row.payment_event_id === null ||
-              row.can_approve ||
-              row.can_reject)) ||
+              ((row.can_approve || row.can_reject) &&
+                !(
+                  row.can_approve &&
+                  row.can_reject &&
+                  row.status_detail === 'Automatic window expired; Owner decision needed'
+                )))) ||
           (row.rejection_reason !== null && typeof row.rejection_reason !== 'string')
         )
           throw new OwnerManualPaymentUnavailableError();

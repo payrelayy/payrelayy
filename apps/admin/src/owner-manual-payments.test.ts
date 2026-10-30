@@ -231,6 +231,42 @@ describe('Owner manual payment boundary', () => {
     ]);
   });
 
+  it('accepts all three Owner actions only for an expired, unattempted payment', async () => {
+    const row = {
+      case_id: null,
+      candidate_id: candidate,
+      legacy_candidate_id: null,
+      payment_event_id: sms,
+      provider_code: 'telebirr',
+      reference_masked: '***AB12',
+      submitted_at: new Date('2026-10-30T11:30:00Z'),
+      payment_at: new Date('2026-10-30T11:29:00Z'),
+      amount_minor: '10300',
+      receiver_account_id: '55555555-5555-4555-8555-555555555555',
+      receiver_account_masked: '***1234',
+      player_id: '12345678',
+      payment_status: 'pending',
+      status_detail: 'Automatic window expired; Owner decision needed',
+      owner_case_status: null,
+      rejection_reason: null,
+      decided_at: null,
+      completed_at: null,
+      can_approve: true,
+      can_reject: true,
+      can_record_stopped_credit: true,
+    };
+    const service = new PostgresOwnerManualPayments({
+      query: async () => ({ rows: [row] }),
+    });
+    await expect(service.listSubmittedPayments(actor, 'pending')).resolves.toMatchObject([
+      { canApprove: true, canReject: true, canRecordStoppedCredit: true },
+    ]);
+    row.status_detail = 'Automatic processing or reconciliation; check before manual credit';
+    await expect(service.listSubmittedPayments(actor, 'pending')).rejects.toBeInstanceOf(
+      OwnerManualPaymentUnavailableError,
+    );
+  });
+
   it('records approval before outside credit through one atomic database function', async () => {
     const calls: unknown[] = [];
     const service = new PostgresOwnerManualPayments({

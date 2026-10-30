@@ -6113,7 +6113,10 @@ function validManualPaymentCase(value) {
     (!value.canApprove || (value.status === 'pending' && value.canReject)) &&
     (!value.canRecordStoppedCredit ||
       (value.status === 'pending' && value.candidateId !== null &&
-        value.paymentEventId !== null && !value.canApprove && !value.canReject)) &&
+        value.paymentEventId !== null &&
+        ((!value.canApprove && !value.canReject) ||
+          (value.canApprove && value.canReject &&
+            value.statusDetail === 'Automatic window expired; Owner decision needed')))) &&
     Number.isFinite(Date.parse(value.submittedAt)) &&
     (value.paymentAt === null || Number.isFinite(Date.parse(value.paymentAt))) &&
     (value.decidedAt === null || Number.isFinite(Date.parse(value.decidedAt))) &&
@@ -6481,45 +6484,51 @@ function renderManualPaymentCase(value) {
     note.className = 'request-meta';
     note.textContent = 'This case was approved under the earlier process. Record the completed manual credit below.';
     card.append(note,manualCompletionForm(value));
-  } else if (value.canRecordStoppedCredit) {
-    const note = document.createElement('p');
-    note.className = 'request-meta';
-    note.textContent = 'Automatic credit stopped before the final action. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.';
-    const record = document.createElement('button');
-    record.type = 'button';
-    record.textContent = 'Record outside credit';
-    record.addEventListener('click',() => void recordStoppedCredit(value,record));
-    card.append(note,record);
-  } else if (value.status === 'pending') {
-    const actions = document.createElement('div');
-    actions.className = 'submitted-payment-actions';
-    if (value.canApprove) {
-      const guidance = document.createElement('p');
-      guidance.className = 'request-meta';
-      guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
-      actions.append(guidance,manualApprovalForm(value));
+  } else {
+    if (value.canRecordStoppedCredit) {
+      const note = document.createElement('p');
+      note.className = 'request-meta';
+      note.textContent = value.statusDetail === 'Automatic window expired; Owner decision needed'
+        ? 'Automatic credit never started. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.'
+        : 'Automatic credit stopped before the final action. If you already credited this Player outside FetanAgent, record it here. This will not credit the Player again.';
+      const record = document.createElement('button');
+      record.type = 'button';
+      record.textContent = 'Record outside credit';
+      record.addEventListener('click',() => void recordStoppedCredit(value,record));
+      card.append(note,record);
     }
-    else {
-      const approve = document.createElement('button');
-      approve.type = 'button';
-      approve.textContent = 'Approve';
-      approve.disabled = true;
-      actions.append(approve);
+    if (value.status === 'pending' &&
+        (!value.canRecordStoppedCredit || value.canApprove || value.canReject)) {
+      const actions = document.createElement('div');
+      actions.className = 'submitted-payment-actions';
+      if (value.canApprove) {
+        const guidance = document.createElement('p');
+        guidance.className = 'request-meta';
+        guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
+        actions.append(guidance,manualApprovalForm(value));
+      }
+      else {
+        const approve = document.createElement('button');
+        approve.type = 'button';
+        approve.textContent = 'Approve';
+        approve.disabled = true;
+        actions.append(approve);
+      }
+      const reject = document.createElement('button');
+      reject.type = 'button';
+      reject.className = 'danger';
+      reject.textContent = 'Reject';
+      reject.disabled = !value.canReject;
+      if (value.canReject)
+        reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
+      actions.append(reject);
+      card.append(actions);
+    } else if (value.ownerCaseStatus === 'rejected') {
+      const note = document.createElement('p');
+      note.className = 'request-meta';
+      note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
+      card.append(note,manualCompletionForm(value));
     }
-    const reject = document.createElement('button');
-    reject.type = 'button';
-    reject.className = 'danger';
-    reject.textContent = 'Reject';
-    reject.disabled = !value.canReject;
-    if (value.canReject)
-      reject.addEventListener('click',() => void decideManualPaymentCase(value,'reject',reject));
-    actions.append(reject);
-    card.append(actions);
-  } else if (value.ownerCaseStatus === 'rejected') {
-    const note = document.createElement('p');
-    note.className = 'request-meta';
-    note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
-    card.append(note,manualCompletionForm(value));
   }
   return card;
 }

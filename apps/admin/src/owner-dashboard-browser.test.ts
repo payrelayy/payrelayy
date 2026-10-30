@@ -1202,6 +1202,38 @@ describe('Owner manual payment review', () => {
     ).toHaveLength(1);
   });
 
+  it('shows Owner decisions and outside-credit recording after an unattempted automatic window expires', async () => {
+    const expired = {
+      ...pending,
+      paymentEventId: '44444444-4444-4444-8444-444444444444',
+      paymentAt: '2026-10-20T09:59:00Z',
+      amountMinor: '10300',
+      receiverAccountId: '55555555-5555-4555-8555-555555555555',
+      receiverAccountMasked: '***1234',
+      statusDetail: 'Automatic window expired; Owner decision needed',
+      canApprove: true,
+      canReject: true,
+      canRecordStoppedCredit: true,
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => {
+        if (url.startsWith('/v1/owner/submitted-payments?'))
+          return response(200, { payments: [expired] });
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
+        return undefined;
+      },
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    await browser.call('loadManualPaymentCases', true);
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    const rendered = JSON.stringify(card);
+    expect(rendered).toContain('Automatic credit never started');
+    expect(rendered).toContain('Record outside credit');
+    expect(rendered).toContain('Approve');
+    expect(rendered).toContain('Reject');
+  });
+
   it('rejects a submitted payment with one click and a fixed Owner reason', async () => {
     let rejected = false;
     const browser = ownerBrowserHarness(503, {

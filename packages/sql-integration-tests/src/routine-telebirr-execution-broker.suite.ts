@@ -12,7 +12,7 @@ const commandSignature =
 const historyCommandSignature =
   'app.execute_agent_platform_routine_deposit_history_confirmation(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,jsonb)';
 const historyWindowSignature = 'app.routine_telebirr_pending_history_window(uuid,uuid)';
-const digest = (seed = randomUUID()): string =>
+export const digest = (seed = randomUUID()): string =>
   `sha256:${createHash('sha256').update(seed, 'utf8').digest('hex')}`;
 
 interface CertificateFixture {
@@ -123,7 +123,7 @@ export async function activeCertificate(
   return { certificateId, deviceId, deviceKeyId, signerKeyId };
 }
 
-function leaseCommand(accountId: string, requestId = randomUUID()) {
+export function leaseCommand(accountId: string, requestId = randomUUID()) {
   return {
     contractVersion: 1,
     protocolMode: 'windows_companion_routine_deposit_execution_v1',
@@ -135,7 +135,7 @@ function leaseCommand(accountId: string, requestId = randomUUID()) {
   };
 }
 
-function boundCommand(
+export function boundCommand(
   lease: ReturnType<typeof leaseCommand>,
   operation: string,
   binding: Record<string, unknown>,
@@ -153,7 +153,7 @@ function boundCommand(
   };
 }
 
-async function execute(
+export async function execute(
   client: Client,
   certificate: CertificateFixture,
   command: Record<string, unknown>,
@@ -170,7 +170,9 @@ async function execute(
   const functionName =
     command.operation === 'confirm_history'
       ? 'app.execute_agent_platform_routine_deposit_history_confirmation'
-      : 'app.execute_agent_platform_routine_deposit_command';
+      : command.operation === 'confirm_modal'
+        ? 'app.execute_agent_platform_routine_deposit_modal_confirmation'
+        : 'app.execute_agent_platform_routine_deposit_command';
   const result = await client.query<{ result: unknown }>(
     `select ${functionName}(
       $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,

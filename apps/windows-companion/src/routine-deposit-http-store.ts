@@ -52,7 +52,13 @@ export interface RoutineDepositHttpStoreOptions {
 
 export interface RoutineDepositHttpStoreDiagnostic {
   readonly operation:
-    'lease' | 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete';
+    | 'lease'
+    | 'fence'
+    | 'record_dispatch'
+    | 'confirm_modal'
+    | 'reconcile'
+    | 'confirm_history'
+    | 'complete';
   readonly stage:
     | 'request_aborted'
     | 'request_build_failed'
@@ -264,6 +270,7 @@ export function createRoutineDepositHttpStore(
       value.operation === 'lease' ||
       value.operation === 'record_dispatch' ||
       value.operation === 'reconcile' ||
+      value.operation === 'confirm_modal' ||
       value.operation === 'confirm_history' ||
       value.operation === 'complete' ||
       value.operation === 'pause';
@@ -417,6 +424,21 @@ export function createRoutineDepositHttpStore(
         reportDiagnostic('record_dispatch', 'binding_mismatch');
         return unavailable();
       }
+    },
+    async confirmModal(lease: RoutineDepositLease): Promise<RoutineDepositBinding | null> {
+      const expectedBinding = binding(lease);
+      const request: RoutineDepositCommand = Object.freeze({
+        ...base(randomUUID(), workerInstanceId, 'confirm_modal'),
+        operation: 'confirm_modal',
+        binding: expectedBinding,
+      });
+      const result = await command(request);
+      if (result === null) return null;
+      if (!sameBinding(expectedBinding, result)) {
+        reportDiagnostic('confirm_modal', 'binding_mismatch');
+        return unavailable();
+      }
+      return decodeRoutineDepositBinding(result) ?? unavailable();
     },
     async reconcile(lease: RoutineDepositLease): Promise<RoutineDepositReconciliation> {
       const request: RoutineDepositCommand = Object.freeze({

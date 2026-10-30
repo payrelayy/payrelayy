@@ -215,6 +215,36 @@ describe('routine deposit protocol', () => {
     expect(decodeRoutineDepositCommand({ ...command, retryAllowed: true })).toBeUndefined();
   });
 
+  it('accepts only the exact bound modal-finalization command and response', () => {
+    const command = {
+      contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
+      protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
+      capability: ROUTINE_DEPOSIT_CAPABILITY,
+      requestId,
+      workerInstanceId,
+      operation: 'confirm_modal',
+      binding,
+    } as const;
+    expect(decodeRoutineDepositCommand(command)).toEqual(command);
+    expect(decodeRoutineDepositCommand({ ...command, historyObservation: {} })).toBeUndefined();
+    const envelope = {
+      contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
+      protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
+      capability: ROUTINE_DEPOSIT_CAPABILITY,
+      requestId,
+      operation: 'confirm_modal',
+      requestContentDigest: digestRoutineDepositCommand(command),
+      serverIssuedAt: '2026-10-30T01:15:00.000Z',
+    } as const;
+    expect(decodeRoutineDepositResponseBody({ ...envelope, result: binding })?.result).toEqual(
+      binding,
+    );
+    expect(decodeRoutineDepositResponseBody({ ...envelope, result: null })?.result).toBeNull();
+    expect(
+      decodeRoutineDepositResponseBody({ ...envelope, result: { ...binding, confirmed: true } }),
+    ).toBeUndefined();
+  });
+
   it('binds an approved History observation to the exact Player, amount, and provider IDs', () => {
     const observation = {
       transactionId: '110891902',

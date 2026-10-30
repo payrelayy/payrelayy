@@ -112,7 +112,7 @@ async function forwardExactDepositRequest(
     body = await response.body();
     observedResponseDigest = providerResponseDigest(response, body);
     const status = response.status();
-    if (status >= 300 && status < 400 && status !== 304) {
+    if (status < 200 || status >= 300) {
       await route.abort('blockedbyclient').catch(() => undefined);
       reportBlocked('mutation_attempt_blocked');
       settle({ outcome: 'local_uncertain', providerResponseDigest: observedResponseDigest });

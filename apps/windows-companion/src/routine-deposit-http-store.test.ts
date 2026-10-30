@@ -96,7 +96,9 @@ function fixture(tamperSignature = false, returnLease = false) {
               issuedAtMs: Date.parse(serverIssuedAt),
               validUntilMs: Date.parse(serverIssuedAt) + 5_000,
             }
-          : command.operation === 'record_dispatch' || command.operation === 'complete'
+          : command.operation === 'record_dispatch' ||
+              command.operation === 'confirm_modal' ||
+              command.operation === 'complete'
             ? command.binding
             : command.operation === 'reconcile'
               ? { outcome: 'pending', historyWindow }
@@ -173,6 +175,9 @@ describe('routine deposit HTTP store', () => {
         exactPlayerCreditMatch: true,
       }),
     ).resolves.toBeUndefined();
+    await expect(selected.store.confirmModal(lease)).resolves.toMatchObject({
+      attemptId: lease.attemptId,
+    });
     await expect(selected.store.reconcile(lease)).resolves.toEqual({
       outcome: 'pending',
       historyWindow,
@@ -186,6 +191,7 @@ describe('routine deposit HTTP store', () => {
       'lease',
       'fence',
       'record_dispatch',
+      'confirm_modal',
       'reconcile',
       'complete',
       'pause',

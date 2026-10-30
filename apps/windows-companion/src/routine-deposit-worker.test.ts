@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { LocalKemerBetRoutineDepositDispatchOutcome } from './local-kemerbet-deposit.js';
-import type { RoutineHistoryScan } from './routine-kemerbet-history.js';
 
 import {
   createRoutineDepositWorker,
@@ -10,13 +9,7 @@ import {
   type RoutineDepositFence,
   type RoutineDepositLease,
   type RoutineDepositPolicy,
-  type RoutineDepositReconciliation,
 } from './routine-deposit-worker.js';
-
-const historyWindow = {
-  from: '2026-10-12T18:33:14.000000Z',
-  until: '2026-10-12T18:33:14.999999Z',
-} as const;
 
 const NOW = 1_800_000_000_000;
 const policy: RoutineDepositPolicy = Object.freeze({
@@ -57,17 +50,6 @@ function makeLease(overrides: Partial<RoutineDepositLease> = {}): RoutineDeposit
   };
 }
 
-function confirmed(lease: RoutineDepositLease): RoutineDepositReconciliation {
-  return {
-    ...lease,
-    outcome: 'confirmed_executed',
-    reconciliationId: randomUUID(),
-    evidenceDigest: `sha256:${'a'.repeat(64)}`,
-    exactHistoryMatchCount: 1,
-    playerCreditConfirmed: true,
-  };
-}
-
 function fixture(lease = makeLease()) {
   const controller = new AbortController();
   let currentTime = NOW;
@@ -83,20 +65,17 @@ function fixture(lease = makeLease()) {
       }),
     ),
     recordDispatch: vi.fn(async () => undefined),
-    reconcile: vi.fn(async (selected: RoutineDepositLease): Promise<RoutineDepositReconciliation> =>
-      confirmed(selected),
+    confirmModal: vi.fn(
+      async (selected: RoutineDepositLease): Promise<RoutineDepositLease | null> => ({
+        ...selected,
+      }),
     ),
-    confirmHistory: vi.fn(
-      async (selected: RoutineDepositLease): Promise<RoutineDepositReconciliation> =>
-        confirmed(selected),
-    ),
+    reconcile: vi.fn(async () => ({ outcome: 'uncertain' as const })),
+    confirmHistory: vi.fn(async () => ({ outcome: 'uncertain' as const })),
     completeConfirmed: vi.fn(async (selected: RoutineDepositLease) => ({ ...selected })),
     pause: vi.fn(async () => undefined),
   } satisfies RoutineDepositExecutionStore;
   const session = {
-    scanRoutineDepositHistory: vi.fn(async (): Promise<RoutineHistoryScan> => ({
-      outcome: 'not_observed',
-    })),
     executeRoutineOneUseDeposit: vi.fn(
       async (
         _player: string,
@@ -164,7 +143,7 @@ describe('routine production serial deposit worker', () => {
       expect(isRoutineDepositPolicy({ ...policy, ...altered })).toBe(false);
   });
 
-  it('executes an arbitrary eligible Player and receipt amount, then confirms credit before completion', async () => {
+  it('finalizes an exact success result without a KemerBet history read', async () => {
     const { worker, store, session, lease } = fixture();
     expect(await worker.runOnce()).toEqual({ status: 'completed' });
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledWith(
@@ -174,37 +153,17 @@ describe('routine production serial deposit worker', () => {
     );
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch).toHaveBeenCalledTimes(1);
-    expect(store.reconcile).toHaveBeenCalledTimes(1);
-    expect(store.completeConfirmed).toHaveBeenCalledTimes(1);
+    expect(store.confirmModal).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
-      store.reconcile.mock.invocationCallOrder[0]!,
-    );
-    expect(store.reconcile.mock.invocationCallOrder[0]).toBeLessThan(
-      store.completeConfirmed.mock.invocationCallOrder[0]!,
+      store.confirmModal.mock.invocationCallOrder[0]!,
     );
     expect(store.pause).not.toHaveBeenCalled();
   });
 
-  it('does not confuse HTTP submission success with credit confirmation', async () => {
-    const { worker, store, session } = fixture();
-    store.reconcile
-      .mockResolvedValueOnce({ outcome: 'pending', historyWindow })
-      .mockResolvedValueOnce({ outcome: 'pending', historyWindow });
-    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
-    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
-    expect(await worker.runOnce()).toEqual({ status: 'completed' });
-    expect(store.leaseNext).toHaveBeenCalledTimes(1);
-    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
-    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
-    expect(store.completeConfirmed).toHaveBeenCalledTimes(1);
-  });
-
-  it('moves repeated missing History observations to Owner review so other requests can proceed', async () => {
+  it('holds a missing durable modal record for Owner review and continues with another request', async () => {
     const { worker, store, session, lease } = fixture();
-    store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
+    store.confirmModal.mockResolvedValueOnce(null);
     store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
-    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
-    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
     expect(await worker.runOnce()).toEqual({
       status: 'contained',
       reason: 'reconciliation_uncertain',
@@ -214,65 +173,6 @@ describe('routine production serial deposit worker', () => {
       'reconciliation_uncertain',
     );
     expect(await worker.runOnce()).toEqual({ status: 'idle' });
-    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
-  });
-
-  it('confirms exactly one approved history row after dispatch without a second Transfer', async () => {
-    const { worker, store, session, lease } = fixture();
-    store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
-    session.scanRoutineDepositHistory.mockResolvedValueOnce({
-      outcome: 'exact_match',
-      observation: {
-        transactionId: '110891902',
-        requestId: '19686411',
-        occurredAt: '2026-10-12T18:33:14.257728Z',
-        playerId: lease.playerId,
-        amountMinor: lease.amountMinor,
-        currencyCode: 'ETB',
-        approvedHistoryMatchCount: 1,
-      },
-    });
-    expect(await worker.runOnce()).toEqual({ status: 'completed' });
-    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
-    expect(session.scanRoutineDepositHistory).toHaveBeenCalledWith(
-      lease.playerId,
-      lease.amountMinor,
-      historyWindow,
-    );
-    expect(store.confirmHistory).toHaveBeenCalledTimes(1);
-    expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
-      session.scanRoutineDepositHistory.mock.invocationCallOrder[0]!,
-    );
-    expect(store.confirmHistory.mock.invocationCallOrder[0]).toBeLessThan(
-      store.completeConfirmed.mock.invocationCallOrder[0]!,
-    );
-  });
-
-  it('contains an ambiguous history in Owner review without retrying Transfer', async () => {
-    const { worker, store, session } = fixture();
-    store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
-    session.scanRoutineDepositHistory.mockResolvedValueOnce({ outcome: 'ambiguous' });
-    expect(await worker.runOnce()).toEqual({
-      status: 'contained',
-      reason: 'reconciliation_uncertain',
-    });
-    expect(store.confirmHistory).not.toHaveBeenCalled();
-    expect(store.completeConfirmed).not.toHaveBeenCalled();
-    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
-  });
-
-  it('contains three unreadable history scans without retrying Transfer', async () => {
-    const { worker, store, session } = fixture();
-    store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
-    session.scanRoutineDepositHistory.mockRejectedValue(new Error('history unavailable'));
-    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
-    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
-    expect(await worker.runOnce()).toEqual({
-      status: 'contained',
-      reason: 'reconciliation_uncertain',
-    });
-    expect(store.confirmHistory).not.toHaveBeenCalled();
-    expect(store.completeConfirmed).not.toHaveBeenCalled();
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
   });
 
@@ -301,10 +201,10 @@ describe('routine production serial deposit worker', () => {
       expect(await worker.runOnce()).toEqual({ status: 'completed' });
     }
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(8);
-    expect(store.completeConfirmed).toHaveBeenCalledTimes(8);
+    expect(store.confirmModal).toHaveBeenCalledTimes(8);
   });
 
-  it('after restart reconciles a fenced attempt without executing again', async () => {
+  it('after restart finalizes a recorded modal result without executing again', async () => {
     const { worker, store, session } = fixture(
       makeLease({ phase: 'reconcile', finalActionFenced: true }),
     );
@@ -312,7 +212,7 @@ describe('routine production serial deposit worker', () => {
     expect(session.executeRoutineOneUseDeposit).not.toHaveBeenCalled();
     expect(store.fenceFinalAction).not.toHaveBeenCalled();
     expect(store.recordDispatch).not.toHaveBeenCalled();
-    expect(store.reconcile).toHaveBeenCalledTimes(1);
+    expect(store.confirmModal).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -360,7 +260,7 @@ describe('routine production serial deposit worker', () => {
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch).not.toHaveBeenCalled();
-    expect(store.completeConfirmed).not.toHaveBeenCalled();
+    expect(store.confirmModal).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -502,19 +402,17 @@ describe('routine production serial deposit worker', () => {
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['uncertain', 'wrong_amount', 'wrong_player', 'no_credit', 'multiple_history_matches'])(
-    'contains only a durable uncertain case but stops on mismatched reconciliation: %s',
+  it.each(['uncertain', 'wrong_amount', 'wrong_player'])(
+    'contains a missing modal result but stops on a mismatched binding: %s',
     async (kind) => {
       const { worker, store } = fixture();
-      store.reconcile.mockImplementationOnce(async (lease) => {
-        if (kind === 'uncertain') return { outcome: 'uncertain' };
+      store.confirmModal.mockImplementationOnce(async (lease) => {
+        if (kind === 'uncertain') return null;
         return {
-          ...confirmed(lease),
+          ...lease,
           ...(kind === 'wrong_amount' ? { amountMinor: 2500 } : {}),
           ...(kind === 'wrong_player' ? { playerId: 'OTHER' } : {}),
-          ...(kind === 'no_credit' ? { playerCreditConfirmed: false } : {}),
-          ...(kind === 'multiple_history_matches' ? { exactHistoryMatchCount: 2 } : {}),
-        } as RoutineDepositReconciliation;
+        };
       });
       if (kind === 'uncertain') {
         expect(await worker.runOnce()).toEqual({
@@ -530,11 +428,11 @@ describe('routine production serial deposit worker', () => {
         expect(await worker.runOnce()).toMatchObject({ status: 'paused' });
         expect(store.leaseNext).toHaveBeenCalledTimes(1);
       }
-      expect(store.completeConfirmed).not.toHaveBeenCalled();
+      expect(store.confirmModal).toHaveBeenCalledTimes(1);
     },
   );
 
-  it.each(['recordDispatch', 'reconcile', 'completeConfirmed'] as const)(
+  it.each(['recordDispatch', 'confirmModal'] as const)(
     'contains %s uncertainty and accepts a different request after durable review',
     async (operation) => {
       const { worker, store, session, lease } = fixture();
@@ -570,7 +468,7 @@ describe('routine production serial deposit worker', () => {
 
   it('stays paused locally after a post-lease database failure even if pause notification fails', async () => {
     const { worker, store } = fixture();
-    store.reconcile.mockRejectedValueOnce(new Error('offline'));
+    store.confirmModal.mockRejectedValueOnce(new Error('offline'));
     store.pause.mockRejectedValueOnce(new Error('offline'));
     expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
     expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });

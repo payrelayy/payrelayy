@@ -21,11 +21,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOptions, 'session'> {
   readonly session: Pick<
     LocalKemerBetSession,
-    | 'executeRoutineOneUseDeposit'
-    | 'scanRoutineDepositHistory'
-    | 'isSignedInVerified'
-    | 'pauseForReview'
-    | 'stop'
+    'executeRoutineOneUseDeposit' | 'isSignedInVerified' | 'pauseForReview' | 'stop'
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
@@ -36,7 +32,7 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
 /** Explicitly invoked, never started by the read-only/v2 entry points. No deposit-count limit. */
 export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
   // This is only the empty-queue delay. Browser work remains serial and a
-  // completed/fenced credit still follows the one-use reconciliation path.
+  // completed/fenced credit still follows the one-use modal confirmation path.
   const idleDelayMs = options.idleDelayMs ?? 500;
   if (!Number.isSafeInteger(idleDelayMs) || idleDelayMs < 100 || idleDelayMs > 60000) {
     throw new Error('Routine queue interval is invalid.');
@@ -67,7 +63,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           if (controller.signal.aborted) break;
           if (!options.session.isSignedInVerified()) continue;
         }
-        // The await is the execution sequence: reconciliation finishes before the next run.
+        // The await is the execution sequence: confirmation finishes before the next run.
         const result = await worker.runOnce();
         lastLeaseWasIdle = result.status === 'idle' || result.status === 'contained';
         try {

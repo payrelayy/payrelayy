@@ -708,6 +708,19 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
     (identities) => {
       privatePlayerIdentities = identities;
     },
+    async () => {
+      const dialogs = page.locator('.ant-modal-content');
+      const count = await dialogs.count();
+      if (count > 20) unavailable();
+      for (let index = 0; index < count; index += 1) {
+        const dialog = dialogs.nth(index);
+        if (
+          (await dialog.isVisible()) &&
+          (await exactlyOneVisible(dialog.getByText('Transfer Successful!', { exact: true })))
+        )
+          unavailable();
+      }
+    },
   );
   if (outcome.outcome !== 'submission_attempted') return outcome;
   if (privatePlayerIdentities.length < 1) unavailable();
@@ -769,6 +782,7 @@ async function executeLocalDepositForAmount(
   acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
   onPlayerPrepared?: (identities: readonly string[]) => void,
+  beforeFinalAction?: () => Promise<void>,
 ): Promise<LocalKemerBetDepositDispatchOutcome> {
   const { privatePlayer } = await prepareLocalDepositForAmount(
     page,
@@ -778,6 +792,7 @@ async function executeLocalDepositForAmount(
     diagnostic,
   );
   onPlayerPrepared?.(privatePlayer.identities);
+  await beforeFinalAction?.();
   // The server/database fence is intentionally requested only after the page is fully prepared.
   reportPreflight(diagnostic, 'final_action_requested');
   const finalAction = await acquireFinalAction();

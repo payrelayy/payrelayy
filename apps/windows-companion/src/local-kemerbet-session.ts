@@ -19,6 +19,7 @@ import {
   dismissRoutineSuccessModal,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
+  LocalKemerBetDepositError,
   rehearseNoMoneyRoutineDepositPreflight,
   type LocalKemerBetFinalAction,
   type LocalKemerBetRoutineDepositDispatchOutcome,
@@ -904,11 +905,30 @@ export async function startLocalKemerBetSession(
     async dismissSettledRoutineSuccess() {
       if (!routineSuccessModalPending) return;
       const page = localPage;
-      if (terminal || stopping || reviewPaused || !signedInVerified || !page)
+      if (terminal || stopping || reviewPaused || !page)
         throw new Error('The confirmed KemerBet result is unavailable.');
       try {
+        if (classifyPageUrl(page.url()) === 'login') {
+          await observePage(page);
+          routineSuccessModalPending = false;
+          return;
+        }
+        if (!signedInVerified) throw new Error('The confirmed KemerBet result is unavailable.');
         await ensureKemerBetAgentWindow(page);
-        await dismissRoutineSuccessModal(page);
+        try {
+          await dismissRoutineSuccessModal(page);
+        } catch (error) {
+          if (classifyPageUrl(page.url()) === 'login') {
+            // The settled result is gone with the provider navigation. The queue
+            // waits for a newly verified sign-in without claiming another credit.
+            await observePage(page);
+          } else {
+            if (error instanceof LocalKemerBetDepositError) throw error;
+            // A failed Close click is a UI failure after durable settlement. A
+            // guarded page reset can recover without another Transfer or fence.
+            await resetVerifiedAgentPage(page);
+          }
+        }
         routineSuccessModalPending = false;
       } finally {
         operationInProgress = false;

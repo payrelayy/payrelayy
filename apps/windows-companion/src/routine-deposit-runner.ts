@@ -21,10 +21,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOptions, 'session'> {
   readonly session: Pick<
     LocalKemerBetSession,
-    | 'executeRoutineOneUseDeposit'
-    | 'isSignedInVerified'
-    | 'pauseForReview'
-    | 'stop'
+    'executeRoutineOneUseDeposit' | 'isSignedInVerified' | 'pauseForReview' | 'stop'
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;

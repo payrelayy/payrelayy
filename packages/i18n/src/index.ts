@@ -65,7 +65,7 @@ export const messages = {
     en: 'Open /menu, tap Deposit, then send your payment reference.',
   },
   depositUnavailable: {
-    en: 'Deposits are unavailable right now. Please try again later.',
+    en: 'Deposits are unavailable right now. Need help? /support.',
   },
   depositReferenceReceived: {
     en: 'Payment details received. We’ll update you here.',

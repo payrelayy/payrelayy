@@ -108,6 +108,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-modal-success-release-guard-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-expired-queue-owner-handoff-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-submitted-cleanup-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-support-outage-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh

@@ -2,6 +2,7 @@ import { BOT_PUBLIC_SUPPORT_CONTACT_URL } from '@fetanagent/config/bot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createTelegramSupportContactResolver,
   handleTelegramSupportMessage,
   loadTelegramSupportContact,
   TELEGRAM_SUPPORT_UNAVAILABLE_TEXT,
@@ -171,6 +172,87 @@ describe('public Telegram support contact transport', () => {
     expect(fetchContact.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
     expect(cancel).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('last verified support contact during Owner interruptions', () => {
+  it('uses the verified contact when the next request fails, without exposing error details', async () => {
+    const fetchContact = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json(contact('help_team')))
+      .mockResolvedValueOnce(new Response('private failure detail', { status: 503 }));
+    const reportFailure = vi.fn();
+    const resolver = createTelegramSupportContactResolver(BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+      fetchContact,
+      reportFailure,
+    });
+    expect(await resolver.resolve()).toBe('https://t.me/help_team');
+    expect(await resolver.resolve()).toBe('https://t.me/help_team');
+    expect(reportFailure).toHaveBeenCalledWith('http_unavailable', true);
+    expect(JSON.stringify(reportFailure.mock.calls)).not.toContain('private failure detail');
+  });
+
+  it('clears the fallback when the Owner explicitly disables the contact', async () => {
+    const fetchContact = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json(contact('help_team')))
+      .mockResolvedValueOnce(json(contact(null)))
+      .mockRejectedValueOnce(new Error('offline'));
+    const resolver = createTelegramSupportContactResolver(BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+      fetchContact,
+    });
+    expect(await resolver.resolve()).toBe('https://t.me/help_team');
+    expect(await resolver.resolve()).toBeNull();
+    expect(await resolver.resolve()).toBeNull();
+  });
+
+  it('does not invent a contact if its first request fails', async () => {
+    const reportFailure = vi.fn();
+    const resolver = createTelegramSupportContactResolver(BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+      fetchContact: vi.fn<typeof fetch>().mockRejectedValue(new Error('offline')),
+      reportFailure,
+    });
+    expect(await resolver.resolve()).toBeNull();
+    expect(reportFailure).toHaveBeenCalledWith('transport_unavailable', false);
+  });
+
+  it('uses the last verified contact after the three-second Owner timeout', async () => {
+    vi.useFakeTimers();
+    const fetchContact = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json(contact('help_team')))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const reportFailure = vi.fn();
+    const resolver = createTelegramSupportContactResolver(BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+      fetchContact,
+      reportFailure,
+    });
+    expect(await resolver.resolve()).toBe('https://t.me/help_team');
+    const duringOutage = resolver.resolve();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await duringOutage).toBe('https://t.me/help_team');
+    expect(reportFailure).toHaveBeenCalledWith('timeout', true);
+  });
+
+  it('coalesces simultaneous requests so an older response cannot restore a revoked contact', async () => {
+    let finish!: (response: Response) => void;
+    const fetchContact = vi.fn<typeof fetch>().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const resolver = createTelegramSupportContactResolver(BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+      fetchContact,
+    });
+    const first = resolver.resolve();
+    const second = resolver.resolve();
+    expect(fetchContact).toHaveBeenCalledOnce();
+    finish(json(contact('help_team')));
+    expect(await Promise.all([first, second])).toEqual([
+      'https://t.me/help_team',
+      'https://t.me/help_team',
+    ]);
   });
 });
 

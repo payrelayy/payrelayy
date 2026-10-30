@@ -24,7 +24,10 @@ import {
 } from './telegram-deposit-temporary-message.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
-import { handleTelegramSupportMessage } from './telegram-support.js';
+import {
+  createTelegramSupportContactResolver,
+  handleTelegramSupportMessage,
+} from './telegram-support.js';
 import {
   TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
   TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
@@ -106,6 +109,28 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const outcomeActions = renderTelegramOutcomeActions();
+let lastSupportFailureLogAt = 0;
+let lastSupportFailureReason = '';
+const supportContact = createTelegramSupportContactResolver(config.supportContactUrl, {
+  reportFailure: (reason, cachedContactUsed) => {
+    const now = Date.now();
+    if (reason === lastSupportFailureReason && now - lastSupportFailureLogAt < 60_000) return;
+    lastSupportFailureReason = reason;
+    lastSupportFailureLogAt = now;
+    console.warn({ reason, cachedContactUsed }, 'Telegram support contact lookup failed.');
+  },
+});
+let supportRefreshTimer: ReturnType<typeof setInterval> | undefined;
+
+async function supportKeyboard(): Promise<InlineKeyboard | undefined> {
+  const contact = await supportContact.resolve();
+  return contact ? new InlineKeyboard().url('💬 Support', contact) : undefined;
+}
+
+async function depositUnavailableOptions(): Promise<{ reply_markup: InlineKeyboard } | undefined> {
+  const keyboard = await supportKeyboard();
+  return keyboard ? { reply_markup: keyboard } : undefined;
+}
 async function syncPrivateCommands(chatId: number, hasSavedPlayer: boolean): Promise<void> {
   try {
     const scope = { type: 'chat' as const, chat_id: chatId };
@@ -132,6 +157,13 @@ async function availableMenuButtons(
         methods.cbe_birr) &&
       (button.callbackData !== TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA || methods.telebirr) &&
       (button.callbackData !== TELEGRAM_GUIDED_CBE_CALLBACK_DATA || methods.cbe_birr),
+  );
+}
+function isDepositMenuButton(button: PrivateTelegramMenuButton): boolean {
+  return (
+    button.callbackData === TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA ||
+    button.callbackData === TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA ||
+    button.callbackData === TELEGRAM_GUIDED_CBE_CALLBACK_DATA
   );
 }
 const screenshotModelAccessKey = config.screenshotReferenceReader.enabled
@@ -244,7 +276,12 @@ async function deliverPlayerAction(
     }
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     if (presentation.kind === 'message') {
-      await reply(presentation.text);
+      await reply(
+        presentation.text,
+        presentation.text === message('en', 'depositUnavailable')
+          ? (await depositUnavailableOptions())?.reply_markup
+          : undefined,
+      );
       return;
     }
     if (presentation.kind === 'prompt') {
@@ -271,15 +308,28 @@ async function deliverPlayerAction(
           ));
         if (!recorded) {
           console.warn('Telegram payment instruction could not be tracked for expiry.');
-          await reply(message('en', 'depositUnavailable'));
+          await reply(
+            message('en', 'depositUnavailable'),
+            (await depositUnavailableOptions())?.reply_markup,
+          );
         }
       }
       return;
     }
-    await reply(
-      presentation.menu.text,
-      inlineMenu(await availableMenuButtons(presentation.menu.buttons)),
-    );
+    const menuButtons = await availableMenuButtons(presentation.menu.buttons);
+    let keyboard = menuButtons.length > 0 ? inlineMenu(menuButtons) : undefined;
+    if (
+      presentation.menu.buttons.some(isDepositMenuButton) &&
+      !menuButtons.some(isDepositMenuButton)
+    ) {
+      const contact = await supportContact.resolve();
+      if (contact) {
+        keyboard ??= new InlineKeyboard();
+        if (menuButtons.length > 0) keyboard.row();
+        keyboard.url('💬 Support', contact);
+      }
+    }
+    await reply(presentation.menu.text, keyboard);
     if (
       'privateChatId' in action &&
       (result.outcome === 'menu' || result.outcome === 'player_selection_saved')
@@ -295,7 +345,7 @@ async function deliverPlayerAction(
       { playerActionKind: action.kind },
       'Telegram Player-ID action delivery was unavailable.',
     );
-    await reply(
+    const unavailableText =
       action.kind === 'deposit_proof_status_command' || action.kind === 'deposit_status_command'
         ? TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT
         : action.kind === 'deposit_proof_command' ||
@@ -308,7 +358,12 @@ async function deliverPlayerAction(
             action.kind === 'cbe_birr_dry_run_instruction_command' ||
             action.kind === 'cbe_birr_bound_dry_run_proof_command'
           ? message('en', 'depositUnavailable')
-          : message('en', 'playerActionUnavailable'),
+          : message('en', 'playerActionUnavailable');
+    await reply(
+      unavailableText,
+      unavailableText === message('en', 'depositUnavailable')
+        ? (await depositUnavailableOptions())?.reply_markup
+        : undefined,
     );
   }
 }
@@ -321,7 +376,11 @@ bot.on('message', async (context) => {
       from: context.from ? { id: context.from.id, isBot: context.from.is_bot } : undefined,
     },
     config.supportContactUrl,
-    { reply: (text) => context.reply(text), botUsername: context.me.username },
+    {
+      reply: (text) => context.reply(text),
+      resolveContact: supportContact.resolve,
+      botUsername: context.me.username,
+    },
   );
   if (supportOutcome === 'handled') return;
 
@@ -369,7 +428,8 @@ bot.on('message', async (context) => {
         await deliverPlayerAction(action, (replyText, keyboard) =>
           context.reply(replyText, replyOptions(keyboard, replyText)),
         );
-      else await context.reply(message('en', 'depositUnavailable'));
+      else
+        await context.reply(message('en', 'depositUnavailable'), await depositUnavailableOptions());
       return;
     }
     if (
@@ -720,7 +780,8 @@ if (playerActions.enabled) {
         await deliverPlayerAction(savedAction, (replyText, keyboard) =>
           context.reply(replyText, replyOptions(keyboard, replyText)),
         );
-      else await context.reply(message('en', 'depositUnavailable'));
+      else
+        await context.reply(message('en', 'depositUnavailable'), await depositUnavailableOptions());
       return;
     }
     if (changePlayer) {
@@ -760,6 +821,12 @@ await runTelegramPolling(
   {
     allowed_updates: playerActions.enabled ? ['message', 'callback_query'] : ['message'],
     onStart: (botInfo) => {
+      // Warm the fallback while Owner is healthy, before a later deposit outage.
+      if (config.nodeEnv === 'production') {
+        void supportContact.resolve();
+        supportRefreshTimer = setInterval(() => void supportContact.resolve(), 60_000);
+        supportRefreshTimer.unref();
+      }
       if (playerActions.enabled) {
         outcomeNotifier = runTelegramDepositOutcomeNotifier(
           {
@@ -800,6 +867,7 @@ await runTelegramPolling(
   },
   {
     onShutdown: () => {
+      if (supportRefreshTimer) clearInterval(supportRefreshTimer);
       outcomeNotifierAbort.abort();
       pollingReadiness.stop();
     },

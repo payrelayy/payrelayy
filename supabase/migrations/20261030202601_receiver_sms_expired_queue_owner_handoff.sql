@@ -296,8 +296,8 @@ begin
       v_definition := pg_catalog.replace(v_definition,v_old,v_new);
       v_old := '        when automatic_started then ' ||
         '''Automatic processing or reconciliation; check before manual credit''';
-      v_new := '        when candidate_id is not null and ' ||
-        'app.owner_expired_unattempted_sms_candidate(candidate_id)' ||
+      v_new := '        when submissions.candidate_id is not null and ' ||
+        'app.owner_expired_unattempted_sms_candidate(submissions.candidate_id)' ||
         pg_catalog.chr(10) ||
         '          then ''Automatic window expired; Owner decision needed''' ||
         pg_catalog.chr(10) || v_old;

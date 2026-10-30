@@ -21,6 +21,7 @@ import {
   activeCertificate,
   registerRoutineTelebirrExecutionBrokerSqlTests,
 } from './routine-telebirr-execution-broker.suite.js';
+import { registerRoutineModalConfirmationSqlTests } from './routine-modal-confirmation.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
 import { registerRoutineTelebirrRotatedInstructionReviewSqlTests } from './routine-telebirr-rotated-instruction-review.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
@@ -196,6 +197,8 @@ const ownerOperationalAlertFactsMigrationName = '20261029120352_owner_operationa
 const ownerRoutineCompanionAlertMigrationName = '20261029130522_owner_routine_companion_alert.sql';
 const ownerStoppedPreActionCreditMigrationName =
   '20261029143500_owner_stopped_pre_action_credit.sql';
+const routineModalConfirmationMigrationName =
+  '20261030011403_routine_success_modal_confirmation.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -682,7 +685,8 @@ describe('disposable SQL migration baseline', () => {
         name !== silenceAmbiguousReviewNoticesMigrationName &&
         name !== ownerOperationalAlertFactsMigrationName &&
         name !== ownerRoutineCompanionAlertMigrationName &&
-        name !== ownerStoppedPreActionCreditMigrationName,
+        name !== ownerStoppedPreActionCreditMigrationName &&
+        name !== routineModalConfirmationMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -8604,7 +8608,6 @@ describe('disposable SQL migration baseline', () => {
           'exact_currency_match',
           'exact_player_credit_match',
           'created_at',
-          'modal_provider_response_digest',
         ],
         table_name: 'execution_reconciliations',
       },
@@ -10249,6 +10252,7 @@ registerVerificationSettlementSqlTests(
 
 describe('100 ETB production deposit policy cutover', () => {
   let postCutoverClient: Client;
+  let postCutoverOwnerAdminId: string;
 
   beforeAll(async () => {
     postCutoverClient = createSqlIntegrationClient(environment, environment.postCutoverHost);
@@ -10267,6 +10271,11 @@ describe('100 ETB production deposit policy cutover', () => {
       `select app.bootstrap_first_owner($1::uuid,'Cutover Test Owner')`,
       [ownerAuthUserId],
     );
+    const ownerAdmin = await postCutoverClient.query<{ id: string }>(
+      `select id from app.admin_users where auth_user_id = $1::uuid`,
+      [ownerAuthUserId],
+    );
+    postCutoverOwnerAdminId = ownerAdmin.rows[0]!.id;
     const agent = await postCutoverClient.query<{ id: string }>(
       `insert into app.platform_agent_accounts (platform_id,label,credential_ref)
           select id,'deposit-range-cutover','secret://deposit-range-cutover'
@@ -10435,6 +10444,16 @@ describe('100 ETB production deposit policy cutover', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerStoppedPreActionCreditMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, routineModalConfirmationMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [routineModalConfirmationMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
@@ -10736,5 +10755,20 @@ describe('100 ETB production deposit policy cutover', () => {
   registerOwnerStoppedPreActionCreditSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
+  );
+  registerRoutineModalConfirmationSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+    () => postCutoverOwnerAdminId,
+    (password) =>
+      new Client({
+        application_name: 'fetanagent_routine_modal_sql_integration',
+        database: 'postgres',
+        host: environment.postCutoverHost,
+        password,
+        port: 5432,
+        ssl: false,
+        user: 'fetanagent_routine_deposit_broker_runtime',
+      }),
   );
 });

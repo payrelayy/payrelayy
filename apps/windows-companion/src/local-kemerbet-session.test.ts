@@ -20,6 +20,7 @@ const dependencies = vi.hoisted(() => ({
   verifyLocalKemerBetIdentity: vi.fn(),
   executeSingleLocalKemerBetLookup: vi.fn(),
   executeRoutineOneUseLocalKemerBetDeposit: vi.fn(),
+  dismissRoutineSuccessModal: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -46,6 +47,7 @@ vi.mock('./local-kemerbet-lookup.js', async (importOriginal) => ({
 vi.mock('./local-kemerbet-deposit.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./local-kemerbet-deposit.js')>()),
   executeRoutineOneUseLocalKemerBetDeposit: dependencies.executeRoutineOneUseLocalKemerBetDeposit,
+  dismissRoutineSuccessModal: dependencies.dismissRoutineSuccessModal,
 }));
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
@@ -270,6 +272,7 @@ beforeEach(() => {
   dependencies.releaseSessionLock.mockResolvedValue(undefined);
   dependencies.ensureKemerBetAgentWindow.mockResolvedValue(undefined);
   dependencies.executeSingleLocalKemerBetLookup.mockResolvedValue('found');
+  dependencies.dismissRoutineSuccessModal.mockResolvedValue(undefined);
   dependencies.verifyLocalKemerBetIdentity.mockResolvedValue({
     bindingCreated: false,
     identityVerified: true,
@@ -340,6 +343,33 @@ describe('local KemerBet enrollment session', () => {
     expect(page.goto).toHaveBeenCalledTimes(1);
     expect(preflight).toContain('preflight_retry_in_place');
     expect(acquireFinalAction).toHaveBeenCalledOnce();
+  });
+
+  it('holds the browser through settlement and releases it after dismissing the result', async () => {
+    const { page, session } = await start(AGENTS_URL, {
+      ...config,
+      routineDepositsEnabled: true,
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockResolvedValue({
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+      exactPlayerCreditMatch: true,
+    });
+    await session.executeRoutineOneUseDeposit('12345678', 10000, async () => ({
+      playerId: '12345678',
+      amountMinor: 10000,
+      isFresh: () => true,
+    }));
+    await vi.advanceTimersByTimeAsync(EIGHT_MINUTES + 1_000);
+    expect(page.reload).not.toHaveBeenCalled();
+    await session.dismissSettledRoutineSuccess();
+    expect(dependencies.dismissRoutineSuccessModal).toHaveBeenCalledOnce();
+    await session.executeRoutineOneUseDeposit('12345678', 10001, async () => ({
+      playerId: '12345678',
+      amountMinor: 10001,
+      isFresh: () => true,
+    }));
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
   });
 
   it('never retries after a deposit has requested the final fence', async () => {
@@ -615,6 +645,9 @@ describe('local KemerBet enrollment session', () => {
     await vi.advanceTimersByTimeAsync(15_000 - 1);
     expect(page.reload).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    expect(page.reload).not.toHaveBeenCalled();
+    await session.dismissSettledRoutineSuccess();
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(page.reload).toHaveBeenCalledTimes(1);
   });
 

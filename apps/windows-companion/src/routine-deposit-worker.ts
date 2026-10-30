@@ -80,6 +80,8 @@ export type RoutineDepositPauseReason =
   | 'confirmation_mismatch'
   | 'operator_stopped';
 
+type LocalRoutineDepositPauseReason = RoutineDepositPauseReason | 'result_modal_unavailable';
+
 /**
  * Durable serialization is the store's responsibility, not a JavaScript mutex or an expiring
  * worker lease. A fenced attempt blocks the account until exact modal confirmation or an
@@ -120,11 +122,14 @@ export type RoutineDepositWorkerResult =
       readonly status: 'contained';
       readonly reason: 'execution_uncertain' | 'reconciliation_uncertain';
     }
-  | { readonly status: 'paused'; readonly reason: RoutineDepositPauseReason };
+  | { readonly status: 'paused'; readonly reason: LocalRoutineDepositPauseReason };
 
 export interface RoutineDepositWorkerOptions {
   readonly store: RoutineDepositExecutionStore;
-  readonly session: Pick<LocalKemerBetSession, 'executeRoutineOneUseDeposit'>;
+  readonly session: Pick<
+    LocalKemerBetSession,
+    'executeRoutineOneUseDeposit' | 'dismissSettledRoutineSuccess'
+  >;
   readonly signal: AbortSignal;
   readonly now?: () => number;
   readonly monotonicNow?: () => number;
@@ -207,7 +212,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   let busy = false;
-  let pauseReason: RoutineDepositPauseReason | undefined;
+  let pauseReason: LocalRoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
 
   async function pause(
@@ -225,6 +230,18 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     return Object.freeze({ status: 'paused' as const, reason });
   }
 
+  async function dismissSettledResult(): Promise<RoutineDepositWorkerResult | undefined> {
+    try {
+      await options.session.dismissSettledRoutineSuccess();
+      return undefined;
+    } catch {
+      // The payment is already settled or durably isolated. Do not lease another
+      // payment behind an obstructing provider dialog or relabel the settled credit.
+      pauseReason = 'result_modal_unavailable';
+      return Object.freeze({ status: 'paused', reason: pauseReason });
+    }
+  }
+
   async function containUncertain(
     lease: RoutineDepositLease,
     reason: 'execution_uncertain' | 'reconciliation_uncertain',
@@ -238,6 +255,8 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
       return Object.freeze({ status: 'paused', reason: 'database_unavailable' });
     }
     awaitingReconciliation = undefined;
+    const dismissFailure = await dismissSettledResult();
+    if (dismissFailure) return dismissFailure;
     return Object.freeze({ status: 'contained', reason });
   }
 
@@ -258,6 +277,8 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     if (!matchesBinding(lease, confirmed))
       return pause(awaitingReconciliation, 'confirmation_mismatch');
     awaitingReconciliation = undefined;
+    const dismissFailure = await dismissSettledResult();
+    if (dismissFailure) return dismissFailure;
     return Object.freeze({ status: 'completed' });
   }
 

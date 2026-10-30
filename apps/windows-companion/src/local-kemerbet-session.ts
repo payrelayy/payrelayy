@@ -16,6 +16,7 @@ import type { WindowsCompanionConfig } from './config.js';
 import { verifyLocalKemerBetIdentity } from './local-kemerbet-identity.js';
 import {
   createLocalKemerBetDepositAuthorization,
+  dismissRoutineSuccessModal,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
   rehearseNoMoneyRoutineDepositPreflight,
@@ -126,6 +127,8 @@ export interface LocalKemerBetSession {
     amountMinor: number,
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
+  /** Close the exact success result only after the server has settled or isolated its attempt. */
+  dismissSettledRoutineSuccess(): Promise<void>;
   scanRoutineDepositHistory(
     playerId: string,
     amountMinor: number,
@@ -184,6 +187,7 @@ export async function startLocalKemerBetSession(
   const lookupAuthorization = createLocalKemerBetLookupAuthorization();
   const depositAuthorization = createLocalKemerBetDepositAuthorization();
   let operationInProgress = false;
+  let routineSuccessModalPending = false;
   let historyReadAuthorization: RoutineHistoryReadAuthorization | undefined;
   let signedInCandidate = false;
   let signedInVerified = false;
@@ -858,8 +862,9 @@ export async function startLocalKemerBetSession(
             acquire,
             reportRoutinePreflight,
           );
+        let result: LocalKemerBetRoutineDepositDispatchOutcome;
         try {
-          return await prepareAndExecute();
+          result = await prepareAndExecute();
         } catch (error) {
           if (
             fenceRequested ||
@@ -882,11 +887,30 @@ export async function startLocalKemerBetSession(
           } catch {
             // Diagnostics must not change a deposit outcome.
           }
-          return await prepareAndExecute();
+          result = await prepareAndExecute();
         }
+        if (result.outcome === 'submission_attempted') routineSuccessModalPending = true;
+        return result;
       } finally {
         lookupAuthorization.clear();
         depositAuthorization.clear();
+        // Hold the browser (including its idle refresh) until the durable result is known.
+        if (!routineSuccessModalPending) {
+          operationInProgress = false;
+          notePlayerWorkCompleted();
+        }
+      }
+    },
+    async dismissSettledRoutineSuccess() {
+      if (!routineSuccessModalPending) return;
+      const page = localPage;
+      if (terminal || stopping || reviewPaused || !signedInVerified || !page)
+        throw new Error('The confirmed KemerBet result is unavailable.');
+      try {
+        await ensureKemerBetAgentWindow(page);
+        await dismissRoutineSuccessModal(page);
+        routineSuccessModalPending = false;
+      } finally {
         operationInProgress = false;
         notePlayerWorkCompleted();
       }

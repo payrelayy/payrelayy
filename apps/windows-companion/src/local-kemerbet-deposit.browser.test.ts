@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createLocalKemerBetDepositAuthorization,
+  dismissRoutineSuccessModal,
   exactKemerBetAmountInputMatches,
   exactKemerBetSuccessTableMatches,
   executeExactOneUseLocalKemerBetDeposit,
@@ -143,7 +144,8 @@ const successTableHtml = fixtureHtml.replace(
         '<tbody><tr><td>fixture-identity</td><td>Balance</td><td>' + Number(amount) + '</td><td>Success</td></tr>' +
         '<tr><td>fixture-agent</td><td>Balance</td><td>-' + Number(amount) + '</td><td>Success</td></tr>' +
         '<tr><td>PLAT</td><td>Balance</td><td>' + Number(amount) + '</td><td>Success</td></tr></tbody></table>' +
-        '<button>Close</button></div>';`,
+        '<button id="success-close">Close</button></div>';
+      document.getElementById('success-close').onclick = renderSearch;`,
 );
 
 const successTableText = [
@@ -372,6 +374,59 @@ describe.skipIf(process.platform !== 'win32')(
       });
       expect(submitted).toEqual([{ playerId: 42, amount: 100, notes: null }]);
       expect(stages.at(-1)).toBe('success_modal_confirmed');
+    }, 15000);
+
+    it('dismisses a settled success result before the next queued credit', async () => {
+      const { page, lookup, deposit, submitted, blocked } = await startFixture(successTableHtml);
+      const first = await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        10000,
+        lookup,
+        deposit,
+        async () => ({ playerId: PLAYER_ID, amountMinor: 10000, isFresh: () => true }),
+      );
+      expect(first.outcome).toBe('submission_attempted');
+      expect(await page.getByText('Transfer Successful!', { exact: true }).count()).toBe(1);
+      await dismissRoutineSuccessModal(page);
+      expect(await page.getByText('Transfer Successful!', { exact: true }).count()).toBe(0);
+      const second = await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        10001,
+        lookup,
+        deposit,
+        async () => ({ playerId: PLAYER_ID, amountMinor: 10001, isFresh: () => true }),
+      );
+      expect(second.outcome).toBe('submission_attempted');
+      expect(submitted).toEqual([
+        { playerId: 42, amount: 100, notes: null },
+        { playerId: 42, amount: 100.01, notes: null },
+      ]);
+      expect(blocked).toEqual([]);
+    }, 30000);
+
+    it('does not close a changed success result', async () => {
+      const { page, lookup, deposit, submitted } = await startFixture(successTableHtml);
+      await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        10000,
+        lookup,
+        deposit,
+        async () => ({ playerId: PLAYER_ID, amountMinor: 10000, isFresh: () => true }),
+      );
+      await page
+        .locator('.ant-modal-content tbody tr')
+        .first()
+        .locator('td')
+        .first()
+        .evaluate((cell) => {
+          cell.textContent = 'other-recipient';
+        });
+      await expect(dismissRoutineSuccessModal(page)).rejects.toThrow();
+      expect(await page.getByText('Transfer Successful!', { exact: true }).count()).toBe(1);
+      expect(submitted).toHaveLength(1);
     }, 15000);
 
     it('rejects a success result already visible before the new Transfer', async () => {

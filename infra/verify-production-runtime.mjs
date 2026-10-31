@@ -2411,9 +2411,7 @@ for (const source of [workflow, quality]) {
 const ownerDbSessionRotation = await read(
   'infra/operations/fetanagent-production-v2-owner-db-session-helper-rotation-v1.sh',
 );
-const ownerDbSessionRunbook = await read(
-  'infra/operations/production-owner-db-session-release.md',
-);
+const ownerDbSessionRunbook = await read('infra/operations/production-owner-db-session-release.md');
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='83a93f54f6684f4ca22bfdaa3c715a64a12a1d6d'",

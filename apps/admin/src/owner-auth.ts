@@ -2,6 +2,32 @@ export interface VerifiedOwnerSubject {
   readonly authUserId: string;
 }
 
+/** Read claims only after Supabase Auth has verified this exact bearer token. */
+export function ownerSessionIdFromVerifiedToken(token: string, authUserId: string): string {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts[1] || parts[1].length > 8_192) {
+      throw new Error('invalid token');
+    }
+    const value: unknown = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('invalid payload');
+    }
+    const claims = value as Record<string, unknown>;
+    if (
+      typeof claims.sub !== 'string' ||
+      claims.sub.toLowerCase() !== authUserId ||
+      typeof claims.session_id !== 'string' ||
+      !UUID_PATTERN.test(claims.session_id)
+    ) {
+      throw new Error('invalid session');
+    }
+    return claims.session_id.toLowerCase();
+  } catch {
+    throw new OwnerAuthenticationRejectedError();
+  }
+}
+
 export class OwnerAuthenticationRejectedError extends Error {
   constructor() {
     super('Owner authentication was rejected.');

@@ -264,7 +264,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         <h2 id="login-title">Owner sign in</h2>
         <p class="receipt-label">
           Sign in to manage payments, Players, and system settings. This browser tab can keep
-          you signed in securely for up to twelve hours.
+          you signed in until you have been inactive for twelve hours, with a seven-day sign-in limit.
         </p>
         <form id="login-form">
           <label for="email">Email</label>
@@ -285,6 +285,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
         <p class="request-meta" id="owner-session-status"></p>
+        <div class="pilot-warning" id="owner-session-warning" role="alert" hidden>
+          <span id="owner-session-warning-text"></span>
+          <button id="owner-stay-signed-in" type="button">Stay signed in</button>
+        </div>
         <div class="owner-workspace">
           <nav class="owner-navigation" aria-label="Owner workspace">
             <p class="owner-navigation-label">WORKSPACE</p>
@@ -1272,6 +1276,9 @@ const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
+const ownerSessionWarning = document.querySelector('#owner-session-warning');
+const ownerSessionWarningText = document.querySelector('#owner-session-warning-text');
+const ownerStaySignedIn = document.querySelector('#owner-stay-signed-in');
 const systemOverviewRefresh = document.querySelector('#system-overview-refresh');
 const systemOverviewStatus = document.querySelector('#system-overview-status');
 const systemOverviewAttention = document.querySelector('#system-overview-attention');
@@ -1446,9 +1453,16 @@ let accessToken;
 let refreshToken;
 let ownerAuthConfig;
 let ownerSessionExpiresAt;
+let ownerAbsoluteExpiresAt;
 let accessTokenRefreshAt;
 let ownerRefreshTimer;
 let ownerRefreshPromise;
+let ownerIdleTimer;
+let ownerWarningTimer;
+let ownerActivityTimer;
+let ownerActivityPromise;
+let ownerActivityPending = false;
+let ownerLastActivityRequestAt = 0;
 let ownerAuthGeneration = 0;
 let receiverChangeReviewCursor;
 let receiverChangeReviewRequest = 0;
@@ -1509,9 +1523,13 @@ let kemerbetPendingText = '';
 let kemerbetTextFlushTimer;
 const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrls = Object.freeze(${JSON.stringify(OWNER_DASHBOARD_SUPABASE_ORIGINS)});
-const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+const OWNER_IDLE_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+const OWNER_ABSOLUTE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000;
+const OWNER_IDLE_WARNING_MS = 5 * 60 * 1_000;
+const OWNER_ACTIVITY_THROTTLE_MS = 5 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
-const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
+const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v2';
+const LEGACY_OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
 const KEMERBET_READINESS_REQUEST_STORAGE_KEY =
   'fetanagent.owner.kemerbet-readiness-request.v1';
 const KEMERBET_AGENT_PROFILE_REQUEST_STORAGE_KEY =
@@ -3057,9 +3075,67 @@ function clearOwnerRefreshTimer() {
   ownerRefreshTimer = undefined;
 }
 
+function clearOwnerIdleTimers() {
+  if (ownerIdleTimer !== undefined) window.clearTimeout(ownerIdleTimer);
+  if (ownerWarningTimer !== undefined) window.clearTimeout(ownerWarningTimer);
+  ownerIdleTimer = undefined;
+  ownerWarningTimer = undefined;
+  ownerSessionWarning.hidden = true;
+}
+
+function ownerDeadline() {
+  return Math.min(ownerSessionExpiresAt || 0, ownerAbsoluteExpiresAt || 0);
+}
+
+function renderOwnerSessionStatus() {
+  ownerSessionStatus.textContent = 'Inactive sign-out: ' +
+    new Date(ownerSessionExpiresAt).toLocaleString() + '. Sign-in limit: ' +
+    new Date(ownerAbsoluteExpiresAt).toLocaleString() + '.';
+}
+
+function ownerExpiryMessage() {
+  return Date.now() >= (ownerAbsoluteExpiresAt || 0)
+    ? 'Your seven-day Owner sign-in limit ended. Sign in again to continue.'
+    : 'Your Owner page was inactive for twelve hours. Sign in again to continue.';
+}
+
+function scheduleOwnerIdleTimers() {
+  clearOwnerIdleTimers();
+  if (!accessToken || !ownerSessionExpiresAt || !ownerAbsoluteExpiresAt) return;
+  const deadline = ownerDeadline();
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    signOut(ownerExpiryMessage());
+    return;
+  }
+  const idleDeadlineFirst = ownerSessionExpiresAt < ownerAbsoluteExpiresAt;
+  ownerSessionWarningText.textContent = idleDeadlineFirst
+    ? 'Your Owner page is nearing its inactivity limit. Use the page to stay signed in.'
+    : 'Your seven-day sign-in limit is ending. Sign in again when it ends.';
+  ownerStaySignedIn.hidden = !idleDeadlineFirst;
+  ownerSessionWarning.hidden = remaining > OWNER_IDLE_WARNING_MS;
+  if (remaining > OWNER_IDLE_WARNING_MS) {
+    ownerWarningTimer = window.setTimeout(() => {
+      ownerSessionWarning.hidden = false;
+    }, remaining - OWNER_IDLE_WARNING_MS);
+  }
+  ownerIdleTimer = window.setTimeout(expireOwnerIdleSession, remaining);
+}
+
+function expireOwnerIdleSession() {
+  if (Date.now() < ownerDeadline()) {
+    scheduleOwnerIdleTimers();
+  } else if (ownerActivityPromise || ownerActivityTimer !== undefined) {
+    ownerIdleTimer = window.setTimeout(expireOwnerIdleSession, 1_000);
+  } else {
+    signOut(ownerExpiryMessage());
+  }
+}
+
 function clearPersistedOwnerSession() {
   try {
     window.sessionStorage.removeItem(OWNER_SESSION_STORAGE_KEY);
+    window.sessionStorage.removeItem(LEGACY_OWNER_SESSION_STORAGE_KEY);
   } catch {
     // An unavailable storage boundary is equivalent to having no restorable session.
   }
@@ -3067,20 +3143,28 @@ function clearPersistedOwnerSession() {
 
 function validPersistedOwnerSession(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).sort().join(',') !== 'expiresAt,refreshToken' ||
+      Object.keys(value).sort().join(',') !== 'absoluteExpiresAt,idleExpiresAt,refreshToken' ||
       typeof value.refreshToken !== 'string' || value.refreshToken.length < 12 ||
       value.refreshToken.length > 4_096 ||
-      !Number.isInteger(value.expiresAt) || value.expiresAt <= Date.now() ||
-      value.expiresAt > Date.now() + OWNER_SESSION_LIFETIME_MS) {
+      !Number.isInteger(value.idleExpiresAt) ||
+      !Number.isInteger(value.absoluteExpiresAt) ||
+      Math.min(value.idleExpiresAt, value.absoluteExpiresAt) <= Date.now() ||
+      value.idleExpiresAt > Date.now() + OWNER_IDLE_LIFETIME_MS + 60_000 ||
+      value.absoluteExpiresAt > Date.now() + OWNER_ABSOLUTE_LIFETIME_MS + 60_000) {
     return undefined;
   }
-  return { expiresAt: value.expiresAt, refreshToken: value.refreshToken };
+  return {
+    absoluteExpiresAt: value.absoluteExpiresAt,
+    idleExpiresAt: value.idleExpiresAt,
+    refreshToken: value.refreshToken,
+  };
 }
 
 function readPersistedOwnerSession() {
   try {
+    window.sessionStorage.removeItem(LEGACY_OWNER_SESSION_STORAGE_KEY);
     const stored = window.sessionStorage.getItem(OWNER_SESSION_STORAGE_KEY);
-    if (!stored || stored.length > 4_256) return undefined;
+    if (!stored || stored.length > 4_512) return undefined;
     const session = validPersistedOwnerSession(JSON.parse(stored));
     if (!session) clearPersistedOwnerSession();
     return session;
@@ -3091,11 +3175,18 @@ function readPersistedOwnerSession() {
 }
 
 function persistOwnerSession() {
-  if (!refreshToken || !ownerSessionExpiresAt) throw new Error('signed_out');
+  if (!refreshToken || !ownerSessionExpiresAt || !ownerAbsoluteExpiresAt) {
+    throw new Error('signed_out');
+  }
   window.sessionStorage.setItem(
     OWNER_SESSION_STORAGE_KEY,
-    JSON.stringify({ expiresAt: ownerSessionExpiresAt, refreshToken }),
+    JSON.stringify({
+      absoluteExpiresAt: ownerAbsoluteExpiresAt,
+      idleExpiresAt: ownerSessionExpiresAt,
+      refreshToken,
+    }),
   );
+  window.sessionStorage.removeItem(LEGACY_OWNER_SESSION_STORAGE_KEY);
 }
 
 function validOwnerMutationRequestId(value) {
@@ -3342,6 +3433,9 @@ function clearPendingCompanionLookupRequestId() {
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
+  clearOwnerIdleTimers();
+  if (ownerActivityTimer !== undefined) window.clearTimeout(ownerActivityTimer);
+  ownerActivityTimer = undefined;
   window.clearTimeout(systemOverviewPollTimer);
   systemOverviewPollTimer = undefined;
   clearPersistedOwnerSession();
@@ -3349,8 +3443,12 @@ function signOut(message = 'Signed out.') {
   refreshToken = undefined;
   ownerAuthConfig = undefined;
   ownerSessionExpiresAt = undefined;
+  ownerAbsoluteExpiresAt = undefined;
   accessTokenRefreshAt = undefined;
   ownerRefreshPromise = undefined;
+  ownerActivityPromise = undefined;
+  ownerActivityPending = false;
+  ownerLastActivityRequestAt = 0;
   kemerbetRecoveryLaneKnown = false;
   kemerbetSecurityRecoveryRequired = false;
   kemerbetRecheckSpentFailedTerminal = false;
@@ -3464,10 +3562,102 @@ async function loadOwnerAuthConfig() {
   return config;
 }
 
+function applyAuthoritativeOwnerBrowserSession(value) {
+  const session = value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === 'absoluteExpiresAt,idleExpiresAt'
+    ? value : undefined;
+  const idleExpiresAt = Date.parse(session?.idleExpiresAt);
+  const absoluteExpiresAt = Date.parse(session?.absoluteExpiresAt);
+  if (!Number.isFinite(idleExpiresAt) || !Number.isFinite(absoluteExpiresAt) ||
+      Math.min(idleExpiresAt, absoluteExpiresAt) <= Date.now() ||
+      idleExpiresAt > Date.now() + OWNER_IDLE_LIFETIME_MS + 60_000 ||
+      absoluteExpiresAt > Date.now() + OWNER_ABSOLUTE_LIFETIME_MS + 60_000) {
+    throw ownerTransportNetworkError();
+  }
+  ownerSessionExpiresAt = idleExpiresAt;
+  ownerAbsoluteExpiresAt = absoluteExpiresAt;
+  renderOwnerSessionStatus();
+  persistOwnerSession();
+  scheduleOwnerRefresh();
+  scheduleOwnerIdleTimers();
+}
+
+async function requestOwnerBrowserSession(action) {
+  if (action === 'touch') await ensureFreshOwnerAccessToken();
+  if (!accessToken) throw new Error('signed_out');
+  const generation = ownerAuthGeneration;
+  const request = await beginDeadlineFetch(
+    '/v1/owner/browser-session',
+    {
+      method: action === 'check' ? 'GET' : 'POST',
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: {
+        authorization: 'Bearer ' + accessToken,
+        ...(action === 'check' ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(action === 'check' ? {} : { body: JSON.stringify({ action }) }),
+      referrerPolicy: 'no-referrer',
+    },
+    OWNER_API_REQUEST_TIMEOUT_MS,
+  );
+  try {
+    if (generation !== ownerAuthGeneration) throw new Error('signed_out');
+    if (request.response.status === 401 || request.response.status === 403) {
+      signOut('Your Owner session ended. Sign in again to continue.');
+      throw new Error('signed_out');
+    }
+    if (!request.response.ok) throw ownerTransportNetworkError();
+    const response = deadlineBoundResponse(request.response, request.deadline);
+    const payload = await response.json();
+    if (generation !== ownerAuthGeneration) throw new Error('signed_out');
+    applyAuthoritativeOwnerBrowserSession(payload?.session);
+  } finally {
+    request.deadline.finish();
+  }
+}
+
+function recordOwnerActivity() {
+  if (!accessToken || document.hidden || ownerPanel.hidden) return;
+  if (Date.now() >= ownerDeadline()) {
+    signOut(ownerExpiryMessage());
+    return;
+  }
+  if (ownerActivityPromise) {
+    ownerActivityPending = true;
+    return;
+  }
+  if (ownerActivityTimer !== undefined) return;
+  const remainingThrottle = OWNER_ACTIVITY_THROTTLE_MS -
+    (Date.now() - ownerLastActivityRequestAt);
+  if (remainingThrottle > 0 && ownerDeadline() - Date.now() > remainingThrottle + 1_000) {
+    ownerActivityTimer = window.setTimeout(() => {
+      ownerActivityTimer = undefined;
+      recordOwnerActivity();
+    }, remainingThrottle);
+    return;
+  }
+  ownerLastActivityRequestAt = Date.now();
+  const activity = requestOwnerBrowserSession('touch')
+    .catch((error) => {
+      if (!isSignedOutError(error)) {
+        setNotice('Owner activity could not be saved. Check your connection and try again.');
+      }
+    })
+    .finally(() => {
+      if (ownerActivityPromise === activity) ownerActivityPromise = undefined;
+      if (ownerActivityPending && accessToken && !ownerPanel.hidden) {
+        ownerActivityPending = false;
+        recordOwnerActivity();
+      }
+    });
+  ownerActivityPromise = activity;
+}
+
 function scheduleOwnerRefresh() {
   clearOwnerRefreshTimer();
-  if (!accessTokenRefreshAt || !ownerSessionExpiresAt) return;
-  const nextAt = Math.min(accessTokenRefreshAt, ownerSessionExpiresAt);
+  if (!accessTokenRefreshAt || !ownerSessionExpiresAt || !ownerAbsoluteExpiresAt) return;
+  const nextAt = Math.min(accessTokenRefreshAt, ownerDeadline());
   const delay = Math.max(1_000, nextAt - Date.now());
   ownerRefreshTimer = window.setTimeout(
     () => void refreshOwnerSession().catch(() => undefined),
@@ -3477,12 +3667,14 @@ function scheduleOwnerRefresh() {
 
 function scheduleOwnerRefreshRetry() {
   clearOwnerRefreshTimer();
-  if (!refreshToken || !ownerSessionExpiresAt || Date.now() >= ownerSessionExpiresAt) return;
+  if (!refreshToken || !ownerSessionExpiresAt || !ownerAbsoluteExpiresAt ||
+      Date.now() >= ownerDeadline()) return;
   ownerRefreshTimer = window.setTimeout(
     () =>
       void refreshOwnerSession()
-        .then(() => {
+        .then(async () => {
           if (!loginPanel.hidden && accessToken) {
+            await requestOwnerBrowserSession('check');
             return loadOwnerDashboardAfterAuthentication(
               'Owner session restored after a temporary connection failure.',
             );
@@ -3498,18 +3690,22 @@ function applyOwnerAuthSession(session, resetLifetime) {
   const parsed = validOwnerAuthSession(session);
   if (!parsed) throw new Error('signed_out');
   const currentTime = Date.now();
-  if (resetLifetime) ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS;
-  if (!ownerSessionExpiresAt || currentTime >= ownerSessionExpiresAt) throw new Error('signed_out');
+  if (resetLifetime) {
+    ownerSessionExpiresAt = currentTime + OWNER_IDLE_LIFETIME_MS;
+    ownerAbsoluteExpiresAt = currentTime + OWNER_ABSOLUTE_LIFETIME_MS;
+  }
+  if (!ownerSessionExpiresAt || !ownerAbsoluteExpiresAt ||
+      currentTime >= ownerDeadline()) throw new Error('signed_out');
   accessToken = parsed.accessToken;
   refreshToken = parsed.refreshToken;
   accessTokenRefreshAt = Math.min(
     currentTime + parsed.expiresInSeconds * 1_000 - ACCESS_TOKEN_REFRESH_MARGIN_MS,
-    ownerSessionExpiresAt,
+    ownerDeadline(),
   );
-  ownerSessionStatus.textContent = 'Owner session active in this tab until ' +
-    new Date(ownerSessionExpiresAt).toLocaleString() + '.';
+  renderOwnerSessionStatus();
   persistOwnerSession();
   scheduleOwnerRefresh();
+  scheduleOwnerIdleTimers();
 }
 
 async function refreshOwnerSession() {
@@ -3517,8 +3713,8 @@ async function refreshOwnerSession() {
   const generation = ownerAuthGeneration;
   ownerRefreshPromise = (async () => {
     if (!refreshToken || !ownerAuthConfig || !ownerSessionExpiresAt ||
-        Date.now() >= ownerSessionExpiresAt) {
-      signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
+        !ownerAbsoluteExpiresAt || Date.now() >= ownerDeadline()) {
+      signOut(ownerExpiryMessage());
       throw new Error('signed_out');
     }
     const request = await beginDeadlineFetch(
@@ -3565,11 +3761,12 @@ async function refreshOwnerSession() {
 }
 
 async function ensureFreshOwnerAccessToken() {
-  if (!accessToken || !accessTokenRefreshAt || !ownerSessionExpiresAt) {
+  if (!accessToken || !accessTokenRefreshAt || !ownerSessionExpiresAt ||
+      !ownerAbsoluteExpiresAt) {
     throw new Error('signed_out');
   }
-  if (Date.now() >= ownerSessionExpiresAt) {
-    signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
+  if (Date.now() >= ownerDeadline()) {
+    signOut(ownerExpiryMessage());
     throw new Error('signed_out');
   }
   if (Date.now() >= accessTokenRefreshAt) await refreshOwnerSession();
@@ -7660,8 +7857,13 @@ loginForm.addEventListener('submit', async (event) => {
     updateCompanionDevicePairingAvailability();
     updateCompanionLookupAvailability();
     applyOwnerAuthSession(session, true);
+    await requestOwnerBrowserSession('start');
   } catch (error) {
-    if (isOwnerTransportError(error)) {
+    if (isSignedOutError(error)) {
+      failureNotice = 'Owner access was not accepted for this sign-in. Sign in again to continue.';
+    } else if (accessToken) {
+      failureNotice = 'Sign-in succeeded, but secure Owner session setup is temporarily unavailable. Try again.';
+    } else if (isOwnerTransportError(error)) {
       failureNotice = 'The sign-in connection was interrupted or took too long. Check your internet connection and try again. Your password was not changed.';
     }
     passwordInput.value = '';
@@ -7672,7 +7874,7 @@ loginForm.addEventListener('submit', async (event) => {
     setBusy(loginForm, false);
   }
   await loadOwnerDashboardAfterAuthentication(
-    'Signed in. This Owner session survives reloads in this tab for up to twelve hours.',
+    'Signed in. This tab stays active while you use the Owner page, up to seven days.',
   );
 });
 
@@ -7687,17 +7889,20 @@ async function restoreOwnerSession() {
     ownerAuthConfig = config;
     updateCompanionDevicePairingAvailability();
     updateCompanionLookupAvailability();
-    ownerSessionExpiresAt = persisted.expiresAt;
+    ownerSessionExpiresAt = persisted.idleExpiresAt;
+    ownerAbsoluteExpiresAt = persisted.absoluteExpiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
+    await requestOwnerBrowserSession('check');
   } catch (error) {
     if (isSignedOutError(error)) {
       if (refreshToken || readPersistedOwnerSession()) {
         signOut('Your saved Owner session was rejected or expired. Sign in again to continue.');
       }
     } else {
+      scheduleOwnerRefreshRetry();
       setNotice(
-        'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains ' +
+        'Your saved Owner session is temporarily unreachable. Its idle deadline remains ' +
           'saved in this tab; reload or wait for the automatic retry.',
       );
     }
@@ -7725,6 +7930,12 @@ logoutButton.addEventListener('click', async () => {
   }
   signOut();
 });
+ownerStaySignedIn.addEventListener('click', recordOwnerActivity);
+for (const eventType of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+  document.addEventListener(eventType, (event) => {
+    if (event.isTrusted === true) recordOwnerActivity();
+  });
+}
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
 receiverChangeReviewRefresh.addEventListener('click', () => loadReceiverChangeReviews());
 receiverChangeReviewOlder.addEventListener('click', () => {

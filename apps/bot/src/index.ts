@@ -199,7 +199,8 @@ function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboa
   const keyboard = new InlineKeyboard();
   for (const [index, button] of buttons.entries()) {
     if (index > 0) keyboard.row();
-    keyboard.text(button.text, button.callbackData);
+    if (button.url === undefined) keyboard.text(button.text, button.callbackData);
+    else keyboard.url(button.text, button.url);
   }
   return keyboard;
 }

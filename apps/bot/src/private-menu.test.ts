@@ -17,8 +17,8 @@ describe('English-only private customer menu', () => {
       text: 'FetanAgent',
       buttons: [{ text: '➕ Add Player ID', callbackData: 'sp1.change' }],
     });
-    expect(Buffer.byteLength(menu.buttons[0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);
-    expect(JSON.stringify(menu)).not.toMatch(/withdrawal|language/i);
+    expect(Buffer.byteLength(menu.buttons[0]!.callbackData!, 'utf8')).toBeLessThanOrEqual(64);
+    expect(JSON.stringify(menu)).not.toMatch(/Withdraw|withdrawal|language/i);
   });
 
   it('refuses to render a static or malformed action callback', () => {
@@ -27,12 +27,13 @@ describe('English-only private customer menu', () => {
     );
   });
 
-  it('shows the saved Player ID without explaining message routing', () => {
+  it('shows the saved Player ID with Deposit followed by manual Withdraw', () => {
     expect(renderPlayerRegistrationMenu(callbackData, '28379330').text).toBe(
-      'FetanAgent\nPlayer ID: 28379330',
+      'FetanAgent\nPlayer ID: 28379330\nWithdrawals are handled manually. Tap Withdraw to chat with the handler; no request is submitted here.',
     );
     expect(renderPlayerRegistrationMenu(callbackData, '28379330').buttons).toEqual([
       { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
     ]);
   });
 

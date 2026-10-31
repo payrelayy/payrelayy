@@ -221,7 +221,7 @@ begin
     order by enriched.submitted_at desc,
       coalesce(enriched.candidate_id,enriched.legacy_candidate_id) desc;
 end;
-$function$
+$function$;
 
 
 alter function app.list_owner_submitted_payments(uuid,text,integer,integer)

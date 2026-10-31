@@ -202,6 +202,8 @@ const routineModalConfirmationMigrationName =
   '20261030011403_routine_success_modal_confirmation.sql';
 const expiredSmsQueueOwnerHandoffMigrationName =
   '20261030202601_receiver_sms_expired_queue_owner_handoff.sql';
+const ownerSubmittedPaymentsFastListMigrationName =
+  '20261031105752_owner_submitted_payments_fast_list.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -690,7 +692,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerRoutineCompanionAlertMigrationName &&
         name !== ownerStoppedPreActionCreditMigrationName &&
         name !== routineModalConfirmationMigrationName &&
-        name !== expiredSmsQueueOwnerHandoffMigrationName,
+        name !== expiredSmsQueueOwnerHandoffMigrationName &&
+        name !== ownerSubmittedPaymentsFastListMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10468,6 +10471,16 @@ describe('100 ETB production deposit policy cutover', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [expiredSmsQueueOwnerHandoffMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerSubmittedPaymentsFastListMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerSubmittedPaymentsFastListMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(

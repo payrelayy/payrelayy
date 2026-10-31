@@ -324,7 +324,6 @@ function config(
   deploymentTarget: OwnerControlDeploymentTarget = 'staging',
   routineReceiptSignerConfigured = false,
   cbeBirrReceiverV2RotationEnabled = false,
-  companionReleaseReadToken?: string,
 ) {
   const target = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   return loadOwnerControlConfig({
@@ -355,9 +354,6 @@ function config(
       : {}),
     ...(routineReceiptSignerConfigured
       ? { OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: 'A'.repeat(180) }
-      : {}),
-    ...(companionReleaseReadToken
-      ? { OWNER_COMPANION_RELEASE_READ_TOKEN: companionReleaseReadToken }
       : {}),
   });
 }
@@ -1459,92 +1455,12 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('serves the private Companion release only after active Owner verification', async () => {
-    const releaseToken = `github_pat_${'A'.repeat(60)}`;
-    const archive = Buffer.from('owner-only companion download');
-    const digest = createHash('sha256').update(archive).digest('hex');
-    const releaseFetch = vi.fn(async (input: string | URL) => {
-      const url = input.toString();
-      if (url.endsWith('/releases/latest'))
-        return new Response(
-          JSON.stringify({
-            tag_name: 'windows-companion-v0.1.73',
-            draft: false,
-            prerelease: false,
-            assets: [
-              {
-                name: 'FetanAgent-Windows-Companion-316afd6ddc74.zip',
-                id: 1,
-                digest: `sha256:${digest}`,
-                size: archive.length,
-              },
-              { name: 'FetanAgent-Windows-Companion-316afd6ddc74.zip.sha256', id: 2 },
-              {
-                name: 'FetanAgent-Windows-Companion.zip',
-                id: 3,
-                digest: `sha256:${digest}`,
-                size: archive.length,
-              },
-              { name: 'FetanAgent-Windows-Companion.zip.sha256', id: 4 },
-            ],
-          }),
-          { headers: { 'content-type': 'application/json' } },
-        );
-      if (url.endsWith('/releases/assets/3'))
-        return new Response(null, {
-          status: 302,
-          headers: { location: 'https://release-assets.githubusercontent.com/download/test' },
-        });
-      return new Response(archive);
-    });
-    const activeOwner = vi.fn(async () => ({}));
-    const app = buildOwnerControlApp(config(false, false, 'staging', false, false, releaseToken), {
-      fetch: verifiedAuthFetch(),
-      releaseFetch: releaseFetch as typeof fetch,
-      runtime: runtime({
-        manualPayments: { systemOverview: activeOwner } as unknown as NonNullable<
-          OwnerControlPostgresRuntime['manualPayments']
-        >,
-      }),
-    });
-    const html = await app.inject({ method: 'GET', url: '/owner' });
-    expect(html.body).toContain('id="companion-download-zip"');
-    expect(html.body).not.toContain('releases/latest/download/FetanAgent-Windows-Companion.zip');
-    expect((await app.inject({ method: 'GET', url: '/owner/config.json' })).json()).toMatchObject({
-      companionReleaseDownloadConfigured: true,
-    });
-    expect(
-      (await app.inject({ method: 'GET', url: '/v1/owner/companion-release/zip' })).statusCode,
-    ).toBe(403);
-    expect(releaseFetch).not.toHaveBeenCalled();
-    const headers = { authorization: `Bearer ${bearer}` };
-    const checksum = await app.inject({
-      method: 'GET',
-      url: '/v1/owner/companion-release/sha256',
-      headers,
-    });
-    expect(checksum.statusCode).toBe(200);
-    expect(checksum.body).toBe(`${digest}  FetanAgent-Windows-Companion.zip\n`);
-    const zip = await app.inject({
-      method: 'GET',
-      url: '/v1/owner/companion-release/zip',
-      headers,
-    });
-    expect(zip.statusCode).toBe(200);
-    expect(zip.headers['cache-control']).toContain('no-store');
-    expect(zip.rawPayload).toEqual(archive);
-    expect(activeOwner).toHaveBeenCalledTimes(2);
-    expect(releaseFetch).toHaveBeenCalledTimes(4);
-    await app.close();
-  });
-
   it('returns only public staging Auth configuration to the private page', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner/config.json' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       companionDevicePairingConfigured: false,
-      companionReleaseDownloadConfigured: false,
       deploymentTarget: 'staging',
       publishableKey: 'sb_publishable_test_key_for_staging_only',
       supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
@@ -1786,7 +1702,6 @@ describe('Owner-control HTTP boundary', () => {
     expect(page.body).not.toContain('Private staging control');
     expect(publicConfig.json()).toEqual({
       companionDevicePairingConfigured: false,
-      companionReleaseDownloadConfigured: false,
       deploymentTarget: 'production',
       publishableKey: 'sb_publishable_test_key_for_production_only',
       supabaseUrl: `https://${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,

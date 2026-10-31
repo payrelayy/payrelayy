@@ -458,7 +458,6 @@ verify_release_files() {
     deposit-proof-reference-encryption-master
     deposit-proof-reference-fingerprint-master
     deposit-proof-reference-profile.v2.json
-    owner-companion-release-read-token
     owner-database-url
     owner-routine-enrollment-signer-pkcs8
     player-action-database-url
@@ -625,8 +624,6 @@ verify_release_files() {
         ;;
     esac
   done
-  [[ "$(<"$release/secrets/owner-companion-release-read-token")" =~ ^github_pat_[A-Za-z0-9_]{40,255}$ ]] ||
-    die 'the Owner Companion release token is malformed'
   if grep -Fq "BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'" \
     "$release/compose.production.yaml"; then
     [[ "$(stat --format='%s' "$release/secrets/bot-screenshot-reference-model-access-key")" -le 257 ]] &&
@@ -926,7 +923,7 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=34
+    expected_count=33
     if grep -Fq "INTERNAL_OWNER_FULL_PAYMENT_IDENTIFIERS_ENABLED: 'true'" \
       "$incoming/compose.production.yaml"; then
       expected_count=$((expected_count + 1))

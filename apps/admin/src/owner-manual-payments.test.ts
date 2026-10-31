@@ -42,6 +42,9 @@ describe('Owner manual payment boundary', () => {
         {
           query: async (sql) => {
             expect(sql).toContain('list_owner_submitted_payments_sensitive');
+            expect(sql).toContain("case when payment_status = 'pending'");
+            expect(sql).toContain('then app.owner_can_record_stopped_credit');
+            expect(sql).toContain('else false end as can_record_stopped_credit');
             return {
               rows: [
                 {

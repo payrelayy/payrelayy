@@ -401,8 +401,18 @@ export class PostgresOwnerManualPayments {
                 receiver_account_masked, player_id, payment_status, status_detail,
                 owner_case_status, rejection_reason, decided_at, completed_at,
                 can_approve, can_reject,
-                app.owner_can_record_stopped_credit($1::uuid,candidate_id)
-                  as can_record_stopped_credit${
+                -- This expensive eligibility check applies only to signed SMS
+                -- payments in execution review; do not run it for every card.
+                case when payment_status = 'pending'
+                    and candidate_id is not null
+                    and payment_event_id is not null
+                    and owner_case_status is null
+                    and status_detail in (
+                      'Automatic processing or reconciliation; check before manual credit',
+                      'Automatic window expired; Owner decision needed'
+                    )
+                  then app.owner_can_record_stopped_credit($1::uuid,candidate_id)
+                  else false end as can_record_stopped_credit${
                     this.displaySecrets
                       ? ', reference_ciphertext, reference_fingerprint, receiver_ciphertext, receiver_fingerprint'
                       : ''

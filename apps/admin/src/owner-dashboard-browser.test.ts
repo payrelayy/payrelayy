@@ -317,7 +317,6 @@ function ownerBrowserHarness(
     if (url === '/owner/config.json') {
       return response(200, {
         companionDevicePairingConfigured: options.companionDevicePairingConfigured ?? false,
-        companionReleaseDownloadConfigured: false,
         deploymentTarget: 'staging',
         publishableKey: `sb_publishable_${'a'.repeat(32)}`,
         supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
@@ -350,7 +349,6 @@ function ownerBrowserHarness(
         element('document').addEventListener(name, callback),
       hidden: false,
       createElement: (_name: string) => new FakeElement(),
-      getElementById: (id: string) => element(`#${id}`),
       querySelector: element,
       querySelectorAll: (_selector: string) => [] as FakeElement[],
     },

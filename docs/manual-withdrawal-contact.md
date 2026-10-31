@@ -17,8 +17,9 @@ new contact after an Owner change. The redirect accepts no user-supplied destina
 `Cache-Control: no-store`. If the contact is disabled or the lookup fails, the page says manual
 withdrawals are unavailable and does not redirect.
 
-For rollout, deploy a compatible Owner server before applying
-`20261101013001_manual_withdrawal_contact.sql`, then deploy the bot. The database migration
-seeds the launch contact and adds three narrowly granted functions. The Owner server's startup
-preflight accepts their absence during rollout and checks their grants once present. Verify the
-Owner saved contact and redirect before announcing the button.
+For rollout, deploy the compatible Owner and bot runtime before applying
+`20261101013001_manual_withdrawal_contact.sql` immediately afterward. The link may return an
+unavailable page during that short interval. The database migration seeds the launch contact
+and adds three narrowly granted functions. The Owner server's startup preflight accepts their
+absence during rollout and checks their grants once present. Verify the Owner saved contact and
+redirect before announcing the button.

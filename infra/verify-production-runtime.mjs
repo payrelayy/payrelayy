@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '4b5833ff9c52f0cf65af54e8ee73d77ece74e6b0'/gu)].length,
+  [...workflow.matchAll(/status '7aecb2ff0c51bcc0527eb60007d3dbbc9acbadd8'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='4b5833ff9c52f0cf65af54e8ee73d77ece74e6b0'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='7aecb2ff0c51bcc0527eb60007d3dbbc9acbadd8'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2484,7 +2484,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='4b5833ff9c52f0cf65af54e8ee73d77ece74e6b0'",
   "readonly PREDECESSOR_SHA256='fcb216521012936324e9af64e6c55f291ccd69090778cdcec1342c5960734fff'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='2123dfdaeb6be99cec69cb3fb6d1207173508c0d53ec28313131fa3c79137854'",
   "readonly SOURCE_REVIEW='owner-idle-session-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2498,7 +2498,7 @@ for (const value of [
   '20261101013000_owner_browser_idle_session.sql',
   '4b5833ff9c52f0cf65af54e8ee73d77ece74e6b0',
   'fcb216521012936324e9af64e6c55f291ccd69090778cdcec1342c5960734fff',
-  helperDigest,
+  '2123dfdaeb6be99cec69cb3fb6d1207173508c0d53ec28313131fa3c79137854',
   'ROTATE EXACT PRODUCTION V2 OWNER IDLE SESSION HELPER V1',
 ]) {
   assert.ok(ownerIdleSessionRunbook.includes(value));
@@ -2507,6 +2507,41 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-owner-idle-session-helper-rotation-v1\.sh/u,
+  );
+}
+const manualWithdrawalRotation = await read(
+  'infra/operations/fetanagent-production-v2-manual-withdrawal-contact-helper-rotation-v1.sh',
+);
+const manualWithdrawalRunbook = await read(
+  'infra/operations/production-manual-withdrawal-contact-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='7aecb2ff0c51bcc0527eb60007d3dbbc9acbadd8'",
+  "readonly PREDECESSOR_SHA256='2123dfdaeb6be99cec69cb3fb6d1207173508c0d53ec28313131fa3c79137854'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='manual-withdrawal-contact-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 MANUAL WITHDRAWAL CONTACT HELPER V1',
+]) {
+  assert.ok(manualWithdrawalRotation.includes(value));
+}
+assert.doesNotMatch(manualWithdrawalRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '20261101013001_manual_withdrawal_contact.sql',
+  '7aecb2ff0c51bcc0527eb60007d3dbbc9acbadd8',
+  '2123dfdaeb6be99cec69cb3fb6d1207173508c0d53ec28313131fa3c79137854',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 MANUAL WITHDRAWAL CONTACT HELPER V1',
+]) {
+  assert.ok(manualWithdrawalRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-manual-withdrawal-contact-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

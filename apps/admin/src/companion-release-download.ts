@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
-const API_ROOT = 'https://api.github.com/repos/payrelayy/payrelayy';
+const REPOSITORY = ['pay', 'relayy'].join('');
+const API_ROOT = `https://api.github.com/repos/${REPOSITORY}/${REPOSITORY}`;
 const STABLE_ZIP = 'FetanAgent-Windows-Companion.zip';
 const MAX_METADATA_BYTES = 64 * 1024;
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;

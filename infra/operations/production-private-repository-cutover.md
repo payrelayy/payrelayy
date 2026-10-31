@@ -8,9 +8,9 @@ credential. This change does not create or retry a Player credit.
 
 ## Before the release
 
-1. Keep `payrelayy/payrelayy` public until the new Owner download works.
-2. In the `payrelayy` account, create a fine-grained personal access token
-   restricted to **only** `payrelayy/payrelayy` with **Contents: read-only**.
+1. Keep the FetanAgent repository public until the new Owner download works.
+2. In its owning GitHub account, create a fine-grained personal access token
+   restricted to **only** the FetanAgent repository with **Contents: read-only**.
    Store it as the `OWNER_COMPANION_RELEASE_READ_TOKEN` secret in the GitHub
    `production` environment. Do not put the token in a URL, issue, command
    argument, repository file, or chat. Do not use the broad `gh` login token.

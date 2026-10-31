@@ -3,6 +3,15 @@ import { BOT_PUBLIC_SUPPORT_CONTACT_URL } from '@fetanagent/config/bot';
 const MAX_RESPONSE_BYTES = 2048;
 const REQUEST_TIMEOUT_MS = 3000;
 
+export type TelegramSupportLookupFailure =
+  'not_configured' | 'timeout' | 'http_unavailable' | 'invalid_response' | 'transport_unavailable';
+
+class SupportLookupError extends Error {
+  constructor(readonly reason: TelegramSupportLookupFailure) {
+    super(reason);
+  }
+}
+
 export const TELEGRAM_SUPPORT_HELP_TEXT = 'Help: /support.';
 export const TELEGRAM_SUPPORT_UNAVAILABLE_TEXT =
   'Support is unavailable right now. Please try again later.';
@@ -28,7 +37,7 @@ function parseContact(value: unknown): string | null {
     !hasOnlyKey(value, 'supportContact') ||
     !hasOnlyKey(value.supportContact, 'telegramUsername')
   ) {
-    throw new Error('Invalid public support response.');
+    throw new SupportLookupError('invalid_response');
   }
   const username = value.supportContact.telegramUsername;
   if (username === null) return null;
@@ -38,25 +47,25 @@ function parseContact(value: unknown): string | null {
     username.length > 32 ||
     /[^a-z0-9_]/u.test(username)
   ) {
-    throw new Error('Invalid public support response.');
+    throw new SupportLookupError('invalid_response');
   }
   return `https://t.me/${username}`;
 }
 
 async function readContact(response: Response, signal: AbortSignal): Promise<string | null> {
   if (response.status !== 200 || response.redirected || !response.body) {
-    throw new Error('Public support response unavailable.');
+    throw new SupportLookupError('http_unavailable');
   }
   const contentType = response.headers.get('content-type');
   if (!contentType || !/^application\/json(?:\s*;|$)/iu.test(contentType)) {
-    throw new Error('Invalid public support response.');
+    throw new SupportLookupError('invalid_response');
   }
   const contentLength = response.headers.get('content-length');
   if (
     contentLength !== null &&
     (!/^\d+$/u.test(contentLength) || Number(contentLength) > MAX_RESPONSE_BYTES)
   ) {
-    throw new Error('Public support response too large.');
+    throw new SupportLookupError('invalid_response');
   }
   const reader = response.body.getReader();
   const cancelRead = () => {
@@ -68,40 +77,49 @@ async function readContact(response: Response, signal: AbortSignal): Promise<str
   let length = 0;
   try {
     while (true) {
-      if (signal.aborted) throw new Error('Public support request timed out.');
+      if (signal.aborted) throw new SupportLookupError('timeout');
       const chunk = await reader.read();
       if (chunk.done) break;
       if (chunk.value.byteLength > MAX_RESPONSE_BYTES - length) {
-        throw new Error('Public support response too large.');
+        throw new SupportLookupError('invalid_response');
       }
       bytes.set(chunk.value, length);
       length += chunk.value.byteLength;
     }
-    if (signal.aborted) throw new Error('Public support request timed out.');
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length));
-    return parseContact(JSON.parse(text) as unknown);
+    if (signal.aborted) throw new SupportLookupError('timeout');
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length));
+      return parseContact(JSON.parse(text) as unknown);
+    } catch {
+      throw new SupportLookupError('invalid_response');
+    }
   } finally {
     signal.removeEventListener('abort', cancelRead);
     cancelRead();
   }
 }
 
-export async function loadTelegramSupportContact(
+async function lookupTelegramSupportContact(
   url: string | undefined,
   fetchContact: typeof fetch = fetch,
-): Promise<string | null> {
+): Promise<
+  | { readonly kind: 'verified'; readonly contact: string | null }
+  | { readonly kind: 'failed'; readonly reason: TelegramSupportLookupFailure }
+> {
   // Defense in depth: even a caller bypassing configuration cannot choose an origin.
-  if (url !== BOT_PUBLIC_SUPPORT_CONTACT_URL) return null;
+  if (url !== BOT_PUBLIC_SUPPORT_CONTACT_URL) return { kind: 'failed', reason: 'not_configured' };
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
+      timedOut = true;
       controller.abort();
-      reject(new Error('Public support request timed out.'));
+      reject(new SupportLookupError('timeout'));
     }, REQUEST_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([
+    const contact = await Promise.race([
       (async () => {
         const response = await fetchContact(url, {
           method: 'GET',
@@ -116,13 +134,66 @@ export async function loadTelegramSupportContact(
       })(),
       deadline,
     ]);
-  } catch {
-    // Never expose transport errors, response bodies or a fallback contact to users.
-    return null;
+    return { kind: 'verified', contact };
+  } catch (error) {
+    // Never expose transport errors or response bodies to customers or diagnostics.
+    return {
+      kind: 'failed',
+      reason: timedOut
+        ? 'timeout'
+        : error instanceof SupportLookupError
+          ? error.reason
+          : 'transport_unavailable',
+    };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     controller.abort();
   }
+}
+
+export async function loadTelegramSupportContact(
+  url: string | undefined,
+  fetchContact: typeof fetch = fetch,
+): Promise<string | null> {
+  const result = await lookupTelegramSupportContact(url, fetchContact);
+  return result.kind === 'verified' ? result.contact : null;
+}
+
+/** Keep the last verified contact while the running bot is serving an Owner API outage. */
+export function createTelegramSupportContactResolver(
+  url: string | undefined,
+  dependencies: {
+    readonly fetchContact?: typeof fetch;
+    readonly reportFailure?: (
+      reason: TelegramSupportLookupFailure,
+      cachedContactUsed: boolean,
+    ) => void;
+  } = {},
+): { readonly resolve: () => Promise<string | null> } {
+  let lastVerifiedContact: string | null = null;
+  let hasVerifiedResponse = false;
+  let pending: Promise<string | null> | undefined;
+  return {
+    resolve() {
+      if (pending) return pending;
+      pending = (async () => {
+        const result = await lookupTelegramSupportContact(url, dependencies.fetchContact);
+        if (result.kind === 'verified') {
+          // A deliberate Owner disable is a verified null and clears the fallback.
+          hasVerifiedResponse = true;
+          lastVerifiedContact = result.contact;
+          return result.contact;
+        }
+        const cachedContactUsed = hasVerifiedResponse && lastVerifiedContact !== null;
+        if (result.reason !== 'not_configured')
+          dependencies.reportFailure?.(result.reason, cachedContactUsed);
+        return cachedContactUsed ? lastVerifiedContact : null;
+      })().finally(() => {
+        pending = undefined;
+      });
+      return pending;
+    },
+  };
 }
 
 /** Public help is consumed before customer, admission and payment pipelines. */
@@ -132,6 +203,7 @@ export async function handleTelegramSupportMessage(
   dependencies: {
     readonly reply: (text: string) => Promise<unknown>;
     readonly fetchContact?: typeof fetch;
+    readonly resolveContact?: () => Promise<string | null>;
     readonly botUsername?: string | undefined;
   },
 ): Promise<'ignored' | 'handled'> {
@@ -166,7 +238,9 @@ export async function handleTelegramSupportMessage(
   ) {
     return 'handled';
   }
-  const contact = await loadTelegramSupportContact(url, dependencies.fetchContact);
+  const contact = dependencies.resolveContact
+    ? await dependencies.resolveContact()
+    : await loadTelegramSupportContact(url, dependencies.fetchContact);
   await dependencies.reply(
     contact ? `Contact support: ${contact}` : TELEGRAM_SUPPORT_UNAVAILABLE_TEXT,
   );

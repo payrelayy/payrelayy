@@ -66,7 +66,7 @@ vi.mock('grammy', () => ({
     }
   },
   InlineKeyboard: class {
-    public buttons: { text: string; callbackData?: string }[] = [];
+    public buttons: { text: string; callbackData?: string; url?: string }[] = [];
 
     public text(text: string, callbackData: string): this {
       this.buttons.push({ text, callbackData });
@@ -74,6 +74,11 @@ vi.mock('grammy', () => ({
     }
 
     public row(): this {
+      return this;
+    }
+
+    public url(text: string, url: string): this {
+      this.buttons.push({ text, url });
       return this;
     }
   },
@@ -443,6 +448,60 @@ describe('Telegram admission, private action, and ingress composition', () => {
     },
   );
 
+  it('keeps /support available during an Owner API interruption after a verified contact', async () => {
+    const fetchContact = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ supportContact: { telegramUsername: 'help_team' } }))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchContact);
+    runtime.config = {
+      ...botConfig(true, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    const first = messageContext('/support');
+    const duringOutage = messageContext('/support');
+    await runtime.messageHandler!(first);
+    await runtime.messageHandler!(duringOutage);
+    expect(first.replies).toEqual(['Contact support: https://t.me/help_team']);
+    expect(duringOutage.replies).toEqual(['Contact support: https://t.me/help_team']);
+    expect(fetchContact).toHaveBeenCalledTimes(2);
+    expect(runtime.admissionCalls).toHaveLength(0);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
+  it('offers a direct Support action when both deposit methods are unavailable', async () => {
+    const fetchPublic = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url) =>
+        String(url).endsWith('/payment-methods')
+          ? Response.json({ methods: { telebirr: false, cbe_birr: false } })
+          : Response.json({ supportContact: { telegramUsername: 'help_team' } }),
+      );
+    vi.stubGlobal('fetch', fetchPublic);
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    const replies: Array<{
+      text: string;
+      options: { reply_markup?: { buttons: Array<{ text: string; url?: string }> } } | undefined;
+    }> = [];
+    await runtime.messageHandler!({
+      ...messageContext('/deposit'),
+      reply: async (text: string, options?: (typeof replies)[number]['options']) => {
+        replies.push({ text, options });
+      },
+    });
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.text).toBe('Deposits are unavailable right now. Need help? /support.');
+    expect(replies[0]!.options?.reply_markup?.buttons).toEqual([
+      { text: '💬 Support', url: 'https://t.me/help_team' },
+    ]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
   it.each([
     { beta: false, action: false },
     { beta: true, action: false },
@@ -620,6 +679,78 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(keyboard?.buttons).toEqual([{ text: '➕ Add Player ID', callbackData: 'sp1.change' }]);
     expect(runtime.commandUpdates).toEqual([
       { kind: 'delete', scope: { type: 'chat', chat_id: 123456789 } },
+    ]);
+  });
+
+  it('keeps Support visible on the saved-Player menu when deposit methods are offline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (url) =>
+          String(url).endsWith('/payment-methods')
+            ? Response.json({ methods: { telebirr: false, cbe_birr: false } })
+            : Response.json({ supportContact: { telegramUsername: 'help_team' } }),
+        ),
+    );
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+    };
+    let buttons: Array<{ text: string; callbackData?: string; url?: string }> = [];
+    await runtime.messageHandler!({
+      ...messageContext('/menu'),
+      reply: async (_text: string, options?: { reply_markup?: { buttons: typeof buttons } }) => {
+        buttons = options?.reply_markup?.buttons ?? [];
+      },
+    });
+    expect(buttons).toEqual([{ text: '💬 Support', url: 'https://t.me/help_team' }]);
+  });
+
+  it('adds Support beside a remaining status action when its Deposit action is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (url) =>
+          String(url).endsWith('/payment-methods')
+            ? Response.json({ methods: { telebirr: false, cbe_birr: false } })
+            : Response.json({ supportContact: { telegramUsername: 'help_team' } }),
+        ),
+    );
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'telebirr_live_deposit_status',
+      proofToken: 'A'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      amountMinor: '10000',
+      currencyCode: 'ETB',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    };
+    let buttons: Array<{ text: string; callbackData?: string; url?: string }> = [];
+    await runtime.messageHandler!({
+      ...messageContext('/menu'),
+      reply: async (_text: string, options?: { reply_markup?: { buttons: typeof buttons } }) => {
+        buttons = options?.reply_markup?.buttons ?? [];
+      },
+    });
+    expect(buttons).toEqual([
+      { text: 'Refresh status', callbackData: `dps1.${'A'.repeat(22)}` },
+      { text: '💬 Support', url: 'https://t.me/help_team' },
     ]);
   });
 

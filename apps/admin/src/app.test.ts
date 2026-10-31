@@ -11,6 +11,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildOwnerControlApp as buildOwnerControlAppProduction } from './app.js';
+import { OwnerAuthenticationRejectedError } from './owner-auth.js';
 import {
   OwnerKemerbetReadinessCohortRejectedError,
   type OwnerKemerbetReadinessCohortControl,
@@ -62,7 +63,15 @@ const companionPairingPackage =
   Buffer.from(JSON.stringify({ pairingOnly: true, transferDisabled: true }), 'utf8').toString(
     'base64url',
   );
-const bearer = 'header.payload.signature-with-safe-characters';
+const bearer =
+  'header.' +
+  Buffer.from(
+    JSON.stringify({
+      sub: authUserId,
+      session_id: '99999999-9999-4999-8999-999999999999',
+    }),
+  ).toString('base64url') +
+  '.signature-with-safe-characters';
 const receiverEncryptionMaster = 'c'.repeat(64);
 const receiverFingerprintMaster = 'd'.repeat(64);
 const cbeLookupEncryptionMaster = 'e'.repeat(64);
@@ -362,6 +371,12 @@ function runtime(
   overrides: Partial<OwnerControlPostgresRuntime> = {},
 ): OwnerControlPostgresRuntime {
   return {
+    browserSessions: {
+      run: async () => ({
+        absoluteExpiresAt: '2099-01-08T00:00:00.000Z',
+        idleExpiresAt: '2099-01-01T12:00:00.000Z',
+      }),
+    },
     assessments: {
       assess: async (_actor, deposit, fixtureId) => ({
         alreadyRecorded: false,
@@ -525,6 +540,89 @@ async function nextEventLoopTurn(): Promise<void> {
 }
 
 describe('Owner-control HTTP boundary', () => {
+  it('starts and touches only a verified Owner Auth session and gates ordinary routes', async () => {
+    const actions: string[] = [];
+    const session = {
+      absoluteExpiresAt: '2026-11-08T00:00:00.000Z',
+      idleExpiresAt: '2026-11-01T12:00:00.000Z',
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        browserSessions: {
+          run: async (actor, id, action) => {
+            expect(actor).toBe(authUserId);
+            expect(id).toBe('99999999-9999-4999-8999-999999999999');
+            actions.push(action);
+            return session;
+          },
+        },
+      }),
+    });
+    const headers = {
+      authorization: `Bearer ${bearer}`,
+      origin: 'https://owner.fetanagent.com',
+      'content-type': 'application/json',
+    };
+    const start = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/browser-session',
+      headers,
+      payload: { action: 'start' },
+    });
+    expect(start.statusCode).toBe(200);
+    expect(start.json()).toEqual({ session });
+    const touch = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/browser-session',
+      headers,
+      payload: { action: 'touch' },
+    });
+    expect(touch.statusCode).toBe(200);
+    const read = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/browser-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(read.statusCode).toBe(200);
+    const queue = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/dry-run-deposit-intake?limit=25',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(actions).toEqual(['start', 'touch', 'check', 'check']);
+    const crossOrigin = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/browser-session',
+      headers: { ...headers, origin: 'https://example.test' },
+      payload: { action: 'touch' },
+    });
+    expect(crossOrigin.statusCode).toBe(400);
+    expect(actions).toHaveLength(4);
+    await app.close();
+  });
+
+  it('rejects ordinary Owner routes after the server idle gate expires', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        browserSessions: {
+          run: async () => {
+            throw new OwnerAuthenticationRejectedError();
+          },
+        },
+      }),
+    });
+    const queue = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/dry-run-deposit-intake?limit=25',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(queue.statusCode).toBe(403);
+    await app.close();
+  });
+
   it('serves only authenticated read-only companion execution readiness without identifiers', async () => {
     const readiness = {
       activationAvailable: false,
@@ -1372,7 +1470,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.headers['x-frame-options']).toBe('DENY');
     expect(response.headers['permissions-policy']).toContain('payment=()');
     expect(response.body).toContain('FetanAgent Owner');
-    expect(response.body).toMatch(/keep\s+you signed in securely for up to twelve hours/u);
+    expect(response.body).toMatch(/inactive for twelve hours, with a seven-day sign-in limit/u);
+    expect(response.body).toContain('id="owner-session-warning"');
     expect(response.body).toContain('id="owner-session-status"');
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
@@ -1476,7 +1575,7 @@ describe('Owner-control HTTP boundary', () => {
     await configuredApp.close();
   });
 
-  it('restores a rotating twelve-hour Owner session after a same-tab reload', async () => {
+  it('restores a rotating idle Owner session after a same-tab reload', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner/app.js' });
     expect(response.statusCode).toBe(200);
@@ -1487,17 +1586,17 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("authorization: 'Bearer ' + accessToken");
     expect(response.body).not.toMatch(/localStorage|document\.cookie|indexedDB/u);
     expect(response.body).toContain(
-      "const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1'",
+      "const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v2'",
     );
     expect(response.body).toContain('window.sessionStorage.setItem(');
     expect(response.body).toContain('window.sessionStorage.getItem(OWNER_SESSION_STORAGE_KEY)');
     expect(response.body).toContain('window.sessionStorage.removeItem(OWNER_SESSION_STORAGE_KEY)');
-    expect(response.body).toContain(
-      'JSON.stringify({ expiresAt: ownerSessionExpiresAt, refreshToken })',
-    );
+    expect(response.body).toContain('absoluteExpiresAt: ownerAbsoluteExpiresAt');
+    expect(response.body).toContain('idleExpiresAt: ownerSessionExpiresAt');
     expect(response.body).toContain('void restoreOwnerSession()');
     expect(response.body).toContain('Owner session restored after reload.');
-    expect(response.body).toContain('const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000');
+    expect(response.body).toContain('const OWNER_IDLE_LIFETIME_MS = 12 * 60 * 60 * 1_000');
+    expect(response.body).toContain('const OWNER_ABSOLUTE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1_000');
     expect(response.body).toContain('const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000');
     expect(response.body).toContain('const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000');
     expect(response.body).toContain('const OWNER_API_REQUEST_TIMEOUT_MS = 25 * 1_000');
@@ -1520,7 +1619,7 @@ describe('Owner-control HTTP boundary', () => {
       /signOut\(failureNotice\);\s*return;\s*\} finally \{\s*if \(tokenRequest\) tokenRequest\.deadline\.finish\(\);\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\(/u,
     );
     expect(response.body).toContain(
-      'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains',
+      'Your saved Owner session is temporarily unreachable. Its idle deadline remains',
     );
     expect(response.body).toContain(
       'Your saved Owner session was rejected or expired. Sign in again to continue.',
@@ -1531,10 +1630,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).not.toMatch(
       /setNotice\('Owner session restored after reload\.'\);\s*await loadOwnerPlayerQueues\(\);/u,
     );
-    expect(response.body).toContain(
-      'ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS',
-    );
-    expect(response.body).toContain('Your twelve-hour Owner session ended.');
+    expect(response.body).toContain('ownerSessionExpiresAt = currentTime + OWNER_IDLE_LIFETIME_MS');
+    expect(response.body).toContain('Your Owner page was inactive for twelve hours.');
     expect(response.body).toContain('refreshToken = undefined');
     expect(response.body).not.toContain('service_role');
     expect(response.body).toContain('/v1/owner/player-registration-requests?limit=25');

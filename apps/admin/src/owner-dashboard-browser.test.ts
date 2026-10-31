@@ -8,7 +8,7 @@ import {
   ownerDashboardHtml,
 } from './owner-dashboard.js';
 
-type BrowserEvent = Readonly<{ preventDefault(): void }>;
+type BrowserEvent = Readonly<{ preventDefault(): void; isTrusted?: boolean }>;
 type BrowserListener = (event: BrowserEvent) => Promise<void> | void;
 type BrowserFetchInit = Readonly<{ signal?: AbortSignal }> & Record<string, unknown>;
 type BrowserFetchOverride = (
@@ -225,9 +225,19 @@ function ownerBrowserHarness(
     confirm?: boolean;
     devicePairingConfigured?: boolean;
     fetchOverride?: BrowserFetchOverride;
+    browserSessionOverride?: BrowserFetchOverride;
+    initialSessionStorage?: Readonly<Record<string, string>>;
+    nowMs?: number;
     randomUUID?: () => string;
   }> = {},
 ) {
+  let clockMs = options.nowMs ?? Date.now();
+  const sessionStartedAt = clockMs;
+  class BrowserDate extends Date {
+    static override now(): number {
+      return clockMs;
+    }
+  }
   const elements = new Map<string, FakeElement>();
   const element = (selector: string) => {
     const current = elements.get(selector);
@@ -289,7 +299,7 @@ function ownerBrowserHarness(
     submit: element('#pilot-prepare-button'),
   });
 
-  const stored = new Map<string, string>();
+  const stored = new Map<string, string>(Object.entries(options.initialSessionStorage ?? {}));
   const sessionStorage = {
     getItem: (key: string) => stored.get(key) ?? null,
     removeItem: (key: string) => void stored.delete(key),
@@ -312,6 +322,17 @@ function ownerBrowserHarness(
   const fetchImplementation = async (input: unknown, init: BrowserFetchInit = {}) => {
     const url = String(input);
     fetchCalls.push({ init, url });
+    if (url === '/v1/owner/browser-session') {
+      return (
+        options.browserSessionOverride?.(url, init) ??
+        response(200, {
+          session: {
+            absoluteExpiresAt: new Date(sessionStartedAt + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+            idleExpiresAt: new Date(clockMs + 12 * 60 * 60 * 1_000).toISOString(),
+          },
+        })
+      );
+    }
     const overridden = options.fetchOverride?.(url, init);
     if (overridden !== undefined) return overridden;
     if (url === '/owner/config.json') {
@@ -335,6 +356,7 @@ function ownerBrowserHarness(
 
   const context = createContext({
     AbortController,
+    Date: options.nowMs === undefined ? Date : BrowserDate,
     URL,
     TextDecoder,
     Uint8Array,
@@ -372,6 +394,9 @@ function ownerBrowserHarness(
       return Promise.resolve((value as (...values: unknown[]) => T)(...args));
     },
     element,
+    advanceTime(milliseconds: number) {
+      clockMs += milliseconds;
+    },
     evaluate(source: string) {
       return runInContext(source, context);
     },
@@ -1550,6 +1575,7 @@ describe('persistent routine TeleBirr policy controls', () => {
       browser.fetchCalls.filter(({ init }) => init.method === 'POST').map(({ url }) => url),
     ).toEqual([
       'https://spzpiyxheappsfyswewl.supabase.co/auth/v1/token?grant_type=password',
+      '/v1/owner/browser-session',
       '/v1/owner/routine-telebirr-processing/save',
     ]);
   });
@@ -2939,7 +2965,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(
       browser.sessionStorage.getItem('fetanagent.owner.companion-device-pairing-request.v1'),
     ).toBe('11111111-1111-4111-8111-111111111111');
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toContain(
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toContain(
       receipt.pairingPackage,
     );
   });
@@ -3863,7 +3889,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(
       browser.sessionStorage.getItem('fetanagent.owner.telebirr-device-pairing-request.v1'),
     ).toBe('11111111-1111-4111-8111-111111111111');
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toContain(
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toContain(
       receipt.pairingPackage,
     );
   });
@@ -3880,7 +3906,7 @@ describe('Owner dashboard browser authentication boundary', () => {
         'Your session remains active; select Refresh to retry.',
     );
     expect(browser.element('#notice').textContent).not.toContain('Sign-in failed');
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toBeNull();
   });
 
   it.each([401, 403] as const)(
@@ -3895,7 +3921,7 @@ describe('Owner dashboard browser authentication boundary', () => {
       expect(browser.element('#notice').textContent).toBe(
         'Your session is unavailable or is not an active Owner.',
       );
-      expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).toBeNull();
+      expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).toBeNull();
     },
   );
 
@@ -3917,10 +3943,10 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(result.status).toBe(409);
     expect(browser.element('#login-panel').hidden).toBe(true);
     expect(browser.element('#owner-panel').hidden).toBe(false);
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toBeNull();
   });
 
-  it('bounds token refresh and preserves the valid twelve-hour credential on timeout', async () => {
+  it('bounds token refresh and preserves the valid idle session on timeout', async () => {
     let refreshSignal: AbortSignal | undefined;
     const browser = ownerBrowserHarness(503, {
       fetchOverride: (url, init) => {
@@ -3940,10 +3966,10 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(refreshSignal?.aborted).toBe(true);
     expect(browser.element('#login-panel').hidden).toBe(true);
     expect(browser.element('#owner-panel').hidden).toBe(false);
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toBeNull();
   });
 
-  it('preserves the valid twelve-hour credential on a transient refresh network failure', async () => {
+  it('preserves the valid idle session on a transient refresh network failure', async () => {
     const browser = ownerBrowserHarness(503, {
       fetchOverride: (url) => {
         if (!url.endsWith('/auth/v1/token?grant_type=refresh_token')) return undefined;
@@ -3955,7 +3981,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     await expect(browser.call('refreshOwnerSession')).rejects.toThrow('owner_transport_network');
     expect(browser.element('#login-panel').hidden).toBe(true);
     expect(browser.element('#owner-panel').hidden).toBe(false);
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toBeNull();
   });
 
   it('bounds Owner response-body parsing without signing out a valid session', async () => {
@@ -3988,7 +4014,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     await expect(parsing).rejects.toThrow('owner_transport_timeout');
     expect(ownerSignal?.aborted).toBe(true);
     expect(browser.element('#login-panel').hidden).toBe(true);
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).not.toBeNull();
   });
 
   it('signs out only after a confirmed refresh-token rejection', async () => {
@@ -4003,7 +4029,167 @@ describe('Owner dashboard browser authentication boundary', () => {
     await expect(browser.call('refreshOwnerSession')).rejects.toThrow('signed_out');
     expect(browser.element('#login-panel').hidden).toBe(false);
     expect(browser.element('#owner-panel').hidden).toBe(true);
-    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).toBeNull();
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).toBeNull();
+  });
+});
+
+describe('Owner browser idle session', () => {
+  const loginAt = Date.parse('2026-11-01T00:00:00.000Z');
+
+  it('keeps the page signed out when server session registration is unavailable', async () => {
+    const browser = ownerBrowserHarness(503, {
+      nowMs: loginAt,
+      browserSessionOverride: () => response(503, { error: 'owner_control_unavailable' }),
+    });
+    await browser.signIn();
+    expect(browser.element('#login-panel').hidden).toBe(false);
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).toBeNull();
+    expect(browser.element('#notice').textContent).toContain(
+      'secure Owner session setup is temporarily unavailable',
+    );
+  });
+
+  it('registers once, then renews only for a trusted Owner interaction', async () => {
+    const browser = ownerBrowserHarness(503, { nowMs: loginAt });
+    await browser.signIn();
+    expect(
+      browser.fetchCalls.filter(({ url }) => url === '/v1/owner/browser-session'),
+    ).toHaveLength(1);
+    const original = JSON.parse(
+      browser.sessionStorage.getItem('fetanagent.owner.session.v2') ?? '{}',
+    );
+    browser.advanceTime(10 * 60 * 1_000);
+    const pointerDown = browser.element('document').listeners.get('pointerdown');
+    await pointerDown?.({ preventDefault() {}, isTrusted: false });
+    expect(
+      browser.fetchCalls.filter(({ url }) => url === '/v1/owner/browser-session'),
+    ).toHaveLength(1);
+    await pointerDown?.({ preventDefault() {}, isTrusted: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const activity = browser.fetchCalls.filter(({ url }) => url === '/v1/owner/browser-session');
+    expect(activity).toHaveLength(2);
+    expect(JSON.parse(String(activity[1]?.init.body))).toEqual({ action: 'touch' });
+    const renewed = JSON.parse(
+      browser.sessionStorage.getItem('fetanagent.owner.session.v2') ?? '{}',
+    );
+    expect(renewed.idleExpiresAt - original.idleExpiresAt).toBe(10 * 60 * 1_000);
+    expect(renewed.absoluteExpiresAt).toBe(original.absoluteExpiresAt);
+    await browser.call('loadSystemOverview');
+    expect(
+      browser.fetchCalls.filter(({ url }) => url === '/v1/owner/browser-session'),
+    ).toHaveLength(2);
+  });
+
+  it('checks the existing server session after a same-tab reload without restarting it', async () => {
+    const first = ownerBrowserHarness(503, { nowMs: loginAt });
+    await first.signIn();
+    const saved = first.sessionStorage.getItem('fetanagent.owner.session.v2');
+    expect(saved).not.toBeNull();
+    const deadlines = JSON.parse(saved!);
+    const restored = ownerBrowserHarness(503, {
+      nowMs: loginAt + 60_000,
+      initialSessionStorage: { 'fetanagent.owner.session.v2': saved! },
+      browserSessionOverride: () =>
+        response(200, {
+          session: {
+            absoluteExpiresAt: new Date(deadlines.absoluteExpiresAt).toISOString(),
+            idleExpiresAt: new Date(deadlines.idleExpiresAt).toISOString(),
+          },
+        }),
+      fetchOverride: (url) =>
+        url.endsWith('/auth/v1/token?grant_type=refresh_token')
+          ? response(200, {
+              access_token: 'header.payload.rotated-signature-with-safe-characters',
+              expires_in: 3600,
+              refresh_token: 'abcdefghijkl',
+            })
+          : undefined,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(restored.element('#owner-panel').hidden).toBe(false);
+    const requests = restored.fetchCalls.filter(({ url }) => url === '/v1/owner/browser-session');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.init.method).toBe('GET');
+    expect(
+      JSON.parse(restored.sessionStorage.getItem('fetanagent.owner.session.v2') ?? '{}')
+        .absoluteExpiresAt,
+    ).toBe(deadlines.absoluteExpiresAt);
+  });
+
+  it('retries a temporarily unavailable reload check without repeatedly rotating the Auth token', async () => {
+    const first = ownerBrowserHarness(503, { nowMs: loginAt });
+    await first.signIn();
+    const saved = first.sessionStorage.getItem('fetanagent.owner.session.v2')!;
+    const deadlines = JSON.parse(saved);
+    let checks = 0;
+    const restored = ownerBrowserHarness(503, {
+      nowMs: loginAt + 60_000,
+      initialSessionStorage: { 'fetanagent.owner.session.v2': saved },
+      fetchOverride: (url) =>
+        url.endsWith('/auth/v1/token?grant_type=refresh_token')
+          ? response(200, {
+              access_token: 'header.payload.rotated-signature-with-safe-characters',
+              expires_in: 3600,
+              refresh_token: 'abcdefghijkl',
+            })
+          : undefined,
+      browserSessionOverride: () => {
+        checks += 1;
+        return checks === 1
+          ? response(503, { error: 'owner_control_unavailable' })
+          : response(200, {
+              session: {
+                absoluteExpiresAt: new Date(deadlines.absoluteExpiresAt).toISOString(),
+                idleExpiresAt: new Date(deadlines.idleExpiresAt).toISOString(),
+              },
+            });
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(restored.element('#login-panel').hidden).toBe(false);
+    restored.expireLatestTimer(5 * 1_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(restored.element('#owner-panel').hidden).toBe(false);
+    expect(checks).toBe(2);
+    expect(
+      restored.fetchCalls.filter(({ url }) =>
+        url.endsWith('/auth/v1/token?grant_type=refresh_token'),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('warns five minutes before inactivity logout, then clears the tab session', async () => {
+    const browser = ownerBrowserHarness(503, { nowMs: loginAt });
+    await browser.signIn();
+    browser.advanceTime(12 * 60 * 60 * 1_000 - 5 * 60 * 1_000);
+    browser.expireLatestTimer(12 * 60 * 60 * 1_000 - 5 * 60 * 1_000);
+    expect(browser.element('#owner-session-warning').hidden).toBe(false);
+    browser.advanceTime(5 * 60 * 1_000);
+    browser.expireLatestTimer(12 * 60 * 60 * 1_000);
+    expect(browser.element('#login-panel').hidden).toBe(false);
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v2')).toBeNull();
+    expect(browser.element('#notice').textContent).toContain('inactive for twelve hours');
+  });
+
+  it('enforces the absolute deadline even while the idle deadline is later', async () => {
+    const browser = ownerBrowserHarness(503, {
+      nowMs: loginAt,
+      browserSessionOverride: () =>
+        response(200, {
+          session: {
+            absoluteExpiresAt: new Date(loginAt + 10 * 60 * 1_000).toISOString(),
+            idleExpiresAt: new Date(loginAt + 12 * 60 * 60 * 1_000).toISOString(),
+          },
+        }),
+    });
+    await browser.signIn();
+    browser.advanceTime(5 * 60 * 1_000);
+    browser.expireLatestTimer(5 * 60 * 1_000);
+    expect(browser.element('#owner-session-warning').hidden).toBe(false);
+    expect(browser.element('#owner-stay-signed-in').hidden).toBe(true);
+    browser.advanceTime(5 * 60 * 1_000);
+    browser.expireLatestTimer(10 * 60 * 1_000);
+    expect(browser.element('#notice').textContent).toContain('seven-day Owner sign-in limit ended');
   });
 });
 

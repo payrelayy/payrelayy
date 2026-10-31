@@ -125,6 +125,9 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     )[0]!.split('as recorder_denied,')[1]!;
     expect(executeCountSql).toMatch(/select count\(\*\) = 36\s*\+/u);
     expect(executeCountSql).toContain(
+      "(to_regprocedure('app.owner_browser_session(uuid,uuid,text)') is not null)::integer",
+    );
+    expect(executeCountSql).toContain(
       "has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')::integer",
     );
     expect(executeCountSql).toContain(

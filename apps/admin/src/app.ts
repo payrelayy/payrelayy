@@ -52,6 +52,7 @@ import {
   OwnerAuthenticationRejectedError,
   OwnerAuthenticationUnavailableError,
   bearerTokenFromRawHeaders,
+  ownerSessionIdFromVerifiedToken,
   verifyOwnerBearerToken,
 } from './owner-auth.js';
 import {
@@ -385,7 +386,10 @@ export function buildOwnerControlApp(
       },
     },
   });
-  const interactiveOwnerSubjects = new Map<string, InteractiveSessionCacheEntry<string>>();
+  const interactiveOwnerSubjects = new Map<
+    string,
+    InteractiveSessionCacheEntry<{ authUserId: string; sessionId: string }>
+  >();
   const interactiveKemerbetProfiles = new Map<string, InteractiveSessionCacheEntry<string>>();
   let kemerbetProfileLifecycleLane = Promise.resolve();
 
@@ -471,7 +475,7 @@ export function buildOwnerControlApp(
     return reply.code(503).send({ error: 'owner_control_unavailable' });
   });
 
-  async function ownerSubject(rawHeaders: readonly string[]): Promise<string> {
+  async function verifiedOwnerBrowserSession(rawHeaders: readonly string[]) {
     const token = bearerTokenFromRawHeaders(rawHeaders);
     if (!token) throw new OwnerAuthenticationRejectedError();
     const verified = await verifyOwnerBearerToken(
@@ -482,8 +486,65 @@ export function buildOwnerControlApp(
       },
       dependencies.fetch,
     );
+    return {
+      authUserId: verified.authUserId,
+      sessionId: ownerSessionIdFromVerifiedToken(token, verified.authUserId),
+    };
+  }
+
+  async function ownerSubject(rawHeaders: readonly string[]): Promise<string> {
+    const verified = await verifiedOwnerBrowserSession(rawHeaders);
+    await dependencies.runtime.browserSessions.run(
+      verified.authUserId,
+      verified.sessionId,
+      'check',
+    );
     return verified.authUserId;
   }
+
+  app.get('/v1/owner/browser-session', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as Record<string, unknown>).length !== 0) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const verified = await verifiedOwnerBrowserSession(request.raw.rawHeaders);
+      const session = await dependencies.runtime.browserSessions.run(
+        verified.authUserId,
+        verified.sessionId,
+        'check',
+      );
+      return reply.send({ session });
+    } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post<{ Body: unknown }>('/v1/owner/browser-session', async (request, reply) => {
+    try {
+      if (
+        Object.keys(request.query as Record<string, unknown>).length !== 0 ||
+        exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+        !privatePilotMutationOrigins.has(exactRawHeader(request.raw.rawHeaders, 'origin') ?? '') ||
+        !exactObject(request.body, ['action']) ||
+        !['start', 'touch'].includes((request.body as { action: unknown }).action as string)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const verified = await verifiedOwnerBrowserSession(request.raw.rawHeaders);
+      const session = await dependencies.runtime.browserSessions.run(
+        verified.authUserId,
+        verified.sessionId,
+        (request.body as { action: 'start' | 'touch' }).action,
+      );
+      return reply.send({ session });
+    } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   registerSupportContactRoutes(app, {
     supportContact: dependencies.runtime.supportContact,
@@ -495,17 +556,30 @@ export function buildOwnerControlApp(
     const token = bearerTokenFromRawHeaders(rawHeaders);
     if (!token) throw new OwnerAuthenticationRejectedError();
     const tokenDigest = createHash('sha256').update(token, 'utf8').digest('hex');
-    return cachedInteractiveValue(interactiveOwnerSubjects, tokenDigest, async () => {
-      const verified = await verifyOwnerBearerToken(
-        token,
-        {
-          publishableKey: runtimeConfig.publishableKey,
-          supabaseUrl: runtimeConfig.supabaseUrl,
-        },
-        dependencies.fetch,
-      );
-      return verified.authUserId;
-    });
+    const verified = await cachedInteractiveValue(
+      interactiveOwnerSubjects,
+      tokenDigest,
+      async () => {
+        const verified = await verifyOwnerBearerToken(
+          token,
+          {
+            publishableKey: runtimeConfig.publishableKey,
+            supabaseUrl: runtimeConfig.supabaseUrl,
+          },
+          dependencies.fetch,
+        );
+        return {
+          authUserId: verified.authUserId,
+          sessionId: ownerSessionIdFromVerifiedToken(token, verified.authUserId),
+        };
+      },
+    );
+    await dependencies.runtime.browserSessions.run(
+      verified.authUserId,
+      verified.sessionId,
+      'check',
+    );
+    return verified.authUserId;
   }
 
   function validPrivatePilotMutationHeaders(

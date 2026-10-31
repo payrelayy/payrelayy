@@ -204,6 +204,7 @@ const expiredSmsQueueOwnerHandoffMigrationName =
   '20261030202601_receiver_sms_expired_queue_owner_handoff.sql';
 const ownerSubmittedPaymentsFastListMigrationName =
   '20261031105752_owner_submitted_payments_fast_list.sql';
+const ownerBrowserIdleSessionMigrationName = '20261101013000_owner_browser_idle_session.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -693,7 +694,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerStoppedPreActionCreditMigrationName &&
         name !== routineModalConfirmationMigrationName &&
         name !== expiredSmsQueueOwnerHandoffMigrationName &&
-        name !== ownerSubmittedPaymentsFastListMigrationName,
+        name !== ownerSubmittedPaymentsFastListMigrationName &&
+        name !== ownerBrowserIdleSessionMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10482,6 +10484,16 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerSubmittedPaymentsFastListMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerBrowserIdleSessionMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerBrowserIdleSessionMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10527,6 +10539,89 @@ describe('100 ETB production deposit policy cutover', () => {
         (select count(*)::text from app.routine_telebirr_runtime_events) as events`,
     );
     expect(transport.rows).toEqual([{ active: false, events: '0' }]);
+  });
+
+  it('expires Owner browser sessions by human activity and the original Auth sign-in', async () => {
+    const sessionId = randomUUID();
+    const oldSessionId = randomUUID();
+    const sql = 'select app.owner_browser_session($1::uuid,$2::uuid,$3::text) as session';
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query(
+        `insert into auth.sessions (id,user_id,created_at) values
+          ($1::uuid,$3::uuid,now()),
+          ($2::uuid,$3::uuid,now() - interval '8 days')`,
+        [sessionId, oldSessionId, ownerAuthUserId],
+      );
+      const privileges = await postCutoverClient.query<{
+        runtime_execute: boolean;
+        runtime_table_denied: boolean;
+        public_denied: boolean;
+      }>(`
+        select has_function_privilege('fetanagent_owner_control_runtime',
+          'app.owner_browser_session(uuid,uuid,text)', 'execute') as runtime_execute,
+          not has_table_privilege('fetanagent_owner_control_runtime',
+            'app.owner_browser_sessions', 'select,insert,update,delete') as runtime_table_denied,
+          not has_function_privilege('authenticated',
+            'app.owner_browser_session(uuid,uuid,text)', 'execute') as public_denied
+      `);
+      expect(privileges.rows).toEqual([
+        {
+          runtime_execute: true,
+          runtime_table_denied: true,
+          public_denied: true,
+        },
+      ]);
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const started = await postCutoverClient.query<{
+        session: { absoluteExpiresAt: string; idleExpiresAt: string };
+      }>(sql, [ownerAuthUserId, sessionId, 'start']);
+      expect(Date.parse(started.rows[0]!.session.idleExpiresAt)).toBeGreaterThan(Date.now());
+
+      await postCutoverClient.query('reset session authorization');
+      await postCutoverClient.query(
+        `update app.owner_browser_sessions set last_activity_at = now() - interval '1 hour'
+          where session_id = $1::uuid`,
+        [sessionId],
+      );
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const checked = await postCutoverClient.query<{
+        session: { idleExpiresAt: string };
+      }>(sql, [ownerAuthUserId, sessionId, 'check']);
+      const touched = await postCutoverClient.query<{
+        session: { idleExpiresAt: string };
+      }>(sql, [ownerAuthUserId, sessionId, 'touch']);
+      expect(Date.parse(touched.rows[0]!.session.idleExpiresAt)).toBeGreaterThan(
+        Date.parse(checked.rows[0]!.session.idleExpiresAt),
+      );
+
+      await postCutoverClient.query('savepoint absolute_expiry');
+      await expect(
+        postCutoverClient.query(sql, [ownerAuthUserId, oldSessionId, 'start']),
+      ).rejects.toMatchObject({ code: '42501' });
+      await postCutoverClient.query('rollback to savepoint absolute_expiry');
+
+      await postCutoverClient.query('reset session authorization');
+      await postCutoverClient.query(
+        `update app.owner_browser_sessions set last_activity_at = now() - interval '12 hours'
+          where session_id = $1::uuid`,
+        [sessionId],
+      );
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      await postCutoverClient.query('savepoint idle_expiry');
+      await expect(
+        postCutoverClient.query(sql, [ownerAuthUserId, sessionId, 'touch']),
+      ).rejects.toMatchObject({ code: '42501' });
+      await postCutoverClient.query('rollback to savepoint idle_expiry');
+      await postCutoverClient.query('savepoint no_replay');
+      await expect(
+        postCutoverClient.query(sql, [ownerAuthUserId, sessionId, 'start']),
+      ).rejects.toMatchObject({ code: '42501' });
+      await postCutoverClient.query('rollback to savepoint no_replay');
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
   });
 
   it('returns only read-only operational facts to the active Owner runtime', async () => {

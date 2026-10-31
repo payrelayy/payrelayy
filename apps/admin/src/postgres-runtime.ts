@@ -27,8 +27,10 @@ import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pair
 import { PostgresOwnerRoutineTelebirrPairing } from './owner-routine-telebirr-pairing.js';
 import { PostgresOwnerRoutineTelebirrReceipt } from './owner-routine-telebirr-receipt.js';
 import { PostgresOwnerTelebirrShadowVerificationStatus } from './owner-telebirr-shadow-verification-status.js';
+import { PostgresOwnerBrowserSessions } from './owner-browser-session.js';
 
 export interface OwnerControlPostgresRuntime {
+  readonly browserSessions: Pick<PostgresOwnerBrowserSessions, 'run'>;
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
@@ -136,6 +138,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     current_user = 'fetanagent_owner_control_runtime' as exact_runtime,
     session_user = 'fetanagent_owner_control_runtime' as exact_session,
     has_schema_privilege(current_user, 'app', 'usage') as app_usage,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.owner_browser_session(uuid,uuid,text)')::oid,
+      'execute'), true) as owner_browser_session_allowed,
     not has_schema_privilege(current_user, 'app', 'create') as app_create_denied,
     exists (
       select 1
@@ -402,6 +407,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
       select count(*) = 36
+        + (to_regprocedure('app.owner_browser_session(uuid,uuid,text)') is not null)::integer
         + has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')::integer
         + has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')::integer
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false)::integer
@@ -539,6 +545,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_public_support_contact()')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.owner_browser_session(uuid,uuid,text)')::oid, 0::oid)
           ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
@@ -637,6 +644,9 @@ export async function createOwnerControlPostgresRuntime(
 
   let closed = false;
   return {
+    browserSessions: new PostgresOwnerBrowserSessions({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
     assessments: new PostgresOwnerDryRunFixtureAssessments({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),

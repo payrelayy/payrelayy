@@ -14,6 +14,7 @@ import {
 } from './owner-manual-payments.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
+import { registerWithdrawalContactRoutes } from './withdrawal-contact-routes.js';
 import {
   OwnerPaymentMethodsConflictError,
   OwnerPaymentMethodsRejectedError,
@@ -548,6 +549,11 @@ export function buildOwnerControlApp(
 
   registerSupportContactRoutes(app, {
     supportContact: dependencies.runtime.supportContact,
+    ownerSubject,
+    mutationOrigins: privatePilotMutationOrigins,
+  });
+  registerWithdrawalContactRoutes(app, {
+    withdrawalContact: dependencies.runtime.withdrawalContact,
     ownerSubject,
     mutationOrigins: privatePilotMutationOrigins,
   });

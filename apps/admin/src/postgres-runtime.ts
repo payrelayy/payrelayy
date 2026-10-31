@@ -22,6 +22,7 @@ import { PostgresOwnerReceiverSmsOldPayments } from './owner-receiver-sms-old-pa
 import { PostgresOwnerManualPayments } from './owner-manual-payments.js';
 import { PostgresOwnerTelebirrTransactions } from './owner-telebirr-transactions.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
+import { PostgresOwnerWithdrawalContact } from './owner-withdrawal-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
 import { PostgresOwnerRoutineTelebirrPairing } from './owner-routine-telebirr-pairing.js';
@@ -60,6 +61,8 @@ export interface OwnerControlPostgresRuntime {
   readonly telebirrTransactions?: Pick<PostgresOwnerTelebirrTransactions, 'list'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
+  readonly withdrawalContact?:
+    Pick<PostgresOwnerWithdrawalContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
@@ -323,6 +326,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 'execute'), true) as support_contact_write_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_public_support_contact()')::oid, 'execute'), true) as support_contact_public_projection_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_withdrawal_contact(uuid)')::oid, 'execute'), true) as withdrawal_contact_read_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_withdrawal_contact(uuid,text,integer)')::oid, 'execute'), true) as withdrawal_contact_write_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_public_withdrawal_contact()')::oid, 'execute'), true) as withdrawal_contact_public_projection_allowed,
     (select count(*) = 4 and bool_and(
         routine.prosecdef and routine.proowner = 'postgres'::regrole
         and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
@@ -468,6 +474,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
+        + (to_regprocedure('app.get_owner_withdrawal_contact(uuid)') is not null)::integer
+        + (to_regprocedure('app.set_owner_withdrawal_contact(uuid,text,integer)') is not null)::integer
+        + (to_regprocedure('app.get_public_withdrawal_contact()') is not null)::integer
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -545,6 +554,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_public_support_contact()')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_withdrawal_contact(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.set_owner_withdrawal_contact(uuid,text,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_public_withdrawal_contact()')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.owner_browser_session(uuid,uuid,text)')::oid, 0::oid)
           ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
@@ -702,6 +714,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     supportContact: new PostgresOwnerSupportContact({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    withdrawalContact: new PostgresOwnerWithdrawalContact({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     companionLookup: config.companionDevicePairing.configured

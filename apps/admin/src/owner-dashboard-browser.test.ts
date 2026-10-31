@@ -264,6 +264,12 @@ function ownerBrowserHarness(
     save: element('#support-contact-save'),
     clear: element('#support-contact-clear'),
   });
+  element('#withdrawal-contact-form').elements = namedElements({
+    telegramUsername: element('#withdrawal-contact-username'),
+    confirmation: element('#withdrawal-contact-confirmation'),
+    save: element('#withdrawal-contact-save'),
+    clear: element('#withdrawal-contact-clear'),
+  });
   element('#receiver-form').elements = namedElements({
     accountHolderName: element('#receiver-holder-name'),
     accountReference: element('#receiver-account-reference'),
@@ -550,6 +556,94 @@ describe('Owner full payment identifiers', () => {
   });
 });
 
+describe('Owner manual withdrawal contact', () => {
+  const launch = {
+    withdrawalContact: { telegramUsername: 'balem18', revision: 0, updatedAt: null },
+  };
+  const changed = {
+    withdrawalContact: {
+      telegramUsername: 'next_handler',
+      revision: 1,
+      updatedAt: '2026-11-01T00:00:00.000Z',
+    },
+  };
+
+  it('loads the launch contact and saves an approved edit independently of Support', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/withdrawal-contact'
+          ? response(200, init.method === 'POST' ? changed : launch)
+          : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#withdrawal-contact-saved').textContent).toContain('@balem18');
+    expect(browser.element('#withdrawal-contact-link').href).toBe('https://t.me/balem18');
+    expect(browser.element('#withdrawal-contact-save').disabled).toBe(true);
+    browser.element('#withdrawal-contact-username').value = '@Next_Handler';
+    await browser.element('#withdrawal-contact-username').listeners.get('input')?.({
+      preventDefault() {},
+    });
+    await browser.call('saveWithdrawalContact');
+    expect(browser.element('#withdrawal-contact-feedback').textContent).toContain('confirm');
+    browser.element('#withdrawal-contact-confirmation').checked = true;
+    await browser.element('#withdrawal-contact-confirmation').listeners.get('change')?.({
+      preventDefault() {},
+    });
+    await browser.element('#withdrawal-contact-form').listeners.get('submit')?.({
+      preventDefault() {},
+    });
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/withdrawal-contact' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      telegramUsername: 'next_handler',
+      expectedRevision: 0,
+    });
+    expect(
+      browser.fetchCalls.some(
+        ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+      ),
+    ).toBe(false);
+    expect(browser.element('#withdrawal-contact-saved').textContent).toContain('@next_handler');
+    expect(browser.element('#withdrawal-contact-feedback').textContent).toContain(
+      'Withdraw now opens',
+    );
+  });
+
+  it('keeps disable as an unsaved draft until the Owner confirms and handles a stale edit', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/withdrawal-contact'
+          ? response(init.method === 'POST' ? 409 : 200, launch)
+          : undefined,
+    });
+    await browser.signIn();
+    await browser.element('#withdrawal-contact-clear').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    expect(browser.element('#withdrawal-contact-saved').textContent).toContain('@balem18');
+    expect(browser.element('#withdrawal-contact-save').disabled).toBe(true);
+    browser.element('#withdrawal-contact-confirmation').checked = true;
+    await browser.element('#withdrawal-contact-confirmation').listeners.get('change')?.({
+      preventDefault() {},
+    });
+    await browser.element('#withdrawal-contact-form').listeners.get('submit')?.({
+      preventDefault() {},
+    });
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/withdrawal-contact' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      telegramUsername: null,
+      expectedRevision: 0,
+    });
+    expect(browser.element('#withdrawal-contact-feedback').textContent).toContain(
+      'changed elsewhere',
+    );
+    expect(browser.element('#withdrawal-contact-save').disabled).toBe(true);
+  });
+});
+
 describe('Owner workspace navigation', () => {
   it('shows a bounded live status snapshot with distinct TeleBirr lookup state', async () => {
     const browser = ownerBrowserHarness(503, {
@@ -773,7 +867,7 @@ describe('Owner workspace navigation', () => {
       submitted: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
       methods: ['payment-methods-title', 'receiver-title'],
       players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
-      system: ['routine-processing-title', 'support-contact-title'],
+      system: ['routine-processing-title', 'support-contact-title', 'withdrawal-contact-title'],
       advanced: [
         'kemerbet-companion-title',
         'execution-readiness-title',

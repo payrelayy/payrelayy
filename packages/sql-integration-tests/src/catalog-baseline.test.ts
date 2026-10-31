@@ -205,6 +205,7 @@ const expiredSmsQueueOwnerHandoffMigrationName =
 const ownerSubmittedPaymentsFastListMigrationName =
   '20261031105752_owner_submitted_payments_fast_list.sql';
 const ownerBrowserIdleSessionMigrationName = '20261101013000_owner_browser_idle_session.sql';
+const manualWithdrawalContactMigrationName = '20261101013001_manual_withdrawal_contact.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -695,7 +696,8 @@ describe('disposable SQL migration baseline', () => {
         name !== routineModalConfirmationMigrationName &&
         name !== expiredSmsQueueOwnerHandoffMigrationName &&
         name !== ownerSubmittedPaymentsFastListMigrationName &&
-        name !== ownerBrowserIdleSessionMigrationName,
+        name !== ownerBrowserIdleSessionMigrationName &&
+        name !== manualWithdrawalContactMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10494,6 +10496,16 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerBrowserIdleSessionMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, manualWithdrawalContactMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [manualWithdrawalContactMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10516,6 +10528,86 @@ describe('100 ETB production deposit policy cutover', () => {
 
   afterAll(async () => {
     await postCutoverClient?.end();
+  });
+
+  it('keeps the manual withdrawal contact Owner-controlled and outside financial switches', async () => {
+    const privileges = await postCutoverClient.query<{
+      readonly owner_read: boolean;
+      readonly owner_write: boolean;
+      readonly public_read: boolean;
+      readonly anon_read: boolean;
+      readonly anon_table: boolean;
+    }>(`select
+      has_function_privilege('fetanagent_owner_control', 'app.get_owner_withdrawal_contact(uuid)', 'execute') as owner_read,
+      has_function_privilege('fetanagent_owner_control', 'app.set_owner_withdrawal_contact(uuid,text,integer)', 'execute') as owner_write,
+      has_function_privilege('fetanagent_owner_control', 'app.get_public_withdrawal_contact()', 'execute') as public_read,
+      has_function_privilege('anon', 'app.get_public_withdrawal_contact()', 'execute') as anon_read,
+      has_table_privilege('anon', 'app.private_withdrawal_contact', 'select') as anon_table`);
+    expect(privileges.rows).toEqual([
+      {
+        owner_read: true,
+        owner_write: true,
+        public_read: true,
+        anon_read: false,
+        anon_table: false,
+      },
+    ]);
+
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      const before = await postCutoverClient.query(
+        'select * from app.get_owner_withdrawal_contact($1::uuid)',
+        [ownerAuthUserId],
+      );
+      expect(before.rows).toEqual([
+        { telegram_username: 'balem18', revision: 0, updated_at: null },
+      ]);
+      const changed = await postCutoverClient.query(
+        'select * from app.set_owner_withdrawal_contact($1::uuid,$2::text,$3::integer)',
+        [ownerAuthUserId, 'another_handler', 0],
+      );
+      expect(changed.rows).toEqual([
+        {
+          telegram_username: 'another_handler',
+          revision: 1,
+          updated_at: expect.any(Date),
+        },
+      ]);
+      expect(
+        (await postCutoverClient.query('select * from app.get_public_withdrawal_contact()')).rows,
+      ).toEqual([{ telegram_username: 'another_handler' }]);
+      await postCutoverClient.query('reset role');
+      expect(
+        (
+          await postCutoverClient.query(`
+        select revision,previous_username,telegram_username,changed_by_admin_id
+          from app.private_withdrawal_contact_revisions
+      `)
+        ).rows,
+      ).toEqual([
+        {
+          revision: 1,
+          previous_username: 'balem18',
+          telegram_username: 'another_handler',
+          changed_by_admin_id: postCutoverOwnerAdminId,
+        },
+      ]);
+      expect(
+        (
+          await postCutoverClient.query(`
+        select feature_key,mode from app.feature_switches
+         where feature_key in ('withdrawal_collection','withdrawal_validation')
+         order by feature_key
+      `)
+        ).rows,
+      ).toEqual([
+        { feature_key: 'withdrawal_collection', mode: 'disabled' },
+        { feature_key: 'withdrawal_validation', mode: 'disabled' },
+      ]);
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
   });
 
   it('records the new active Owner policy while preserving the complete migration order', async () => {

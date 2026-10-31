@@ -100,6 +100,13 @@ export const OWNER_CONTROL_GROUPS = [
         view: 'system',
         section: 'support-contact-title',
       },
+      {
+        label: 'Manual withdrawal contact',
+        description: 'Choose who customers reach when they tap Withdraw in Telegram.',
+        effect: 'Changes public contact',
+        view: 'system',
+        section: 'withdrawal-contact-title',
+      },
     ],
   },
   {
@@ -424,6 +431,39 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
           </form>
           <p class="request-meta" id="support-contact-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+        </section>
+        <section class="review-section" aria-labelledby="withdrawal-contact-title">
+          <div class="panel-heading">
+            <h2 id="withdrawal-contact-title">Manual withdrawal contact</h2>
+            <button class="secondary" id="withdrawal-contact-refresh" type="button">Refresh saved contact</button>
+          </div>
+          <p class="receipt-label">
+            Customers with a saved Player ID can tap Withdraw in the Telegram bot to open this
+            person's chat. This only connects them to a person; no withdrawal is submitted or paid.
+          </p>
+          <p class="request-meta" id="withdrawal-contact-saved">Sign in to load the saved contact.</p>
+          <form id="withdrawal-contact-form" autocomplete="off" novalidate>
+            <label for="withdrawal-contact-username">Withdrawal handler's Telegram username (optional @)</label>
+            <input id="withdrawal-contact-username" name="telegramUsername" type="text"
+              maxlength="33" autocomplete="off" spellcheck="false" autocapitalize="none"
+              aria-describedby="withdrawal-contact-help withdrawal-contact-preview" />
+            <p class="receipt-label" id="withdrawal-contact-help">
+              Use 5–32 letters, digits, or underscores. Leave blank to disable the link.
+              Check the preview yourself before approving it; FetanAgent does not verify who owns it.
+            </p>
+            <p class="request-meta" id="withdrawal-contact-preview">No withdrawal contact will be published.</p>
+            <a id="withdrawal-contact-link" target="_blank" rel="noopener noreferrer" hidden>Check Telegram preview</a>
+            <label class="confirmation-row" for="withdrawal-contact-confirmation">
+              <input id="withdrawal-contact-confirmation" name="confirmation" type="checkbox" />
+              I checked the preview, control this username, and approve making it the withdrawal
+              contact; if blank, I approve disabling the link.
+            </label>
+            <div class="actions">
+              <button id="withdrawal-contact-save" type="submit" disabled>Save withdrawal contact</button>
+              <button class="secondary" id="withdrawal-contact-clear" type="button">Clear draft / disable link</button>
+            </div>
+          </form>
+          <p class="request-meta" id="withdrawal-contact-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
         </section>
 
         <section class="review-section" aria-labelledby="player-review-title">
@@ -1080,6 +1120,7 @@ section[aria-labelledby="routine-processing-title"] { order: 3; }
 section[aria-labelledby="kemerbet-companion-title"],
 section[aria-labelledby="kemerbet-readiness-cohort-title"] { order: 4; }
 section[aria-labelledby="support-contact-title"],
+section[aria-labelledby="withdrawal-contact-title"],
 section[aria-labelledby="deposit-intake-title"] { order: 5; }
 .owner-control-directory { order: 3; }
 .owner-control-directory > .receipt-label { margin-top: -8px; }
@@ -1222,8 +1263,8 @@ const ownerViews = {
   },
   system: {
     title: 'System',
-    description: 'Check TeleBirr policy and customer support.',
-    sections: ['routine-processing-title', 'support-contact-title'],
+    description: 'Check TeleBirr policy and customer contact settings.',
+    sections: ['routine-processing-title', 'support-contact-title', 'withdrawal-contact-title'],
   },
   advanced: {
     title: 'Advanced tools',
@@ -1324,6 +1365,16 @@ const supportContactSaved = document.querySelector('#support-contact-saved');
 const supportContactPreview = document.querySelector('#support-contact-preview');
 const supportContactLink = document.querySelector('#support-contact-link');
 const supportContactFeedback = document.querySelector('#support-contact-feedback');
+const withdrawalContactForm = document.querySelector('#withdrawal-contact-form');
+const withdrawalContactUsername = document.querySelector('#withdrawal-contact-username');
+const withdrawalContactConfirmation = document.querySelector('#withdrawal-contact-confirmation');
+const withdrawalContactSave = document.querySelector('#withdrawal-contact-save');
+const withdrawalContactClear = document.querySelector('#withdrawal-contact-clear');
+const withdrawalContactRefresh = document.querySelector('#withdrawal-contact-refresh');
+const withdrawalContactSaved = document.querySelector('#withdrawal-contact-saved');
+const withdrawalContactPreview = document.querySelector('#withdrawal-contact-preview');
+const withdrawalContactLink = document.querySelector('#withdrawal-contact-link');
+const withdrawalContactFeedback = document.querySelector('#withdrawal-contact-feedback');
 const notice = document.querySelector('#notice');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
@@ -1472,6 +1523,12 @@ let supportContactRequest = 0;
 let supportContactLoading = false;
 let supportContactSaving = false;
 let supportContactDirty = false;
+let withdrawalContactRevision;
+let withdrawalContactSavedUsername;
+let withdrawalContactRequest = 0;
+let withdrawalContactLoading = false;
+let withdrawalContactSaving = false;
+let withdrawalContactDirty = false;
 let eligibleCbeUpgradeReceiver;
 let loadedReceiverHistory = [];
 let loadedReceiverHistoryReady = false;
@@ -2158,6 +2215,200 @@ async function saveSupportContact() {
     if (current()) {
       supportContactSaving = false;
       renderSupportContactPreview();
+    }
+  }
+}
+
+function setWithdrawalContactFeedback(message) {
+  withdrawalContactFeedback.textContent = message;
+  withdrawalContactFeedback.hidden = !message;
+}
+
+function updateWithdrawalContactControls() {
+  setBusy(withdrawalContactForm, withdrawalContactSaving);
+  withdrawalContactRefresh.disabled = !accessToken || withdrawalContactLoading || withdrawalContactSaving;
+  withdrawalContactSave.disabled = !accessToken || withdrawalContactLoading || withdrawalContactSaving ||
+    withdrawalContactRevision === undefined || !withdrawalContactConfirmation.checked ||
+    normalizedSupportUsername(withdrawalContactUsername.value) === undefined;
+}
+
+function renderWithdrawalContactPreview() {
+  const username = normalizedSupportUsername(withdrawalContactUsername.value);
+  withdrawalContactLink.hidden = !username;
+  withdrawalContactLink.removeAttribute('href');
+  withdrawalContactLink.textContent = '';
+  withdrawalContactPreview.textContent = username === undefined
+    ? 'Invalid username: use 5–32 ASCII letters, digits, or underscores, with an optional @.'
+    : username === null ? 'The withdrawal link will be disabled.' : 'Telegram chat preview:';
+  if (username) {
+    const link = 'https://t.me/' + username;
+    withdrawalContactLink.href = link;
+    withdrawalContactLink.textContent = link;
+  }
+  updateWithdrawalContactControls();
+}
+
+function clearWithdrawalContact() {
+  withdrawalContactRequest += 1;
+  withdrawalContactRevision = undefined;
+  withdrawalContactSavedUsername = undefined;
+  withdrawalContactLoading = false;
+  withdrawalContactSaving = false;
+  withdrawalContactDirty = false;
+  withdrawalContactUsername.value = '';
+  withdrawalContactConfirmation.checked = false;
+  withdrawalContactSaved.textContent = 'Sign in to load the saved contact.';
+  setWithdrawalContactFeedback('');
+  renderWithdrawalContactPreview();
+}
+
+function validWithdrawalContact(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).join(',') !== 'withdrawalContact') return false;
+  const value = payload.withdrawalContact;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'revision,telegramUsername,updatedAt' ||
+      !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+      (value.telegramUsername !== null && (typeof value.telegramUsername !== 'string' ||
+        !/^[a-z0-9_]{5,32}$/.test(value.telegramUsername)))) return false;
+  if (value.revision === 0) return value.updatedAt === null;
+  return typeof value.updatedAt === 'string' &&
+    Number.isFinite(Date.parse(value.updatedAt)) &&
+    new Date(value.updatedAt).toISOString() === value.updatedAt;
+}
+
+function renderSavedWithdrawalContact(value) {
+  withdrawalContactRevision = value.revision;
+  withdrawalContactSavedUsername = value.telegramUsername;
+  withdrawalContactSaved.textContent = 'Last confirmed saved contact: ' +
+    (value.telegramUsername === null ? 'not configured (disabled)' : '@' + value.telegramUsername) +
+    '. Revision ' + value.revision +
+    (value.updatedAt === null ? ' (launch setting).' : '. Updated ' + new Date(value.updatedAt).toLocaleString() + '.');
+}
+
+async function withdrawalContactRequestForSession(generation, init) {
+  await ensureFreshOwnerAccessToken();
+  if (generation !== ownerAuthGeneration || !accessToken) throw new Error('signed_out');
+  const request = await beginDeadlineFetch('/v1/owner/withdrawal-contact', {
+    ...init,
+    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + accessToken },
+  }, OWNER_API_REQUEST_TIMEOUT_MS);
+  if (generation !== ownerAuthGeneration || !accessToken) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    throw new Error('signed_out');
+  }
+  if (request.response.status !== 200) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    if (request.response.status === 401 || request.response.status === 403) {
+      signOut('Your session is unavailable or is not an active Owner.');
+      throw new Error('signed_out');
+    }
+    return { status: request.response.status };
+  }
+  const payload = await deadlineBoundResponse(request.response, request.deadline).json();
+  return { status: 200, payload };
+}
+
+async function loadWithdrawalContact() {
+  if (!accessToken || withdrawalContactLoading || withdrawalContactSaving) return;
+  const generation = ownerAuthGeneration;
+  const requestId = ++withdrawalContactRequest;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === withdrawalContactRequest && !!accessToken;
+  withdrawalContactLoading = true;
+  withdrawalContactRevision = undefined;
+  withdrawalContactConfirmation.checked = false;
+  setWithdrawalContactFeedback('Loading saved withdrawal contact…');
+  updateWithdrawalContactControls();
+  try {
+    const result = await withdrawalContactRequestForSession(generation, { method: 'GET' });
+    if (!current()) return;
+    if (result.status !== 200 || !validWithdrawalContact(result.payload)) throw new Error('unavailable');
+    renderSavedWithdrawalContact(result.payload.withdrawalContact);
+    if (!withdrawalContactDirty) {
+      withdrawalContactUsername.value = result.payload.withdrawalContact.telegramUsername ?? '';
+      withdrawalContactConfirmation.checked = false;
+    }
+    setWithdrawalContactFeedback(withdrawalContactDirty
+      ? 'Saved contact refreshed. Your unsaved draft has been kept; review it before saving.'
+      : 'Saved withdrawal contact loaded.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      setWithdrawalContactFeedback('Withdrawal contact is temporarily unavailable. Refresh saved contact before saving.');
+    }
+  } finally {
+    if (current()) {
+      withdrawalContactLoading = false;
+      renderWithdrawalContactPreview();
+    }
+  }
+}
+
+async function saveWithdrawalContact() {
+  if (!accessToken || withdrawalContactLoading || withdrawalContactSaving) return;
+  const username = normalizedSupportUsername(withdrawalContactUsername.value);
+  if (username === undefined) {
+    setWithdrawalContactFeedback('Invalid username. Enter 5–32 ASCII letters, digits, or underscores, not a URL.');
+    return;
+  }
+  if (!withdrawalContactConfirmation.checked) {
+    setWithdrawalContactFeedback('Check the preview and confirm that you approve publishing or disabling this contact.');
+    return;
+  }
+  if (withdrawalContactRevision === undefined) {
+    setWithdrawalContactFeedback('Refresh saved contact before saving.');
+    return;
+  }
+  const generation = ownerAuthGeneration;
+  const requestId = ++withdrawalContactRequest;
+  const expectedRevision = withdrawalContactRevision;
+  const previousUsername = withdrawalContactSavedUsername;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === withdrawalContactRequest && !!accessToken;
+  withdrawalContactSaving = true;
+  setWithdrawalContactFeedback('Saving withdrawal contact…');
+  updateWithdrawalContactControls();
+  try {
+    const result = await withdrawalContactRequestForSession(generation, {
+      method: 'POST', body: JSON.stringify({ telegramUsername: username, expectedRevision }),
+    });
+    if (!current()) return;
+    if (result.status === 400) {
+      setWithdrawalContactFeedback('The username was not accepted. Check the username and your confirmation, then try again.');
+      return;
+    }
+    if (result.status === 409) {
+      withdrawalContactRevision = undefined;
+      withdrawalContactConfirmation.checked = false;
+      setWithdrawalContactFeedback('The saved contact changed elsewhere. Refresh saved contact, review your draft, and save again.');
+      return;
+    }
+    if (result.status !== 200 || !validWithdrawalContact(result.payload) ||
+        result.payload.withdrawalContact.telegramUsername !== username ||
+        result.payload.withdrawalContact.revision < expectedRevision ||
+        (result.payload.withdrawalContact.revision === expectedRevision && username !== previousUsername)) {
+      throw new Error('unconfirmed');
+    }
+    renderSavedWithdrawalContact(result.payload.withdrawalContact);
+    withdrawalContactDirty = false;
+    withdrawalContactUsername.value = username ?? '';
+    withdrawalContactConfirmation.checked = false;
+    setWithdrawalContactFeedback(username === null
+      ? 'Saved. The manual withdrawal link is disabled.'
+      : 'Saved. Withdraw now opens the Telegram chat for @' + username + '.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      withdrawalContactRevision = undefined;
+      withdrawalContactConfirmation.checked = false;
+      setWithdrawalContactFeedback('Saving could not be confirmed. Refresh saved contact before retrying; your draft has been kept.');
+    }
+  } finally {
+    if (current()) {
+      withdrawalContactSaving = false;
+      renderWithdrawalContactPreview();
     }
   }
 }
@@ -3464,6 +3715,7 @@ function signOut(message = 'Signed out.') {
   clearReceivers();
   clearPaymentMethods();
   clearSupportContact();
+  clearWithdrawalContact();
   clearKemerbetAgentProfiles();
   clearCompanionDevicePairingPackage();
   companionDevicePairingConfirmation.checked = false;
@@ -7803,7 +8055,7 @@ async function loadOwnerDashboardAfterAuthentication(successNotice) {
   updateRoutineReceiptAvailability();
   setNotice(successNotice);
   try {
-    await Promise.all([loadOwnerPlayerQueues(), loadSupportContact()]);
+    await Promise.all([loadOwnerPlayerQueues(), loadSupportContact(), loadWithdrawalContact()]);
   } catch (error) {
     // Authentication and dashboard hydration are separate boundaries. A transient read failure
     // must not discard a valid, rotating Owner session or misreport it as a password failure.
@@ -7966,6 +8218,27 @@ supportContactClear.addEventListener('click', () => {
 supportContactForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveSupportContact();
+});
+withdrawalContactRefresh.addEventListener('click', loadWithdrawalContact);
+withdrawalContactUsername.addEventListener('input', () => {
+  withdrawalContactDirty = true;
+  withdrawalContactConfirmation.checked = false;
+  setWithdrawalContactFeedback('');
+  renderWithdrawalContactPreview();
+});
+withdrawalContactConfirmation.addEventListener('change', updateWithdrawalContactControls);
+withdrawalContactClear.addEventListener('click', () => {
+  if (withdrawalContactSaving) return;
+  withdrawalContactUsername.value = '';
+  withdrawalContactDirty = true;
+  withdrawalContactConfirmation.checked = false;
+  setWithdrawalContactFeedback('Draft cleared. Confirm and save to disable the withdrawal link. Nothing has been saved yet.');
+  renderWithdrawalContactPreview();
+  withdrawalContactConfirmation.focus();
+});
+withdrawalContactForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await saveWithdrawalContact();
 });
 kemerbetReadinessCohortConfirmation.addEventListener(
   'change',

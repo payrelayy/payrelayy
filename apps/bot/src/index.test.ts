@@ -711,7 +711,10 @@ describe('Telegram admission, private action, and ingress composition', () => {
         buttons = options?.reply_markup?.buttons ?? [];
       },
     });
-    expect(buttons).toEqual([{ text: '💬 Support', url: 'https://t.me/help_team' }]);
+    expect(buttons).toEqual([
+      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
+      { text: '💬 Support', url: 'https://t.me/help_team' },
+    ]);
   });
 
   it('adds Support beside a remaining status action when its Deposit action is unavailable', async () => {
@@ -762,14 +765,17 @@ describe('Telegram admission, private action, and ingress composition', () => {
       callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
       selectedPlayerId: 'PLAYER-DEMO-42',
     };
-    let buttons: { text: string; callbackData: string }[] = [];
+    let buttons: { text: string; callbackData?: string; url?: string }[] = [];
     await runtime.messageHandler!({
       ...messageContext('/menu'),
       reply: async (_text: string, options?: { reply_markup?: { buttons: typeof buttons } }) => {
         buttons = options?.reply_markup?.buttons ?? [];
       },
     });
-    expect(buttons.map((button) => button.text)).toEqual(['💰 Deposit']);
+    expect(buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
+    ]);
     expect(runtime.commandUpdates).toEqual([
       {
         kind: 'set',

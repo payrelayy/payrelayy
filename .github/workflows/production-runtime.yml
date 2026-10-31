@@ -302,6 +302,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-expired-queue-owner-handoff-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-owner-submitted-cleanup-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-support-outage-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-private-companion-download-helper-rotation-v1.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets
@@ -455,6 +456,7 @@ jobs:
           OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON: ${{ vars.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON }}
           DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          OWNER_COMPANION_RELEASE_READ_TOKEN: ${{ secrets.OWNER_COMPANION_RELEASE_READ_TOKEN }}
           OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET: ${{ secrets.OWNER_SMS_DISPLAY_ENCRYPTION_MASTER_SECRET }}
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
           ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
@@ -601,6 +603,10 @@ jobs:
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY" =~ ^[A-Za-z0-9_-]{40,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$OWNER_COMPANION_RELEASE_READ_TOKEN" =~ ^github_pat_[A-Za-z0-9_]{40,255}$ ]] || {
+            echo '::error::The Owner Companion release read token is missing or malformed.' >&2
+            exit 1
+          }
           [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" == 'telebirr-assignment-production-v1' ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
@@ -688,6 +694,7 @@ jobs:
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             "fetanagent_telebirr_device_state_runtime$runtime_role_suffix" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
+          printf '%s\n' "$OWNER_COMPANION_RELEASE_READ_TOKEN" >"$secret_dir/owner-companion-release-read-token"
           printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
           printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/api-action-transport-hmac"
           printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/bot-action-transport-hmac"
@@ -1388,7 +1395,7 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             "$RUNNER_TEMP/release/compose.production.inert-maintenance.yaml" \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,receiver-sms-owner-display-encryption-master,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-companion-release-read-token,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,receiver-sms-owner-display-encryption-master,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
             "$SECRET_DIR"/bot-screenshot-reference-model-access-key
           )
           case "$REQUESTED_MODE" in

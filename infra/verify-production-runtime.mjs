@@ -576,8 +576,12 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 7);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 7);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 33);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 33);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 34);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 34);
+assert.match(
+  secrets,
+  /owner_companion_release_read_token:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-companion-release-read-token/u,
+);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -597,6 +601,11 @@ assert.match(
   workflow,
   /OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: \$\{\{ secrets\.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL \}\}/u,
 );
+assert.match(
+  workflow,
+  /OWNER_COMPANION_RELEASE_READ_TOKEN: \$\{\{ secrets\.OWNER_COMPANION_RELEASE_READ_TOKEN \}\}/u,
+);
+assert.match(workflow, /owner-companion-release-read-token/u);
 assert.match(
   workflow,
   /TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256: \$\{\{ vars\.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 \}\}/u,
@@ -2384,7 +2393,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='5db6bb64582ab1a1fc03d85cb5362b8fe7d7b932'",
   "readonly PREDECESSOR_SHA256='415d6bc2a7565225bdb60e690f9655023ae7a0d73eb6a99c3660cc51f22a00d1'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='25bacc11e4195c76e181b78cb800b69da286e42419aee64211f86e0484ff141a'",
   "readonly SOURCE_REVIEW='support-outage-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2397,7 +2406,7 @@ assert.doesNotMatch(supportOutageRotation, /\b(?:docker|psql|rm|sed|chmod|chown)
 for (const value of [
   '5db6bb64582ab1a1fc03d85cb5362b8fe7d7b932',
   '415d6bc2a7565225bdb60e690f9655023ae7a0d73eb6a99c3660cc51f22a00d1',
-  helperDigest,
+  '25bacc11e4195c76e181b78cb800b69da286e42419aee64211f86e0484ff141a',
   'ROTATE EXACT PRODUCTION V2 SUPPORT OUTAGE HELPER V1',
 ]) {
   assert.ok(supportOutageRunbook.includes(value));
@@ -2406,6 +2415,29 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-support-outage-helper-rotation-v1\.sh/u,
+  );
+}
+const privateCompanionDownloadRotation = await read(
+  'infra/operations/fetanagent-production-v2-private-companion-download-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='83a93f54f6684f4ca22bfdaa3c715a64a12a1d6d'",
+  "readonly PREDECESSOR_SHA256='25bacc11e4195c76e181b78cb800b69da286e42419aee64211f86e0484ff141a'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='private-companion-download-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 PRIVATE COMPANION DOWNLOAD HELPER V1',
+]) {
+  assert.ok(privateCompanionDownloadRotation.includes(value));
+}
+assert.doesNotMatch(privateCompanionDownloadRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-private-companion-download-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

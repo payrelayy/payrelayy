@@ -63,6 +63,7 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
   OWNER_SMS_DISPLAY_ENCRYPTION_MASTER: '/run/secrets/owner_sms_display_encryption_master',
   OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: '/run/secrets/owner_control_supabase_publishable_key',
   OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: '/run/secrets/owner_routine_enrollment_signer_pkcs8',
+  OWNER_COMPANION_RELEASE_READ_TOKEN: '/run/secrets/owner_companion_release_read_token',
 };
 
 export interface OwnerControlDatabaseConnection {
@@ -83,6 +84,7 @@ export type OwnerControlRuntimeConfig =
       readonly companionDevicePairing: undefined;
       readonly cbeBirrLookupKeyMaterial: undefined;
       readonly cbeBirrReceiverV2RotationEnabled: false;
+      readonly companionReleaseReadToken: undefined;
       readonly connection: undefined;
       readonly deploymentTarget: undefined;
       readonly devicePairing: undefined;
@@ -119,6 +121,7 @@ export type OwnerControlRuntimeConfig =
             readonly masterProfile: OwnerCbeBirrLookupProfile;
           };
       readonly cbeBirrReceiverV2RotationEnabled: boolean;
+      readonly companionReleaseReadToken?: string | undefined;
       readonly connection: OwnerControlDatabaseConnection;
       readonly deploymentTarget: OwnerControlDeploymentTarget;
       readonly devicePairing:
@@ -300,6 +303,7 @@ export function loadOwnerControlConfig(
         companionDevicePairing: undefined,
         cbeBirrLookupKeyMaterial: undefined,
         cbeBirrReceiverV2RotationEnabled: false,
+        companionReleaseReadToken: undefined,
         connection: undefined,
         deploymentTarget: undefined,
         devicePairing: undefined,
@@ -340,6 +344,17 @@ export function loadOwnerControlConfig(
     'OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY',
     dependencies,
   );
+  const companionReleaseReadToken = readSecret(
+    environment,
+    'OWNER_COMPANION_RELEASE_READ_TOKEN',
+    dependencies,
+  );
+  if (
+    companionReleaseReadToken !== undefined &&
+    !/^github_pat_[A-Za-z0-9_]{40,255}$/u.test(companionReleaseReadToken)
+  ) {
+    throw new Error('OWNER_COMPANION_RELEASE_READ_TOKEN is malformed.');
+  }
   if (!databaseUrl) throw new Error('OWNER_CONTROL_DATABASE_URL is required.');
   if (!publishableKey || !/^sb_publishable_[A-Za-z0-9_-]{20,}$/u.test(publishableKey)) {
     throw new Error('OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY is missing or malformed.');
@@ -494,6 +509,7 @@ export function loadOwnerControlConfig(
       enabled: true,
       cbeBirrLookupKeyMaterial,
       cbeBirrReceiverV2RotationEnabled,
+      companionReleaseReadToken,
       companionDevicePairing:
         companionServerSignerKeyId === undefined
           ? { serverSignerKeyId: undefined, configured: false }
@@ -542,6 +558,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       databaseConfigured: config.runtime.enabled,
       companionDevicePairingConfigured:
         config.runtime.enabled && config.runtime.companionDevicePairing.configured,
+      companionReleaseDownloadConfigured:
+        config.runtime.enabled && config.runtime.companionReleaseReadToken !== undefined,
       cbeBirrLookupKeyMaterialConfigured:
         config.runtime.enabled && config.runtime.cbeBirrLookupKeyMaterial.configured,
       cbeBirrReceiverV2RotationEnabled:

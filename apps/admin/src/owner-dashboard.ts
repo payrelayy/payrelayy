@@ -653,27 +653,41 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
                 This check does not send commands or move money. Refreshes every 20 seconds while this page is visible.</p>
               <button id="companion-connection-refresh" type="button" disabled>Refresh connection</button>
             </div>
-            <div class="actions companion-actions">
-              <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
-                target="_blank" rel="noopener noreferrer"
-                aria-describedby="companion-download-help">Download Windows companion ZIP (new tab)</a>
-              <a class="secondary-link"
-                href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip.sha256"
-                target="_blank" rel="noopener noreferrer"
-                aria-describedby="companion-download-help">Download SHA-256 checksum (new tab)</a>
-            </div>
-            <div id="companion-download-help" class="receipt-label">
-              <p>If the companion is already connected, no download or re-pairing is needed.
-                Keep the installed companion and its separate Chrome window open.</p>
-              <p>Download links open a new tab so this Owner page stays open. If a download says
-                &ldquo;Not Found&rdquo; or is blocked, check the assets on the
-                <a href="https://github.com/payrelayy/payrelayy/releases"
-                  target="_blank" rel="noopener noreferrer">official FetanAgent GitHub releases page (new tab)</a>
-                for the companion ZIP and its matching SHA-256 checksum.</p>
-              <p>If the file is still unavailable, report the exact error text without passwords,
-                pairing packages, or signed download URLs. Do not turn off browser or antivirus
-                protection to force a download. A download error does not require a new pairing.</p>
-            </div>
+            ${
+              runtime.companionReleaseReadToken
+                ? `
+              <div class="actions companion-actions">
+                <button id="companion-download-zip" type="button">Download Windows Companion</button>
+                <button id="companion-download-sha256" type="button">Download SHA-256 checksum</button>
+              </div>
+              <p id="companion-download-status" role="status" aria-live="polite"></p>
+              <p id="companion-download-help" class="receipt-label">Your Owner sign-in is enough to download.
+                If the Companion is already running, no download or re-pairing is needed.</p>
+            `
+                : `
+              <div class="actions companion-actions">
+                <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
+                  target="_blank" rel="noopener noreferrer"
+                  aria-describedby="companion-download-help">Download Windows companion ZIP (new tab)</a>
+                <a class="secondary-link"
+                  href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip.sha256"
+                  target="_blank" rel="noopener noreferrer"
+                  aria-describedby="companion-download-help">Download SHA-256 checksum (new tab)</a>
+              </div>
+              <div id="companion-download-help" class="receipt-label">
+                <p>If the companion is already connected, no download or re-pairing is needed.
+                  Keep the installed companion and its separate Chrome window open.</p>
+                <p>Download links open a new tab so this Owner page stays open. If a download says
+                  &ldquo;Not Found&rdquo; or is blocked, check the assets on the
+                  <a href="https://github.com/payrelayy/payrelayy/releases"
+                    target="_blank" rel="noopener noreferrer">official FetanAgent GitHub releases page (new tab)</a>
+                  for the companion ZIP and its matching SHA-256 checksum.</p>
+                <p>If the file is still unavailable, report the exact error text without passwords,
+                  pairing packages, or signed download URLs. Do not turn off browser or antivirus
+                  protection to force a download. A download error does not require a new pairing.</p>
+              </div>
+            `
+            }
             <ol class="companion-steps">
               <li>Extract the ZIP once.</li>
               <li>Double-click <strong>Start FetanAgent Companion.vbs</strong>.</li>
@@ -3456,6 +3470,7 @@ async function loadOwnerAuthConfig() {
   if ((config.deploymentTarget !== 'staging' && config.deploymentTarget !== 'production') ||
       config.supabaseUrl !== expectedSupabaseUrls[config.deploymentTarget] ||
       typeof config.companionDevicePairingConfigured !== 'boolean' ||
+      typeof config.companionReleaseDownloadConfigured !== 'boolean' ||
       typeof config.telebirrDevicePairingConfigured !== 'boolean' ||
       typeof config.publishableKey !== 'string' ||
       !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(config.publishableKey)) {
@@ -7936,6 +7951,40 @@ telebirrDevicePairingClearButton.addEventListener('click', () => {
     'The package was cleared from this page. Its request ID is retained until expiry so a confirmed retry can recover only the same package.',
   );
 });
+const companionDownloadZipButton = document.getElementById('companion-download-zip');
+const companionDownloadChecksumButton = document.getElementById('companion-download-sha256');
+const companionDownloadStatus = document.getElementById('companion-download-status');
+async function downloadCompanionAsset(asset) {
+  if (!companionDownloadZipButton || !companionDownloadChecksumButton ||
+      !companionDownloadStatus) return;
+  companionDownloadZipButton.disabled = true;
+  companionDownloadChecksumButton.disabled = true;
+  companionDownloadStatus.textContent = 'Preparing your download…';
+  try {
+    const response = await ownerRequest('/v1/owner/companion-release/' + asset, {}, 120_000);
+    if (!response.ok) throw new Error('download_unavailable');
+    const file = await response.blob();
+    if (file.size < 1 || file.size > (asset === 'zip' ? 100 * 1024 * 1024 : 200))
+      throw new Error('download_unavailable');
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'FetanAgent-Windows-Companion.zip' + (asset === 'sha256' ? '.sha256' : '');
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    companionDownloadStatus.textContent = 'Download started.';
+  } catch {
+    companionDownloadStatus.textContent =
+      'Download unavailable. Please try again or contact support.';
+  } finally {
+    companionDownloadZipButton.disabled = false;
+    companionDownloadChecksumButton.disabled = false;
+  }
+}
+companionDownloadZipButton?.addEventListener('click', () => void downloadCompanionAsset('zip'));
+companionDownloadChecksumButton?.addEventListener('click', () => void downloadCompanionAsset('sha256'));
 void restoreOwnerSession();
 `;
 
@@ -7944,6 +7993,7 @@ export function ownerDashboardPublicConfig(
 ) {
   return {
     companionDevicePairingConfigured: runtime.companionDevicePairing.configured,
+    companionReleaseDownloadConfigured: runtime.companionReleaseReadToken !== undefined,
     deploymentTarget: runtime.deploymentTarget,
     publishableKey: runtime.publishableKey,
     supabaseUrl: runtime.supabaseUrl,

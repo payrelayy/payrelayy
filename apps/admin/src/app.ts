@@ -15,6 +15,12 @@ import {
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import {
+  CompanionReleaseUnavailableError,
+  companionReleaseArchiveName,
+  fetchCompanionReleaseArchive,
+  latestCompanionReleaseAsset,
+} from './companion-release-download.js';
+import {
   OwnerPaymentMethodsConflictError,
   OwnerPaymentMethodsRejectedError,
   OwnerPaymentMethodsUnavailableError,
@@ -140,6 +146,7 @@ import {
 
 export interface OwnerControlAppDependencies {
   readonly fetch?: typeof fetch;
+  readonly releaseFetch?: typeof fetch;
   readonly kemerbetReadinessCohortControl?: OwnerKemerbetReadinessCohortControl;
   readonly kemerbetSessionControl?: OwnerKemerbetSessionControl;
   readonly now?: () => Date;
@@ -484,6 +491,69 @@ export function buildOwnerControlApp(
     );
     return verified.authUserId;
   }
+
+  let companionArchiveInFlight = false;
+  app.get<{ Params: { asset: string } }>(
+    '/v1/owner/companion-release/:asset',
+    async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      if (
+        Object.keys(request.query as Record<string, unknown>).length !== 0 ||
+        (request.params.asset !== 'zip' && request.params.asset !== 'sha256')
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      let archiveClaimed = false;
+      try {
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (
+          !dependencies.runtime.manualPayments?.systemOverview ||
+          !runtimeConfig.companionReleaseReadToken
+        )
+          return reply.code(503).send({ error: 'companion_download_unavailable' });
+        // The bearer token alone proves a Supabase user, so the Owner-only SQL
+        // projection must also authorize this actor before any release is read.
+        await dependencies.runtime.manualPayments.systemOverview(actor);
+        if (request.params.asset === 'zip') {
+          if (companionArchiveInFlight)
+            return reply.code(429).send({ error: 'companion_download_busy' });
+          companionArchiveInFlight = true;
+          archiveClaimed = true;
+        }
+        const asset = await latestCompanionReleaseAsset(
+          runtimeConfig.companionReleaseReadToken,
+          dependencies.releaseFetch,
+        );
+        if (request.params.asset === 'sha256') {
+          return reply
+            .type('text/plain; charset=utf-8')
+            .header(
+              'content-disposition',
+              `attachment; filename="${companionReleaseArchiveName}.sha256"`,
+            )
+            .send(`${asset.digest}  ${companionReleaseArchiveName}\n`);
+        }
+        const bytes = await fetchCompanionReleaseArchive(
+          runtimeConfig.companionReleaseReadToken,
+          asset,
+          dependencies.releaseFetch,
+        );
+        return reply
+          .type('application/zip')
+          .header('content-disposition', `attachment; filename="${companionReleaseArchiveName}"`)
+          .header('content-length', bytes.length)
+          .send(bytes);
+      } catch (error) {
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof CompanionReleaseUnavailableError)
+          return reply.code(503).send({ error: 'companion_download_unavailable' });
+        request.log.warn('Owner Companion download is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      } finally {
+        if (archiveClaimed) companionArchiveInFlight = false;
+      }
+    },
+  );
 
   registerSupportContactRoutes(app, {
     supportContact: dependencies.runtime.supportContact,

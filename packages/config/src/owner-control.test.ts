@@ -56,6 +56,21 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe('Owner-control configuration', () => {
+  it('keeps the private release token server-side and rejects broad user tokens', () => {
+    const token = `github_pat_${'A'.repeat(60)}`;
+    const configured = loadOwnerControlConfig({
+      ...enabledEnvironment(),
+      OWNER_COMPANION_RELEASE_READ_TOKEN: token,
+    });
+    expect(configured.runtime.companionReleaseReadToken).toBe(token);
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(configured))).not.toContain(token);
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_COMPANION_RELEASE_READ_TOKEN: 'gho_broad_user_token',
+      }),
+    ).toThrow('OWNER_COMPANION_RELEASE_READ_TOKEN is malformed');
+  });
   it('requires a distinct display key only when full Owner identifiers are enabled', () => {
     const disabled = loadOwnerControlConfig(enabledEnvironment());
     expect(disabled.runtime.enabled && disabled.runtime.paymentDisplayProtection).toBeUndefined();

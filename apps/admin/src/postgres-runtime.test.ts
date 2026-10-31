@@ -96,12 +96,12 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).not.toContain('app.admit_routine_telebirr_execution_job');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).not.toContain('app.assess_routine_telebirr_execution_job');
   });
-  it('enforces one connection, verify-full, and strict client/server timeouts', () => {
+  it('retains one connection and enforces verify-full and strict timeouts', () => {
     expect(ownerControlPoolConfig(config)).toMatchObject({
       max: 1,
       min: 0,
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 10_000,
+      idleTimeoutMillis: 0,
       query_timeout: 5_000,
       statement_timeout: 5_000,
       lock_timeout: 1_000,

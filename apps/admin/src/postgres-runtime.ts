@@ -115,7 +115,9 @@ export function ownerControlPoolConfig(
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,
-    idleTimeoutMillis: 10_000,
+    // The role has one database slot. Supavisor session mode may retain that
+    // slot briefly after a client disconnects, so reuse the same client.
+    idleTimeoutMillis: 0,
     idle_in_transaction_session_timeout: 5_000,
     lock_timeout: 1_000,
     max: 1,

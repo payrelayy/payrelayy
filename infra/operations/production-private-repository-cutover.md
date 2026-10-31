@@ -14,10 +14,15 @@ credential. This change does not create or retry a Player credit.
    Store it as the `OWNER_COMPANION_RELEASE_READ_TOKEN` secret in the GitHub
    `production` environment. Do not put the token in a URL, issue, command
    argument, repository file, or chat. Do not use the broad `gh` login token.
-3. Check the account plan and configure an Actions spending budget before
-   making the repository private. Preserve the existing `main` branch rules
-   and required checks. Stop if the required private-repository features or
-   the budget do not fit the Owner's monthly cap.
+3. The repository belongs to a personal GitHub Free account. Upgrade that
+   account to GitHub Pro before making the repository private: private branch
+   protection and production environment secrets require Pro. Set a hard
+   product-level GitHub Actions budget for the account with **Stop usage when
+   budget limit is reached** enabled. Allow for the Pro subscription, tax,
+   and any other GitHub charges within the Owner's $50 monthly ceiling. A
+   reached budget stops new hosted CI and release/deploy workflows, but does
+   not stop the already running production deposit service. Preserve the
+   existing `main` branch rules and required checks.
 4. Require green PR checks and exact merged-main CI. Recheck the running
    release, deposit queue, unresolved attempts, payment switches, and helper
    digest immediately before production deployment.

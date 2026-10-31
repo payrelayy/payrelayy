@@ -3670,18 +3670,23 @@ function scheduleOwnerRefreshRetry() {
   if (!refreshToken || !ownerSessionExpiresAt || !ownerAbsoluteExpiresAt ||
       Date.now() >= ownerDeadline()) return;
   ownerRefreshTimer = window.setTimeout(
-    () =>
-      void refreshOwnerSession()
-        .then(async () => {
+    () => void (async () => {
+      try {
+        if (!accessToken || !accessTokenRefreshAt || Date.now() >= accessTokenRefreshAt) {
+          await refreshOwnerSession();
+        }
           if (!loginPanel.hidden && accessToken) {
             await requestOwnerBrowserSession('check');
-            return loadOwnerDashboardAfterAuthentication(
+            await loadOwnerDashboardAfterAuthentication(
               'Owner session restored after a temporary connection failure.',
             );
           }
-          return undefined;
-        })
-        .catch(() => undefined),
+      } catch (error) {
+        if (!isSignedOutError(error) && refreshToken && Date.now() < ownerDeadline()) {
+          scheduleOwnerRefreshRetry();
+        }
+      }
+    })(),
     OWNER_REFRESH_RETRY_DELAY_MS,
   );
 }

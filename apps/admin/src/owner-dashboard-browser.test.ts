@@ -4116,6 +4116,48 @@ describe('Owner browser idle session', () => {
     ).toBe(deadlines.absoluteExpiresAt);
   });
 
+  it('retries a temporarily unavailable reload check without repeatedly rotating the Auth token', async () => {
+    const first = ownerBrowserHarness(503, { nowMs: loginAt });
+    await first.signIn();
+    const saved = first.sessionStorage.getItem('fetanagent.owner.session.v2')!;
+    const deadlines = JSON.parse(saved);
+    let checks = 0;
+    const restored = ownerBrowserHarness(503, {
+      nowMs: loginAt + 60_000,
+      initialSessionStorage: { 'fetanagent.owner.session.v2': saved },
+      fetchOverride: (url) =>
+        url.endsWith('/auth/v1/token?grant_type=refresh_token')
+          ? response(200, {
+              access_token: 'header.payload.rotated-signature-with-safe-characters',
+              expires_in: 3600,
+              refresh_token: 'abcdefghijkl',
+            })
+          : undefined,
+      browserSessionOverride: () => {
+        checks += 1;
+        return checks === 1
+          ? response(503, { error: 'owner_control_unavailable' })
+          : response(200, {
+              session: {
+                absoluteExpiresAt: new Date(deadlines.absoluteExpiresAt).toISOString(),
+                idleExpiresAt: new Date(deadlines.idleExpiresAt).toISOString(),
+              },
+            });
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(restored.element('#login-panel').hidden).toBe(false);
+    restored.expireLatestTimer(5 * 1_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(restored.element('#owner-panel').hidden).toBe(false);
+    expect(checks).toBe(2);
+    expect(
+      restored.fetchCalls.filter(({ url }) =>
+        url.endsWith('/auth/v1/token?grant_type=refresh_token'),
+      ),
+    ).toHaveLength(1);
+  });
+
   it('warns five minutes before inactivity logout, then clears the tab session', async () => {
     const browser = ownerBrowserHarness(503, { nowMs: loginAt });
     await browser.signIn();

@@ -114,6 +114,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-owner-idle-session-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-manual-withdrawal-contact-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-telegram-withdraw-direct-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-withdraw-payment-results-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh

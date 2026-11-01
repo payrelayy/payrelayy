@@ -14,6 +14,7 @@ const runtime = vi.hoisted(() => ({
   admissionOutcome: 'ignored' as 'ignored' | 'admitted' | 'unavailable',
   callbackHandler: undefined as ((context: unknown) => Promise<void>) | undefined,
   catchHandler: undefined as ((error: unknown) => void) | undefined,
+  captureSentMessages: false,
   commandUpdates: [] as { kind: string; commands?: unknown; scope: unknown }[],
   config: undefined as unknown,
   ingressDeliveries: [] as unknown[],
@@ -21,6 +22,19 @@ const runtime = vi.hoisted(() => ({
   mediaReads: [] as unknown[],
   mediaResult: { kind: 'text', text: 'Transaction ID: SYNTB00000001' } as unknown,
   messageHandler: undefined as ((context: unknown) => Promise<void>) | undefined,
+  outcomeSend: undefined as
+    | ((
+        chatId: number,
+        text: string,
+        showDepositButton: boolean,
+      ) => Promise<{ message_id: number }>)
+    | undefined,
+  sentMessages: [] as Array<{
+    chatId: number;
+    text: string;
+    buttons: Array<{ text: string; callbackData?: string; url?: string }> | undefined;
+    rows: Array<Array<{ text: string; callbackData?: string; url?: string }>> | undefined;
+  }>,
   startOptions: undefined as
     | {
         readonly allowed_updates: readonly string[];
@@ -47,6 +61,25 @@ vi.mock('grammy', () => ({
         runtime.commandUpdates.push({ kind: 'delete', scope: options.scope });
         return true;
       },
+      sendMessage: async (
+        chatId: number,
+        text: string,
+        options?: {
+          reply_markup?: {
+            buttons: Array<{ text: string; callbackData?: string; url?: string }>;
+            rows: Array<Array<{ text: string; callbackData?: string; url?: string }>>;
+          };
+        },
+      ) => {
+        if (!runtime.captureSentMessages) throw new Error('Bot sendMessage is unavailable.');
+        runtime.sentMessages.push({
+          chatId,
+          text,
+          buttons: options?.reply_markup?.buttons,
+          rows: options?.reply_markup?.rows,
+        });
+        return { message_id: 42 };
+      },
     };
     public async init(): Promise<void> {}
 
@@ -67,18 +100,24 @@ vi.mock('grammy', () => ({
   },
   InlineKeyboard: class {
     public buttons: { text: string; callbackData?: string; url?: string }[] = [];
+    public rows: { text: string; callbackData?: string; url?: string }[][] = [[]];
 
     public text(text: string, callbackData: string): this {
-      this.buttons.push({ text, callbackData });
+      const button = { text, callbackData };
+      this.buttons.push(button);
+      this.rows.at(-1)!.push(button);
       return this;
     }
 
     public row(): this {
+      this.rows.push([]);
       return this;
     }
 
     public url(text: string, url: string): this {
-      this.buttons.push({ text, url });
+      const button = { text, url };
+      this.buttons.push(button);
+      this.rows.at(-1)!.push(button);
       return this;
     }
   },
@@ -89,7 +128,9 @@ vi.mock('./telegram-polling-readiness.js', () => ({
 }));
 
 vi.mock('./telegram-deposit-outcome-notifier.js', () => ({
-  runTelegramDepositOutcomeNotifier: async () => {},
+  runTelegramDepositOutcomeNotifier: async (dependencies: { send: typeof runtime.outcomeSend }) => {
+    runtime.outcomeSend = dependencies.send;
+  },
 }));
 
 vi.mock('./telegram-beta-invite-admission.js', () => ({
@@ -238,6 +279,7 @@ beforeEach(() => {
   runtime.admissionOutcome = 'ignored';
   runtime.callbackHandler = undefined;
   runtime.catchHandler = undefined;
+  runtime.captureSentMessages = false;
   runtime.commandUpdates = [];
   runtime.config = undefined;
   runtime.ingressDeliveries = [];
@@ -245,6 +287,8 @@ beforeEach(() => {
   runtime.mediaReads = [];
   runtime.mediaResult = { kind: 'text', text: 'Transaction ID: SYNTB00000001' };
   runtime.messageHandler = undefined;
+  runtime.outcomeSend = undefined;
+  runtime.sentMessages = [];
   runtime.startOptions = undefined;
 });
 
@@ -732,12 +776,25 @@ describe('Telegram admission, private action, and ingress composition', () => {
       supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
     };
     await import('./index.js');
-    const menus: Array<{ text: string; buttons: Array<{ text: string; url?: string }> }> = [];
+    const menus: Array<{
+      text: string;
+      buttons: Array<{ text: string; url?: string }>;
+      rows: Array<Array<{ text: string; url?: string }>>;
+    }> = [];
     const reply = async (
       text: string,
-      options?: { reply_markup?: { buttons: Array<{ text: string; url?: string }> } },
+      options?: {
+        reply_markup?: {
+          buttons: Array<{ text: string; url?: string }>;
+          rows: Array<Array<{ text: string; url?: string }>>;
+        };
+      },
     ) => {
-      menus.push({ text, buttons: options?.reply_markup?.buttons ?? [] });
+      menus.push({
+        text,
+        buttons: options?.reply_markup?.buttons ?? [],
+        rows: options?.reply_markup?.rows ?? [],
+      });
     };
 
     runtime.actionResult = {
@@ -761,9 +818,65 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!({ ...messageContext('/menu'), reply });
     expect(menus[1]!.text).toBe('FetanAgent\nPlayer ID: PLAYER-DEMO-42');
     expect(menus[1]!.buttons[1]).toEqual({ text: '💸 Withdraw', url: 'https://t.me/balem18' });
+    expect(menus[1]!.rows).toEqual([
+      [
+        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+        { text: '💸 Withdraw', url: 'https://t.me/balem18' },
+      ],
+    ]);
     handler = 'new_handler';
     await runtime.messageHandler!({ ...messageContext('/menu'), reply });
     expect(menus[2]!.buttons[1]).toEqual({ text: '💸 Withdraw', url: 'https://t.me/new_handler' });
+  });
+
+  it('adds Withdraw beside Deposit on final payment notices while keeping their text', async () => {
+    let handler = 'balem18';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).endsWith('/payment-methods'))
+          return Response.json({ methods: { telebirr: true, cbe_birr: true } });
+        if (String(url).endsWith('/withdrawal-chat'))
+          return Response.redirect(`https://t.me/${handler}`, 302);
+        throw new Error('Unexpected public lookup');
+      }),
+    );
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    runtime.captureSentMessages = true;
+    await import('./index.js');
+    await runtime.startOptions!.onStart({ username: 'FetanAgentBot' });
+    const approved = '✅ Deposit complete\n100.00 ETB credited to your Player account.';
+    await runtime.outcomeSend!(123456789, approved, true);
+    expect(runtime.sentMessages[0]).toEqual({
+      chatId: 123456789,
+      text: approved,
+      buttons: [
+        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+        { text: '💸 Withdraw', url: 'https://t.me/balem18' },
+      ],
+      rows: [
+        [
+          { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+          { text: '💸 Withdraw', url: 'https://t.me/balem18' },
+        ],
+      ],
+    });
+
+    handler = 'new_handler';
+    const rejected = '❌ Deposit not credited. Contact support if you need help.';
+    await runtime.outcomeSend!(123456789, rejected, true);
+    expect(runtime.sentMessages[1]!.text).toBe(rejected);
+    expect(runtime.sentMessages[1]!.buttons?.[1]).toEqual({
+      text: '💸 Withdraw',
+      url: 'https://t.me/new_handler',
+    });
+
+    await runtime.outcomeSend!(123456789, '⏳ Still checking your payment.', false);
+    expect(runtime.sentMessages[2]!.buttons).toBeUndefined();
+    expect(runtime.sentMessages[2]!.rows).toBeUndefined();
   });
 
   it('adds Support beside a remaining status action when its Deposit action is unavailable', async () => {
@@ -803,6 +916,57 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(buttons).toEqual([
       { text: 'Refresh status', callbackData: `dps1.${'A'.repeat(22)}` },
       { text: '💬 Support', url: 'https://t.me/help_team' },
+    ]);
+  });
+
+  it('keeps Refresh status above the side-by-side Deposit and Withdraw actions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).endsWith('/payment-methods'))
+          return Response.json({ methods: { telebirr: true, cbe_birr: true } });
+        if (String(url).endsWith('/withdrawal-chat'))
+          return Response.redirect('https://t.me/balem18', 302);
+        throw new Error('Unexpected public lookup');
+      }),
+    );
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    const proofToken = 'A'.repeat(22);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'telebirr_live_deposit_status',
+      proofToken,
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      amountMinor: '10000',
+      currencyCode: 'ETB',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    };
+    let rows: Array<Array<{ text: string; callbackData?: string; url?: string }>> = [];
+    await runtime.messageHandler!({
+      ...messageContext(`/deposit_status p1.${proofToken}`),
+      reply: async (
+        _text: string,
+        options?: {
+          reply_markup?: {
+            rows: Array<Array<{ text: string; callbackData?: string; url?: string }>>;
+          };
+        },
+      ) => {
+        rows = options?.reply_markup?.rows ?? [];
+      },
+    });
+    expect(rows).toEqual([
+      [{ text: 'Refresh status', callbackData: `dps1.${proofToken}` }],
+      [
+        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+        { text: '💸 Withdraw', url: 'https://t.me/balem18' },
+      ],
     ]);
   });
 
@@ -1074,7 +1238,21 @@ describe('Telegram admission, private action, and ingress composition', () => {
   });
 
   it('attaches Deposit to an immediate duplicate rejection and routes the button to the deposit flow', async () => {
-    await loadComposition(false, true, true, false, true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).endsWith('/payment-methods'))
+          return Response.json({ methods: { telebirr: true, cbe_birr: true } });
+        if (String(url).endsWith('/withdrawal-chat'))
+          return Response.redirect('https://t.me/balem18', 302);
+        throw new Error('Unexpected public lookup');
+      }),
+    );
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
     runtime.actionResult = {
       version: 1,
       outcome: 'receiver_sms_candidate_received',
@@ -1095,7 +1273,10 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(context.replies).toEqual([
       '❌ This payment was already credited. It can’t be credited again.',
     ]);
-    expect(keyboard?.buttons).toEqual([{ text: '💰 Deposit', callbackData: 'gd1.deposit' }]);
+    expect(keyboard?.buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+      { text: '💸 Withdraw', url: 'https://t.me/balem18' },
+    ]);
     expect(runtime.actionDeliveries).toEqual([
       expect.objectContaining({
         kind: 'saved_receiver_sms_proof_command',

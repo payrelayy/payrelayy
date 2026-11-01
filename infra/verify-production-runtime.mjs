@@ -802,14 +802,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'cab65e4099fd3b1eb4de135117a86d8abb980b47'/gu)].length,
+  [...workflow.matchAll(/status '6b7cbde53436037faf1c72af4fd589afb1a3122e'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='cab65e4099fd3b1eb4de135117a86d8abb980b47'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='6b7cbde53436037faf1c72af4fd589afb1a3122e'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2554,7 +2554,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='cab65e4099fd3b1eb4de135117a86d8abb980b47'",
   "readonly PREDECESSOR_SHA256='a2919bd701acd78c74a9e3296bf89828e045aa8525f41a9cebbfa845fb0a5171'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='346ced64fdd0283bfcff414a52de3bc6787e544b118768343b3637efc2c5292f'",
   "readonly SOURCE_REVIEW='telegram-withdraw-direct-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2567,7 +2567,7 @@ assert.doesNotMatch(telegramWithdrawDirectRotation, /\b(?:docker|psql|rm|sed|chm
 for (const value of [
   'cab65e4099fd3b1eb4de135117a86d8abb980b47',
   'a2919bd701acd78c74a9e3296bf89828e045aa8525f41a9cebbfa845fb0a5171',
-  helperDigest,
+  '346ced64fdd0283bfcff414a52de3bc6787e544b118768343b3637efc2c5292f',
   'ROTATE EXACT PRODUCTION V2 TELEGRAM WITHDRAW DIRECT HELPER V1',
 ]) {
   assert.ok(telegramWithdrawDirectRunbook.includes(value));
@@ -2576,6 +2576,40 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-telegram-withdraw-direct-helper-rotation-v1\.sh/u,
+  );
+}
+const withdrawPaymentResultsRotation = await read(
+  'infra/operations/fetanagent-production-v2-withdraw-payment-results-helper-rotation-v1.sh',
+);
+const withdrawPaymentResultsRunbook = await read(
+  'infra/operations/production-withdraw-payment-results-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='6b7cbde53436037faf1c72af4fd589afb1a3122e'",
+  "readonly PREDECESSOR_SHA256='346ced64fdd0283bfcff414a52de3bc6787e544b118768343b3637efc2c5292f'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='withdraw-payment-results-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 WITHDRAW PAYMENT RESULTS HELPER V1',
+]) {
+  assert.ok(withdrawPaymentResultsRotation.includes(value));
+}
+assert.doesNotMatch(withdrawPaymentResultsRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '6b7cbde53436037faf1c72af4fd589afb1a3122e',
+  '346ced64fdd0283bfcff414a52de3bc6787e544b118768343b3637efc2c5292f',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 WITHDRAW PAYMENT RESULTS HELPER V1',
+]) {
+  assert.ok(withdrawPaymentResultsRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-withdraw-payment-results-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

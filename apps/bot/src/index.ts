@@ -1,5 +1,8 @@
 import { loadBotConfig, redactedBotConfigForLog } from '@fetanagent/config/bot';
-import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
+import type {
+  TelegramPrivateActionEnvelope,
+  TelegramPrivateActionResult,
+} from '@fetanagent/contracts';
 import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
@@ -110,6 +113,7 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const outcomeActions = renderTelegramOutcomeActions();
+const WITHDRAW_BUTTON_TEXT = '💸 Withdraw';
 let lastSupportFailureLogAt = 0;
 let lastSupportFailureReason = '';
 const supportContact = createTelegramSupportContactResolver(config.supportContactUrl, {
@@ -160,6 +164,33 @@ async function availableMenuButtons(
       (button.callbackData !== TELEGRAM_GUIDED_CBE_CALLBACK_DATA || methods.cbe_birr),
   );
 }
+async function availableButtonsWithWithdrawal(
+  buttons: readonly PrivateTelegramMenuButton[],
+  hasSavedPlayer: boolean,
+): Promise<PrivateTelegramMenuButton[]> {
+  const [availableButtons, withdrawalUrl] = await Promise.all([
+    availableMenuButtons(buttons),
+    hasSavedPlayer
+      ? loadTelegramWithdrawalContact(config.supportContactUrl)
+      : Promise.resolve(null),
+  ]);
+  return withdrawalUrl
+    ? [...availableButtons, { text: WITHDRAW_BUTTON_TEXT, url: withdrawalUrl }]
+    : [...availableButtons];
+}
+function hasSavedPlayerForResult(
+  action: TelegramPrivateActionEnvelope,
+  result: TelegramPrivateActionResult,
+): boolean {
+  return (
+    (result.outcome === 'menu' && result.selectedPlayerId !== null) ||
+    result.outcome === 'player_selection_saved' ||
+    action.kind.startsWith('saved_') ||
+    result.outcome === 'deposit_status' ||
+    result.outcome === 'deposit_proof_status' ||
+    result.outcome === 'telebirr_live_deposit_status'
+  );
+}
 function isDepositMenuButton(button: PrivateTelegramMenuButton): boolean {
   return (
     button.callbackData === TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA ||
@@ -199,7 +230,11 @@ const unreadableReferenceText =
 function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   for (const [index, button] of buttons.entries()) {
-    if (index > 0) keyboard.row();
+    if (
+      index > 0 &&
+      !(button.text === WITHDRAW_BUTTON_TEXT && isDepositMenuButton(buttons[index - 1]!))
+    )
+      keyboard.row();
     if (button.url === undefined) keyboard.text(button.text, button.callbackData);
     else keyboard.url(button.text, button.url);
   }
@@ -318,17 +353,10 @@ async function deliverPlayerAction(
       }
       return;
     }
-    const hasSavedPlayer =
-      (result.outcome === 'menu' && result.selectedPlayerId !== null) ||
-      result.outcome === 'player_selection_saved';
-    const [availableButtons, withdrawalUrl] = await Promise.all([
-      availableMenuButtons(presentation.menu.buttons),
-      hasSavedPlayer
-        ? loadTelegramWithdrawalContact(config.supportContactUrl)
-        : Promise.resolve(null),
-    ]);
-    const menuButtons: PrivateTelegramMenuButton[] = [...availableButtons];
-    if (withdrawalUrl) menuButtons.push({ text: '💸 Withdraw', url: withdrawalUrl });
+    const menuButtons = await availableButtonsWithWithdrawal(
+      presentation.menu.buttons,
+      hasSavedPlayerForResult(action, result),
+    );
     let keyboard = menuButtons.length > 0 ? inlineMenu(menuButtons) : undefined;
     if (
       presentation.menu.buttons.some(isDepositMenuButton) &&
@@ -848,7 +876,11 @@ await runTelegramPolling(
                 chatId,
                 text,
                 showDepositButton
-                  ? { reply_markup: inlineMenu(await availableMenuButtons(outcomeActions)) }
+                  ? {
+                      reply_markup: inlineMenu(
+                        await availableButtonsWithWithdrawal(outcomeActions, true),
+                      ),
+                    }
                   : undefined,
               );
               if (showDepositButton) void syncPrivateCommands(chatId, true);

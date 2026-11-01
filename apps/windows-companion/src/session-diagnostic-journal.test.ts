@@ -26,6 +26,7 @@ describe('local KemerBet session diagnostic journal', () => {
     });
     journal.record({ category: 'process', state: 'started' });
     journal.record({ category: 'provider', state: 'admin_socket_logout_received' });
+    journal.record({ category: 'provider', state: 'refresh_error_expired' });
     journal.record({ category: 'preflight', state: 'preflight_retry_in_place' });
     journal.record({ category: 'session', state: 'login_required' });
     journal.record({
@@ -45,10 +46,11 @@ describe('local KemerBet session diagnostic journal', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(entries).toHaveLength(4);
+    expect(entries).toHaveLength(5);
     expect(entries.map((entry) => `${entry.category}:${entry.state}`)).toEqual([
       'process:started',
       'provider:admin_socket_logout_received',
+      'provider:refresh_error_expired',
       'preflight:preflight_retry_in_place',
       'session:login_required',
     ]);

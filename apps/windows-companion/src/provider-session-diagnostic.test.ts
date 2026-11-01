@@ -4,6 +4,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  classifyRefreshErrorBody,
   classifyProviderSessionServerFrame,
   installProviderSessionPassiveDiagnostics,
   type ProviderSessionDiagnosticEvent,
@@ -14,6 +15,30 @@ const REFRESH_URL = 'https://admin-api.agt-digi.com/Account/RefreshToken';
 const SEPARATOR = '\u001e';
 
 describe('passive provider session diagnostics', () => {
+  it('reduces bounded refresh errors to fixed categories without exposing provider text', () => {
+    expect(
+      classifyRefreshErrorBody(
+        Buffer.from('{"errorCode":"REFRESH_TOKEN_EXPIRED","accessToken":"private-token"}'),
+      ),
+    ).toBe('refresh_error_expired');
+    expect(classifyRefreshErrorBody(Buffer.from('{"error":{"code":"invalid_grant"}}'))).toBe(
+      'refresh_error_invalid_grant',
+    );
+    expect(
+      classifyRefreshErrorBody(Buffer.from('{"code":400,"message":"Invalid refresh token."}')),
+    ).toBe('refresh_error_invalid_token');
+    expect(
+      classifyRefreshErrorBody(Buffer.from('{"errorCode":"account-123456","message":"private"}')),
+    ).toBe('refresh_error_code_unrecognized');
+    expect(classifyRefreshErrorBody(Buffer.from('{"detail":"private"}'))).toBe(
+      'refresh_error_code_missing',
+    );
+    expect(classifyRefreshErrorBody(Buffer.from('not json'))).toBe(
+      'refresh_error_body_unavailable',
+    );
+    expect(classifyRefreshErrorBody(Buffer.alloc(4_097))).toBe('refresh_error_body_unavailable');
+  });
+
   it('classifies only bounded SignalR refresh and logout event names', () => {
     expect(
       classifyProviderSessionServerFrame(
@@ -30,7 +55,7 @@ describe('passive provider session diagnostics', () => {
     expect(classifyProviderSessionServerFrame('not-json')).toBeUndefined();
   });
 
-  it('observes only exact session transport and refresh outcomes without touching message bodies', () => {
+  it('observes only exact session transport and refresh outcomes without touching unrelated bodies', async () => {
     const context = new EventEmitter();
     const page = new EventEmitter();
     const events: ProviderSessionDiagnosticEvent[] = [];
@@ -66,6 +91,7 @@ describe('passive provider session diagnostics', () => {
       url: () => REFRESH_URL,
       request: () => ({ method: () => 'POST' }),
       status: () => 400,
+      headers: () => ({ 'content-type': 'text/html' }),
       body: unreadBody,
     });
     context.emit('response', {
@@ -121,6 +147,7 @@ describe('passive provider session diagnostics', () => {
       url: () => 'https://admin-api.agt-digi.com/Account/Info',
       method: () => 'GET',
     });
+    await vi.waitFor(() => expect(events).toContain('refresh_error_body_unavailable'));
     expect(events).toEqual([
       'admin_socket_browser_opened',
       'admin_socket_refresh_received',
@@ -128,6 +155,7 @@ describe('passive provider session diagnostics', () => {
       'refresh_http_succeeded',
       'refresh_http_auth_rejected',
       'refresh_http_bad_request',
+      'refresh_error_body_unavailable',
       'refresh_http_conflict',
       'refresh_http_unprocessable',
       'refresh_http_server_error',
@@ -141,5 +169,42 @@ describe('passive provider session diagnostics', () => {
     ]);
     expect(unreadBody).not.toHaveBeenCalled();
     expect(JSON.stringify(events)).not.toContain('do-not-log-me');
+  });
+
+  it('reads only the exact HTTP 400 refresh error and ignores oversized responses', async () => {
+    const context = new EventEmitter();
+    const events: ProviderSessionDiagnosticEvent[] = [];
+    const body = vi.fn(async () =>
+      Buffer.from('{"errorCode":"session_revoked","token":"never-record-this"}'),
+    );
+    installProviderSessionPassiveDiagnostics(
+      context as unknown as BrowserContext,
+      new EventEmitter() as unknown as Page,
+      (event) => events.push(event),
+    );
+    const response = (status: number, url = REFRESH_URL, length?: string) => ({
+      url: () => url,
+      request: () => ({ method: () => 'POST' }),
+      status: () => status,
+      headers: () => ({
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': length,
+      }),
+      body,
+    });
+    context.emit('response', response(200));
+    context.emit('response', response(400, `${REFRESH_URL}?unexpected=1`));
+    context.emit('response', response(400, REFRESH_URL, '4097'));
+    context.emit('response', response(400, REFRESH_URL, '63'));
+    await vi.waitFor(() => expect(events).toContain('refresh_error_revoked'));
+    expect(body).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      'refresh_http_succeeded',
+      'refresh_http_bad_request',
+      'refresh_error_body_unavailable',
+      'refresh_http_bad_request',
+      'refresh_error_revoked',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('never-record-this');
   });
 });

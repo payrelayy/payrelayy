@@ -564,10 +564,10 @@ export async function startLocalKemerBetSession(
         const button = form.locator('button[type="submit"]');
         if ((await button.count()) !== 1) throw new Error('Sign-in control unavailable.');
         reportDiagnostic('automatic_signin_started');
-        autoSigninAttempts += 1;
         await form.locator('input#userName').fill(credentials.username);
         await form.locator('input#password').fill(credentials.password);
         if (terminal || stopping || classifyPageUrl(page.url()) !== 'login') return;
+        autoSigninAttempts += 1;
         await button.click({ timeout: 10_000 });
         reportDiagnostic('automatic_signin_submitted');
       } catch {

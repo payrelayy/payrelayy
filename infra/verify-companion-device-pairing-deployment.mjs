@@ -81,6 +81,7 @@ const [
 ]);
 
 assert.match(compose, /^name: fetanagent-companion-device-pairing$/mu);
+assert.match(caddyfile, /path [^\r\n]*\/v1\/companion\/device\/kemerbet-signin:read/u);
 assert.equal([...compose.matchAll(/^    profiles: \[companion-device-pairing\]$/gmu)].length, 1);
 assert.match(compose, /target: companion-device-bridge/u);
 assert.match(compose, /user: '10001:10001'/u);
@@ -392,7 +393,7 @@ assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace
 assert.match(postgresRuntime, /select count\(\*\) = \$\{expectedFunctionCount\}/u);
 assert.match(
   postgresRuntime,
-  /COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  11,\n\);/u,
+  /COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  12,\n\);/u,
 );
 assert.match(
   postgresRuntime,

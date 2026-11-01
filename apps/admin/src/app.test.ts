@@ -540,6 +540,52 @@ async function nextEventLoopTurn(): Promise<void> {
 }
 
 describe('Owner-control HTTP boundary', () => {
+  it('lets the authenticated Owner save sign-in credentials without returning the password', async () => {
+    const accountId = '88888888-8888-4888-8888-888888888888';
+    const settings = {
+      platformAgentAccountId: accountId,
+      username: 'agent',
+      revision: 1,
+      updatedAt: '2026-11-02T10:00:00.000Z',
+    };
+    const save = vi.fn(async () => settings);
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({ kemerbetSignin: { get: async () => settings, set: save } }),
+    });
+    const url = '/v1/owner/kemerbet-signin';
+    const headers = {
+      authorization: `Bearer ${bearer}`,
+      origin: 'http://127.0.0.1:3002',
+      'content-type': 'application/json',
+    };
+    const payload = {
+      platformAgentAccountId: accountId,
+      username: 'agent',
+      password: 'private-password',
+      expectedRevision: 0,
+    };
+    try {
+      expect((await app.inject({ url })).statusCode).toBe(403);
+      expect((await app.inject({ url, headers })).json()).toEqual({ settings });
+      const blocked = await app.inject({
+        method: 'POST',
+        url,
+        headers: { ...headers, origin: 'https://other.example' },
+        payload,
+      });
+      expect(blocked.statusCode).toBe(403);
+      expect(save).not.toHaveBeenCalled();
+      const result = await app.inject({ method: 'POST', url, headers, payload });
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toEqual({ settings });
+      expect(result.body).not.toContain(payload.password);
+      expect(save).toHaveBeenCalledWith(authUserId, accountId, 'agent', payload.password, 0);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('starts and touches only a verified Owner Auth session and gates ordinary routes', async () => {
     const actions: string[] = [];
     const session = {

@@ -230,15 +230,18 @@ If a reference cannot be verified while fresh, it must not later be treated as a
 verified queued payment. A paused or changed Owner policy may require operator
 resolution instead of silently crediting an old queue item.
 
-Review any unfinished attempt before restarting the automatic-deposit Companion.
+Review any unfinished attempt before a manual restart of the automatic-deposit Companion.
 The signed routine browser refreshes the same guarded KemerBet page after seven
 idle minutes and re-verifies the bound account before new credit work. It stays open
 beyond 24 hours while signed in; the separate non-routine enrollment/execution
 windows retain their twelve-hour cap. If KemerBet itself returns to login, the
-routine window stays open for manual sign-in but stops claiming credit work. The
-signed worker lease then goes stale, while paid verification and already verified
-jobs remain available/queued. No token is exported from Chrome or used to
-reauthenticate silently. Recheck any unfinished attempt before credit work resumes.
+routine window stops claiming credit work while it signs in using the Owner-managed
+credential stored in Supabase Vault. It resumes only after the same bound account
+passes identity verification. A KemerBet challenge or invalid saved password still
+needs Owner attention. The launcher restarts an unexpectedly closed routine browser;
+an unresolved transfer remains held for reconciliation and is never replayed.
+No provider token is exported from Chrome. Recheck any unfinished attempt before
+manually crediting it.
 For a sign-out investigation, inspect the local `diagnostics/kemerbet-session.jsonl`
 and `.jsonl.1` files under the Companion data root. Correlate `login_required` with
 the preceding fixed event names: provider `Logout`, refresh rejection/network failure,

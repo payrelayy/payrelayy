@@ -64,7 +64,12 @@ export type ProviderSessionDiagnosticEvent =
   | 'account_info_network_failed'
   | 'guarded_page_reload_started'
   | 'guarded_page_reload_committed'
-  | 'guarded_page_reload_failed';
+  | 'guarded_page_reload_failed'
+  | 'automatic_signin_started'
+  | 'automatic_signin_submitted'
+  | 'automatic_signin_unavailable'
+  | 'automatic_signin_challenge'
+  | 'automatic_signin_failed';
 
 function isAccountInfoUrl(rawUrl: string): boolean {
   try {

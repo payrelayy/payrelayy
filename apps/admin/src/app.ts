@@ -14,6 +14,11 @@ import {
 } from './owner-manual-payments.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
+import {
+  OwnerKemerbetSigninConflictError,
+  OwnerKemerbetSigninInvalidError,
+  OwnerKemerbetSigninRejectedError,
+} from './owner-kemerbet-signin.js';
 import { registerWithdrawalContactRoutes } from './withdrawal-contact-routes.js';
 import {
   OwnerPaymentMethodsConflictError,
@@ -552,6 +557,72 @@ export function buildOwnerControlApp(
     ownerSubject,
     mutationOrigins: privatePilotMutationOrigins,
   });
+  app.get('/v1/owner/kemerbet-signin', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as Record<string, unknown>).length)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const actor = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.kemerbetSignin) throw new Error();
+      return reply.header('cache-control', 'no-store').send({
+        settings: await dependencies.runtime.kemerbetSignin.get(actor),
+      });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetSigninRejectedError
+      )
+        return reply.code(403).send({ error: 'forbidden' });
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+  app.post<{ Body: unknown }>(
+    '/v1/owner/kemerbet-signin',
+    { bodyLimit: 1_024 },
+    async (request, reply) => {
+      try {
+        if (
+          Object.keys(request.query as Record<string, unknown>).length ||
+          !privatePilotMutationOrigins.has(exactRawHeader(request.raw.rawHeaders, 'origin') ?? '')
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        const body = exactObject(request.body, [
+          'expectedRevision',
+          'password',
+          'platformAgentAccountId',
+          'username',
+        ]);
+        if (
+          !body ||
+          typeof body.platformAgentAccountId !== 'string' ||
+          typeof body.username !== 'string' ||
+          typeof body.password !== 'string' ||
+          typeof body.expectedRevision !== 'number'
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.kemerbetSignin) throw new Error();
+        const settings = await dependencies.runtime.kemerbetSignin.set(
+          actor,
+          body.platformAgentAccountId,
+          body.username,
+          body.password,
+          body.expectedRevision,
+        );
+        return reply.header('cache-control', 'no-store').send({ settings });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerKemerbetSigninRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerKemerbetSigninInvalidError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerKemerbetSigninConflictError)
+          return reply.code(409).send({ error: 'settings_changed' });
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
   registerWithdrawalContactRoutes(app, {
     withdrawalContact: dependencies.runtime.withdrawalContact,
     ownerSubject,

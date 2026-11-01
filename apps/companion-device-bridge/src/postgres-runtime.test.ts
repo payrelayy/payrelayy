@@ -88,7 +88,7 @@ describe('companion device bridge PostgreSQL runtime', () => {
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );
-    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 11');
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 12');
     for (const functionName of [
       'claim_telegram_player_validation_assignment',
       'complete_telegram_player_validation_assignment',

@@ -5,6 +5,8 @@ import {
   KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL,
   KEMERBET_AGENT_LOGIN_URL,
   KEMERBET_AGENT_LOGIN_RETRY_URL,
+  KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR,
+  KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR,
   KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS,
   KEMERBET_MAX_LOGIN_LIFETIME_SECONDS,
 } from '@fetanagent/agent-platform-kemerbet';
@@ -50,6 +52,7 @@ import {
 } from './provider-session-diagnostic.js';
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
+import type { KemerBetSigninCredentials } from './kemerbet-signin-client.js';
 
 // KemerBet's agent client can return to login after roughly ten minutes. Prefer seven
 // minutes without Player work, but make refresh due by eight minutes under frequent work.
@@ -58,6 +61,7 @@ const KEMERBET_IDLE_RELOAD_MS = 7 * 60 * 1_000;
 const KEMERBET_MAX_RELOAD_MS = 8 * 60 * 1_000;
 const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
 const KEMERBET_ROUTINE_IDENTITY_RETRY_MS = 15 * 1_000;
+const KEMERBET_AUTO_SIGNIN_RETRY_MS = 15 * 1_000;
 
 export type LocalKemerBetSessionState =
   | 'starting'
@@ -180,6 +184,7 @@ export async function startLocalKemerBetSession(
   report: (event: LocalKemerBetSessionEvent) => void,
   reportDiagnostic: (event: ProviderSessionDiagnosticEvent) => void = () => undefined,
   reportRoutinePreflight: LocalKemerBetRoutinePreflightReporter = () => undefined,
+  getSigninCredentials?: () => Promise<KemerBetSigninCredentials | undefined>,
 ): Promise<LocalKemerBetSession> {
   report({ state: 'starting', transferDisabled: true, detailsRedacted: true });
 
@@ -206,6 +211,10 @@ export async function startLocalKemerBetSession(
   let signedInVerifiedAt: number | undefined;
   let lastPlayerWorkCompletedAt: number | undefined;
   let identityRetryTimer: NodeJS.Timeout | undefined;
+  let autoSigninRetryTimer: NodeJS.Timeout | undefined;
+  let autoSigninInProgress = false;
+  let autoSigninRevision: number | undefined;
+  let autoSigninAttempts = 0;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
   let observePage!: (candidate: Page) => Promise<void>;
@@ -253,6 +262,11 @@ export async function startLocalKemerBetSession(
     identityRetryTimer = undefined;
   };
 
+  const disarmAutoSigninRetry = (): void => {
+    if (autoSigninRetryTimer !== undefined) clearTimeout(autoSigninRetryTimer);
+    autoSigninRetryTimer = undefined;
+  };
+
   const finish = async (
     state: 'failed' | 'stopped',
     reason?: LocalKemerBetSessionEvent['reason'],
@@ -268,6 +282,7 @@ export async function startLocalKemerBetSession(
     disarmCandidateDeadline();
     disarmSignedInReload();
     disarmIdentityRetry();
+    disarmAutoSigninRetry();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
     let lockReleased = lock === undefined;
@@ -300,10 +315,10 @@ export async function startLocalKemerBetSession(
   };
 
   const armLoginDeadline = (): void => {
-    // A signed routine launch already has a persistent Owner policy and a short server lease.
-    // After its first verified sign-in, leave Chrome open for manual reauthentication if the
-    // provider ends its session; the queue remains unable to claim work while signed out.
-    if (config.routineDepositsEnabled && verifiedSettled) return;
+    // The routine worker must remain available for a later Owner credential update or
+    // network recovery, including before its first verified sign-in. No Player work is
+    // admitted while KemerBet is signed out.
+    if (config.routineDepositsEnabled) return;
     if (terminal || loginTimer !== undefined) return;
     const deadlineEpoch = ++loginDeadlineEpoch;
     loginTimer = setTimeout(() => {
@@ -494,6 +509,75 @@ export async function startLocalKemerBetSession(
       return 'identity_binding_unavailable';
     };
 
+    const scheduleAutoSignin = (): void => {
+      if (!getSigninCredentials || terminal || stopping || reviewPaused || autoSigninRetryTimer)
+        return;
+      autoSigninRetryTimer = setTimeout(() => {
+        autoSigninRetryTimer = undefined;
+        if (!terminal && !stopping && classifyPageUrl(page.url()) === 'login') {
+          void attemptAutoSignin();
+        }
+      }, KEMERBET_AUTO_SIGNIN_RETRY_MS);
+      autoSigninRetryTimer.unref();
+    };
+
+    const attemptAutoSignin = async (): Promise<void> => {
+      if (
+        !getSigninCredentials ||
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        autoSigninInProgress ||
+        classifyPageUrl(page.url()) !== 'login'
+      )
+        return;
+      if (operationInProgress) {
+        scheduleAutoSignin();
+        return;
+      }
+      autoSigninInProgress = true;
+      try {
+        const credentials = await getSigninCredentials();
+        if (!credentials || terminal || stopping || classifyPageUrl(page.url()) !== 'login') {
+          reportDiagnostic('automatic_signin_unavailable');
+          return;
+        }
+        if (credentials.revision !== autoSigninRevision) {
+          autoSigninRevision = credentials.revision;
+          autoSigninAttempts = 0;
+        }
+        // Limit retries for one saved password so a wrong password cannot lock the account.
+        if (autoSigninAttempts >= 2) return;
+        const form = page.locator(KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR);
+        await form.waitFor({ state: 'visible', timeout: 10_000 });
+        if ((await page.locator(KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR).count()) > 0) {
+          reportDiagnostic('automatic_signin_challenge');
+          return;
+        }
+        if (
+          terminal ||
+          stopping ||
+          classifyPageUrl(page.url()) !== 'login' ||
+          (await form.count()) !== 1
+        )
+          return;
+        const button = form.locator('button[type="submit"]');
+        if ((await button.count()) !== 1) throw new Error('Sign-in control unavailable.');
+        reportDiagnostic('automatic_signin_started');
+        await form.locator('input#userName').fill(credentials.username);
+        await form.locator('input#password').fill(credentials.password);
+        if (terminal || stopping || classifyPageUrl(page.url()) !== 'login') return;
+        autoSigninAttempts += 1;
+        await button.click({ timeout: 10_000 });
+        reportDiagnostic('automatic_signin_submitted');
+      } catch {
+        reportDiagnostic('automatic_signin_failed');
+      } finally {
+        autoSigninInProgress = false;
+        if (!terminal && !stopping && classifyPageUrl(page.url()) === 'login') scheduleAutoSignin();
+      }
+    };
+
     observePage = async (candidate: Page): Promise<void> => {
       const kind = classifyPageUrl(candidate.url());
       if (kind === 'unsupported' && candidate.url() !== 'about:blank' && !stopping) {
@@ -501,6 +585,8 @@ export async function startLocalKemerBetSession(
         return;
       }
       if (kind === 'authenticated_candidate') {
+        disarmAutoSigninRetry();
+        autoSigninAttempts = 0;
         phase = 'signed_in_read_only';
         // This route is only a candidate. The local identity verifier must still reject visible
         // signed-out state and match the exact reviewed header to its protected local binding.
@@ -519,6 +605,7 @@ export async function startLocalKemerBetSession(
         phase = 'manual_login';
         armLoginDeadline();
         report({ state: 'login_required', transferDisabled: true, detailsRedacted: true });
+        void attemptAutoSignin();
       }
     };
 
@@ -616,6 +703,7 @@ export async function startLocalKemerBetSession(
         disarmCandidateDeadline();
         disarmSignedInReload();
         disarmIdentityRetry();
+        disarmAutoSigninRetry();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
           .then(() => {

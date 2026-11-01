@@ -48,6 +48,9 @@ off by default; without the exact opt-in configuration it retains the original r
   `diagnostics/kemerbet-session.jsonl` under the Companion data root. The file rotates at 8 MiB
   to `.jsonl.1`. Records contain UTC time, a launch ID, release identity, and fixed event/reason
   names; no provider frames, tokens, cookies, account details, Player IDs, or payment details.
+  For an HTTP 400 from the exact refresh endpoint, the Companion also classifies a bounded JSON
+  error response in memory. It records only a predefined reason category (or that the code is
+  missing, unrecognized, or unavailable), never the response body or the original error text.
 
 The exact reviewed main-frame `/agents` page first produces only `signed_in_candidate`. The
 companion then rejects visible login/CAPTCHA state, observes exactly one reviewed identity header

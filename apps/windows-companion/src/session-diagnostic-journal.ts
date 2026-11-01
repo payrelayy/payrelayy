@@ -76,6 +76,11 @@ const providerStates: Record<ProviderSessionDiagnosticEvent, true> = {
   guarded_page_reload_started: true,
   guarded_page_reload_committed: true,
   guarded_page_reload_failed: true,
+  automatic_signin_started: true,
+  automatic_signin_submitted: true,
+  automatic_signin_unavailable: true,
+  automatic_signin_challenge: true,
+  automatic_signin_failed: true,
 };
 const preflightStates: Record<LocalKemerBetRoutinePreflightStage, true> = {
   session_unavailable: true,

@@ -12,7 +12,8 @@ Owner-approved pilot path; this code does not enable routine live processing.
 The companion is paired and signed-command-only. Automatic Deposit execution is compiled in but
 off by default; without the exact opt-in configuration it retains the original read-only behavior:
 
-- the owner types KemerBet credentials and CAPTCHA directly into the local Chrome window;
+- non-routine launches use the local Chrome sign-in; the Owner-managed automatic sign-in
+  applies to the paired routine launch, and any CAPTCHA remains in Chrome for the Owner;
 - the dedicated Chrome profile stays on this Windows account;
 - on first use, the owner types the exact visible agent-header identity into the launcher; the
   companion compares the reviewed header twice and stores only a random-keyed fingerprint whose
@@ -31,8 +32,10 @@ off by default; without the exact opt-in configuration it retains the original r
   execution-v2 allowance is synchronously installed for the exact prepared request;
 - the exact non-financial KemerBet session-refresh request remains available so the signed-in
   session can stay healthy;
-- no screenshot, keystroke, credential, cookie, browser-storage value, Player ID, or provider
-  response body is sent to remote FetanAgent services, Git, or logs;
+- no screenshot, keystroke, cookie, browser-storage value, Player ID, or provider
+  response body is sent to remote FetanAgent services, Git, or logs. The Owner may save
+  KemerBet sign-in credentials in encrypted Supabase Vault; only the paired Companion
+  fetches them through its signed device route when the login page appears;
 - Chrome starts offline until context-wide request guards are installed; approved provider HTTP
   requests are forwarded locally, with every redirect checked before it is followed;
 - provider service workers are blocked; only the exact non-financial KemerBet admin session
@@ -41,9 +44,12 @@ off by default; without the exact opt-in configuration it retains the original r
   detecting the exact reviewed agent page, with an overall twelve-hour-ten-minute cap;
 - the separately signed Automatic Deposits routine session refreshes that same guarded page after
   seven idle minutes, re-verifies the locally bound account before new Player work, and stays open
-  beyond 24 hours while signed in. If KemerBet ends its own server session, new work pauses and
-  the login page stays open for manual sign-in; the Companion does not save a provider token
-  outside Chrome or bypass KemerBet's authentication.
+  beyond 24 hours while signed in. If KemerBet ends its own server session, new work pauses
+  while the Companion signs in with the Owner-saved credential, then resumes only after the
+  same bound account is verified. A challenge or invalid password still needs Owner attention.
+  The Companion does not save a provider token outside Chrome or bypass KemerBet's authentication.
+- if the routine Chrome window closes unexpectedly, its launcher starts a new guarded session
+  after two seconds. An unresolved transfer remains held for reconciliation, never replayed.
 - redacted session and provider-refresh events are retained only on this Windows computer in
   `diagnostics/kemerbet-session.jsonl` under the Companion data root. The file rotates at 8 MiB
   to `.jsonl.1`. Records contain UTC time, a launch ID, release identity, and fixed event/reason

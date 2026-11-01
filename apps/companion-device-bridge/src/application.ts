@@ -3,6 +3,7 @@ import type { Server } from 'node:http';
 
 import {
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_KEMERBET_SIGNIN_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
   AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
@@ -21,6 +22,7 @@ import {
   createDormantCompanionExecutionHandler,
 } from './execution-handler.js';
 import { createCompanionLookupHandler } from './lookup-handler.js';
+import { createKemerBetSigninHandler } from './kemerbet-signin-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
 import { createCompanionPlayerValidationHandler } from './player-validation-handler.js';
 import {
@@ -191,6 +193,11 @@ export async function startCompanionDeviceBridgeApplication(
           assessedAt,
         ),
     });
+    const signinHandler = createKemerBetSigninHandler({
+      signer: config.signer,
+      now: dependencies.now ?? (() => new Date().toISOString()),
+      database: postgres.database,
+    });
     // A signed Find result commits with its one-use Player selection/review
     // decision. The protected Companion scheduler remains default-off, and this
     // route has no Transfer or other financial authority.
@@ -339,20 +346,22 @@ export async function startCompanionDeviceBridgeApplication(
           })
         : createDormantRoutineDepositHandler();
     const handler: CompanionDeviceBridgeHandler = (request) =>
-      request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH ||
-      request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH
-        ? playerValidationHandler(request)
-        : request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
-            request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
-          ? lookupHandler(request)
-          : request.path === COMPANION_EXECUTION_POLL_PATH ||
-              request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
-              request.path === COMPANION_EXECUTION_RESULT_PATH ||
-              request.path === COMPANION_EXECUTION_STATUS_PATH
-            ? executionHandler(request)
-            : request.path === ROUTINE_DEPOSIT_COMMAND_PATH
-              ? routineHandler(request)
-              : pairingHandler(request);
+      request.path === AGENT_PLATFORM_COMPANION_KEMERBET_SIGNIN_PATH
+        ? signinHandler(request)
+        : request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH ||
+            request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH
+          ? playerValidationHandler(request)
+          : request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
+              request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
+            ? lookupHandler(request)
+            : request.path === COMPANION_EXECUTION_POLL_PATH ||
+                request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
+                request.path === COMPANION_EXECUTION_RESULT_PATH ||
+                request.path === COMPANION_EXECUTION_STATUS_PATH
+              ? executionHandler(request)
+              : request.path === ROUTINE_DEPOSIT_COMMAND_PATH
+                ? routineHandler(request)
+                : pairingHandler(request);
     server = createServer(handler);
     await server.listen();
     if (

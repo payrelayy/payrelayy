@@ -23,6 +23,7 @@ import {
   takeCompanionLaunchProofRequest,
 } from './launch-proof-channel.js';
 import { verifyWindowsCompanionInstallationTree } from './installation-tree.js';
+import { readKemerBetSigninCredentials } from './kemerbet-signin-client.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
@@ -57,7 +58,8 @@ import { shouldRunExactFiveLookup, shouldRunPlayerValidation } from './worker-mo
 function report(event: LocalKemerBetSessionEvent): void {
   const messages: Record<LocalKemerBetSessionEvent['state'], string> = {
     starting: 'Opening the protected local KemerBet browser…',
-    login_required: 'KemerBet is ready. Sign in directly in the Chrome window.',
+    login_required:
+      'KemerBet sign-in is in progress. If it needs your help, use the Chrome window.',
     signed_in_candidate:
       'KemerBet agent page detected; account and session identity have not been verified. Financial requests remain blocked.',
     verifying_identity:
@@ -313,6 +315,18 @@ export async function runWindowsCompanion(): Promise<void> {
       reportSession,
       reportProvider,
       reportPreflight,
+      async () => {
+        const accountId =
+          config.routineExpectedPlatformAgentAccountId ??
+          config.executionV2ExpectedPlatformAgentAccountId;
+        if (!accountId) return undefined;
+        try {
+          const device = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+          return await readKemerBetSigninCredentials(device, accountId);
+        } catch {
+          return undefined;
+        }
+      },
     );
   } catch (error) {
     sessionJournal.record({ category: 'process', state: 'exited' });

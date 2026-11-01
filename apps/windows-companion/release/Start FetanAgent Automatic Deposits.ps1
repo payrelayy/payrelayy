@@ -153,18 +153,25 @@ public static class FetanAgentConsoleInputMode {
       [string]$NoMoneyPreflightAmountMinor
   }
   try {
-    & $node $entry
-    $nodeExitCode = $LASTEXITCODE
+    while ($true) {
+      & $node $entry
+      $nodeExitCode = $LASTEXITCODE
+      if ($nodeExitCode -ne 0) {
+        throw 'The protected routine-deposit session stopped.'
+      }
+      if ($preflightPlayerProvided) { break }
+      # A closed Chrome window ends the child normally. Start a fresh guarded
+      # session so Owner-managed sign-in can restore the unattended queue.
+      Write-Output 'KemerBet browser closed. Restarting the protected Companion.'
+      Start-Sleep -Seconds 2
+    }
   } finally {
     if (-not [FetanAgentConsoleInputMode]::SetConsoleMode($consoleInput, $originalInputMode)) {
       [Console]::Error.WriteLine('The status window input mode could not be restored.')
     }
   }
-  if ($nodeExitCode -ne 0) { throw 'The protected routine-deposit session stopped.' }
   if ($preflightPlayerProvided) {
     Write-Output 'The no-money preflight session ended. No transfer was authorized.'
-  } else {
-    Write-Output 'The protected routine-deposit session ended. Review any unfinished attempt before restarting.'
   }
   exit 0
 } catch {

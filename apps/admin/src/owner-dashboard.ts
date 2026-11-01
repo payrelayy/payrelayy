@@ -94,6 +94,13 @@ export const OWNER_CONTROL_GROUPS = [
         section: 'routine-processing-title',
       },
       {
+        label: 'KemerBet automatic sign-in',
+        description: 'Update the agent sign-in used by the paired Companion.',
+        effect: 'Changes Companion sign-in',
+        view: 'system',
+        section: 'kemerbet-signin-title',
+      },
+      {
         label: 'Customer support contact',
         description: 'Set or remove the Telegram contact shown to customers.',
         effect: 'Changes public contact',
@@ -431,6 +438,19 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
           </form>
           <p class="request-meta" id="support-contact-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+        </section>
+        <section class="review-section" aria-labelledby="kemerbet-signin-title">
+          <h2 id="kemerbet-signin-title">KemerBet automatic sign-in</h2>
+          <p class="receipt-label">Set the agent username and password the paired Companion uses when KemerBet asks it to sign in.</p>
+          <p class="request-meta" id="kemerbet-signin-status" role="status">Open System to load sign-in settings.</p>
+          <form id="kemerbet-signin-form" autocomplete="off" novalidate>
+            <label for="kemerbet-signin-username">Username</label>
+            <input id="kemerbet-signin-username" type="text" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false" />
+            <label for="kemerbet-signin-password">Password</label>
+            <input id="kemerbet-signin-password" type="password" maxlength="256" autocomplete="new-password" />
+            <p class="receipt-label">The saved password is never shown here. Enter it again when changing these settings.</p>
+            <button id="kemerbet-signin-save" type="submit">Save sign-in</button>
+          </form>
         </section>
         <section class="review-section" aria-labelledby="withdrawal-contact-title">
           <div class="panel-heading">
@@ -1264,7 +1284,7 @@ const ownerViews = {
   system: {
     title: 'System',
     description: 'Check TeleBirr policy and customer contact settings.',
-    sections: ['routine-processing-title', 'support-contact-title', 'withdrawal-contact-title'],
+    sections: ['routine-processing-title', 'kemerbet-signin-title', 'support-contact-title', 'withdrawal-contact-title'],
   },
   advanced: {
     title: 'Advanced tools',
@@ -1289,6 +1309,7 @@ function showOwnerView(view, focusHeading = false) {
   ownerViewDescription.textContent = details.description;
   if (focusHeading) ownerViewTitle.focus();
   if (selectedView === 'sms' && accessToken) void loadReceiverSmsInbox(true);
+  if (selectedView === 'system' && accessToken) void loadKemerbetSignin();
 }
 for (const view of Object.keys(ownerViews)) {
   document.querySelector('#owner-nav-' + view).addEventListener('click', () => showOwnerView(view, true));
@@ -1356,6 +1377,11 @@ let receiverSmsInboxAppliedFilters = {
 };
 let manualReceiverAccounts = [];
 const supportContactForm = document.querySelector('#support-contact-form');
+const kemerbetSigninForm = document.querySelector('#kemerbet-signin-form');
+const kemerbetSigninUsername = document.querySelector('#kemerbet-signin-username');
+const kemerbetSigninPassword = document.querySelector('#kemerbet-signin-password');
+const kemerbetSigninStatus = document.querySelector('#kemerbet-signin-status');
+const kemerbetSigninSave = document.querySelector('#kemerbet-signin-save');
 const supportContactUsername = document.querySelector('#support-contact-username');
 const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
 const supportContactSave = document.querySelector('#support-contact-save');
@@ -1518,6 +1544,9 @@ let ownerAuthGeneration = 0;
 let receiverChangeReviewCursor;
 let receiverChangeReviewRequest = 0;
 let supportContactRevision;
+let kemerbetSigninRevision;
+let kemerbetSigninRequest = 0;
+let kemerbetSigninBusy = false;
 let supportContactSavedUsername;
 let supportContactRequest = 0;
 let supportContactLoading = false;
@@ -2116,6 +2145,92 @@ async function supportContactRequestForSession(generation, init) {
   }
   const payload = await deadlineBoundResponse(request.response, request.deadline).json();
   return { status: 200, payload };
+}
+
+function clearKemerbetSignin() {
+  kemerbetSigninRequest += 1;
+  kemerbetSigninRevision = undefined;
+  kemerbetSigninBusy = false;
+  kemerbetSigninUsername.value = '';
+  kemerbetSigninPassword.value = '';
+  kemerbetSigninStatus.textContent = 'Sign in to load these settings.';
+  kemerbetSigninSave.disabled = true;
+}
+
+async function loadKemerbetSignin() {
+  if (!accessToken || kemerbetSigninBusy) return;
+  const generation = ownerAuthGeneration;
+  const request = ++kemerbetSigninRequest;
+  kemerbetSigninStatus.textContent = 'Loading sign-in settings…';
+  kemerbetSigninSave.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-signin', { method: 'GET', headers: {} });
+    if (generation !== ownerAuthGeneration || request !== kemerbetSigninRequest) return;
+    if (response.status !== 200) throw new Error('unavailable');
+    const payload = await response.json();
+    const value = payload?.settings;
+    if (value !== null && (!value || typeof value !== 'object' ||
+        typeof value.username !== 'string' || !Number.isSafeInteger(value.revision) || value.revision < 1 ||
+        typeof value.platformAgentAccountId !== 'string')) throw new Error('invalid_response');
+    if (value && value.platformAgentAccountId !== activeKemerbetAgentProfileId) throw new Error('account_changed');
+    kemerbetSigninRevision = value?.revision ?? 0;
+    kemerbetSigninUsername.value = value?.username ?? '';
+    kemerbetSigninPassword.value = '';
+    kemerbetSigninStatus.textContent = value
+      ? 'Automatic sign-in is configured. Enter the password again to change it.'
+      : 'Automatic sign-in is not configured yet.';
+    kemerbetSigninSave.disabled = !activeKemerbetAgentProfileId;
+  } catch (error) {
+    if (generation === ownerAuthGeneration && request === kemerbetSigninRequest && !isSignedOutError(error)) {
+      kemerbetSigninRevision = undefined;
+      kemerbetSigninStatus.textContent = 'Sign-in settings are unavailable. Open System again to retry.';
+    }
+  }
+}
+
+async function saveKemerbetSignin() {
+  if (!accessToken || kemerbetSigninBusy || kemerbetSigninRevision === undefined ||
+      !activeKemerbetAgentProfileId) return;
+  const username = kemerbetSigninUsername.value;
+  const password = kemerbetSigninPassword.value;
+  if (!username || username !== username.trim() || username.length > 128 ||
+      !password || password.length > 256 || /[\\u0000-\\u001f\\u007f]/.test(username + password)) {
+    kemerbetSigninStatus.textContent = 'Enter a valid username and password.';
+    return;
+  }
+  const generation = ownerAuthGeneration;
+  const request = ++kemerbetSigninRequest;
+  kemerbetSigninBusy = true;
+  kemerbetSigninSave.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-signin', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        platformAgentAccountId: activeKemerbetAgentProfileId,
+        username, password, expectedRevision: kemerbetSigninRevision,
+      }),
+    });
+    if (generation !== ownerAuthGeneration || request !== kemerbetSigninRequest) return;
+    if (response.status === 409) {
+      kemerbetSigninStatus.textContent = 'Settings changed elsewhere. Open System again to refresh.';
+      kemerbetSigninRevision = undefined;
+      return;
+    }
+    if (response.status !== 200) throw new Error('unavailable');
+    const payload = await response.json();
+    if (!payload?.settings || payload.settings.platformAgentAccountId !== activeKemerbetAgentProfileId ||
+        payload.settings.username !== username || !Number.isSafeInteger(payload.settings.revision))
+      throw new Error('invalid_response');
+    kemerbetSigninRevision = payload.settings.revision;
+    kemerbetSigninStatus.textContent = 'Saved. The Companion will use these credentials the next time KemerBet asks it to sign in.';
+  } catch (error) {
+    if (generation === ownerAuthGeneration && request === kemerbetSigninRequest && !isSignedOutError(error))
+      kemerbetSigninStatus.textContent = 'Could not confirm the save. Open System again to refresh before retrying.';
+  } finally {
+    kemerbetSigninPassword.value = '';
+    kemerbetSigninBusy = false;
+    kemerbetSigninSave.disabled = kemerbetSigninRevision === undefined || !activeKemerbetAgentProfileId;
+  }
 }
 
 async function loadSupportContact() {
@@ -3715,6 +3830,7 @@ function signOut(message = 'Signed out.') {
   clearReceivers();
   clearPaymentMethods();
   clearSupportContact();
+  clearKemerbetSignin();
   clearWithdrawalContact();
   clearKemerbetAgentProfiles();
   clearCompanionDevicePairingPackage();
@@ -4594,6 +4710,8 @@ function renderKemerbetAgentProfiles(profiles) {
   activeKemerbetAgentProfileId = profiles.find((profile) => profile.profileStatus === 'active')
     ?.platformAgentAccountId;
   kemerbetAgentProfileLoadState = 'loaded';
+  if (document.querySelector('#owner-nav-system').dataset.active === 'true' && accessToken)
+    void loadKemerbetSignin();
   updateRoutineProcessingAvailability();
   if (!activeKemerbetAgentProfileId || previousLoadState !== 'loaded' ||
       previousActiveProfileId !== activeKemerbetAgentProfileId) {
@@ -8218,6 +8336,10 @@ supportContactClear.addEventListener('click', () => {
 supportContactForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveSupportContact();
+});
+kemerbetSigninForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await saveKemerbetSignin();
 });
 withdrawalContactRefresh.addEventListener('click', loadWithdrawalContact);
 withdrawalContactUsername.addEventListener('input', () => {

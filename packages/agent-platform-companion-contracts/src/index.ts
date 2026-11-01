@@ -29,6 +29,8 @@ export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH =
   '/v1/companion/device/player-validations:poll' as const;
 export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH =
   '/v1/companion/device/player-validations:submit' as const;
+export const AGENT_PLATFORM_COMPANION_KEMERBET_SIGNIN_PATH =
+  '/v1/companion/device/kemerbet-signin:read' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE =
   'application/vnd.fetanagent.companion-device-bridge+json' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX =
@@ -1804,6 +1806,29 @@ export function digestCompanionLookupPollContent(
         ]),
       )
     : undefined;
+}
+
+/** Binds a credential read to the paired certificate and exact configured agent account. */
+export function digestCompanionKemerBetSigninContent(
+  certificateBodyDigestCandidate: unknown,
+  platformAgentAccountIdCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  const platformAgentAccountId = platformAgentAccountIdCandidate;
+  if (
+    !certificateBodyDigest ||
+    typeof platformAgentAccountId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      platformAgentAccountId,
+    )
+  )
+    return undefined;
+  return sha256(
+    encodeFields('fetanagent:companion:kemerbet-signin-content:v1', [
+      ['certificateBodyDigest', certificateBodyDigest],
+      ['platformAgentAccountId', platformAgentAccountId],
+    ]),
+  );
 }
 
 /** Binds a submission request to the exact signed assignment and redacted signed result. */

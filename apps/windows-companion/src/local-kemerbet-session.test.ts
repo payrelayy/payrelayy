@@ -108,6 +108,7 @@ class FakePage extends FakeEvents {
     this.navigate(this.currentUrl);
     return null;
   });
+  readonly locator = vi.fn((_selector: string): unknown => undefined);
 
   constructor(private readonly order: string[]) {
     super();
@@ -229,7 +230,13 @@ function fakeAccountInfoResponse({
 
 const sessions: LocalKemerBetSession[] = [];
 
-async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
+async function start(
+  landingUrl = AGENTS_URL,
+  sessionConfig = config,
+  getSigninCredentials?: () => Promise<
+    { username: string; password: string; revision: number } | undefined
+  >,
+) {
   const order: string[] = [];
   const context = new FakeContext(order);
   const events: LocalKemerBetSessionEvent[] = [];
@@ -249,6 +256,7 @@ async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
     (event) => events.push(event),
     (event) => diagnostics.push(event),
     (stage) => preflight.push(stage),
+    getSigninCredentials,
   );
   // Expected deadline failures are consumed before timers run, avoiding unhandled test promises.
   void session.done.catch(() => undefined);
@@ -900,13 +908,59 @@ describe('local KemerBet enrollment session', () => {
     expect(page.reload).toHaveBeenCalledTimes(1);
   });
 
-  it('retains the first-sign-in deadline for a routine window that was never authenticated', async () => {
+  it('signs in after a routine logout and resumes only after the bound account is verified', async () => {
     const routineConfig = { ...config, routineDepositsEnabled: true };
-    const { events, session } = await start(LOGIN_URL, routineConfig);
+    const getSigninCredentials = vi.fn(async () => ({
+      username: 'reviewed-agent',
+      password: 'saved-password',
+      revision: 1,
+    }));
+    const { context, diagnostics, page, session } = await start(
+      AGENTS_URL,
+      routineConfig,
+      getSigninCredentials,
+    );
+    const usernameFill = vi.fn(async () => undefined);
+    const passwordFill = vi.fn(async () => undefined);
+    const submit = vi.fn(async () => {
+      page.navigate(AGENTS_URL);
+    });
+    const form = {
+      waitFor: vi.fn(async () => undefined),
+      count: vi.fn(async () => 1),
+      locator: vi.fn((selector: string) =>
+        selector === 'input#userName'
+          ? { fill: usernameFill }
+          : selector === 'input#password'
+            ? { fill: passwordFill }
+            : { count: vi.fn(async () => 1), click: submit },
+      ),
+    };
+    page.locator.mockImplementation((selector: string) =>
+      selector.includes('iframe') ? { count: vi.fn(async () => 0) } : form,
+    );
+
+    page.navigate(LOGIN_URL);
+    expect(session.isSignedInVerified()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(usernameFill).toHaveBeenCalledWith('reviewed-agent');
+    expect(passwordFill).toHaveBeenCalledWith('saved-password');
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toContain('automatic_signin_submitted');
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+    expect(session.isSignedInVerified()).toBe(true);
+    expect(context.close).not.toHaveBeenCalled();
+  });
+
+  it('keeps an initially signed-out routine window ready for a later Owner credential update', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, session } = await start(LOGIN_URL, routineConfig);
 
     await vi.advanceTimersByTimeAsync(TEN_MINUTES);
-    await expect(session.done).rejects.toThrow('failed closed');
-    expect(events.at(-1)?.reason).toBe('login_lifetime_expired');
+    expect(context.close).not.toHaveBeenCalled();
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(events.at(-1)?.state).toBe('login_required');
+    await session.stop();
   });
 
   it('reports a newly created local identity binding without exposing identity material', async () => {

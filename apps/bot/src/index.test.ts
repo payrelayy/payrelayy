@@ -685,13 +685,13 @@ describe('Telegram admission, private action, and ingress composition', () => {
   it('keeps Support visible on the saved-Player menu when deposit methods are offline', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn<typeof fetch>()
-        .mockImplementation(async (url) =>
-          String(url).endsWith('/payment-methods')
-            ? Response.json({ methods: { telebirr: false, cbe_birr: false } })
-            : Response.json({ supportContact: { telegramUsername: 'help_team' } }),
-        ),
+      vi.fn<typeof fetch>().mockImplementation(async (url) => {
+        if (String(url).endsWith('/payment-methods'))
+          return Response.json({ methods: { telebirr: false, cbe_birr: false } });
+        if (String(url).endsWith('/withdrawal-chat'))
+          return Response.redirect('https://t.me/balem18', 302);
+        return Response.json({ supportContact: { telegramUsername: 'help_team' } });
+      }),
     );
     runtime.config = {
       ...botConfig(false, true, true, false, true),
@@ -712,9 +712,58 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     });
     expect(buttons).toEqual([
-      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
+      { text: '💸 Withdraw', url: 'https://t.me/balem18' },
       { text: '💬 Support', url: 'https://t.me/help_team' },
     ]);
+  });
+
+  it('uses the current Owner handler only after a Player ID is saved', async () => {
+    let handler = 'balem18';
+    const fetchPublic = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      if (String(url).endsWith('/payment-methods'))
+        return Response.json({ methods: { telebirr: true, cbe_birr: true } });
+      if (String(url).endsWith('/withdrawal-chat'))
+        return Response.redirect(`https://t.me/${handler}`, 302);
+      throw new Error('Unexpected public lookup');
+    });
+    vi.stubGlobal('fetch', fetchPublic);
+    runtime.config = {
+      ...botConfig(false, true, true, false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    const menus: Array<{ text: string; buttons: Array<{ text: string; url?: string }> }> = [];
+    const reply = async (
+      text: string,
+      options?: { reply_markup?: { buttons: Array<{ text: string; url?: string }> } },
+    ) => {
+      menus.push({ text, buttons: options?.reply_markup?.buttons ?? [] });
+    };
+
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: null,
+    };
+    await runtime.messageHandler!({ ...messageContext('/menu'), reply });
+    expect(menus[0]!.buttons).toEqual([{ text: '➕ Add Player ID', callbackData: 'sp1.change' }]);
+    expect(fetchPublic.mock.calls.some(([url]) => String(url).endsWith('/withdrawal-chat'))).toBe(
+      false,
+    );
+
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+    };
+    await runtime.messageHandler!({ ...messageContext('/menu'), reply });
+    expect(menus[1]!.text).toBe('FetanAgent\nPlayer ID: PLAYER-DEMO-42');
+    expect(menus[1]!.buttons[1]).toEqual({ text: '💸 Withdraw', url: 'https://t.me/balem18' });
+    handler = 'new_handler';
+    await runtime.messageHandler!({ ...messageContext('/menu'), reply });
+    expect(menus[2]!.buttons[1]).toEqual({ text: '💸 Withdraw', url: 'https://t.me/new_handler' });
   });
 
   it('adds Support beside a remaining status action when its Deposit action is unavailable', async () => {
@@ -772,10 +821,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
         buttons = options?.reply_markup?.buttons ?? [];
       },
     });
-    expect(buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
-    ]);
+    expect(buttons).toEqual([{ text: '💰 Deposit', callbackData: 'gd1.deposit' }]);
     expect(runtime.commandUpdates).toEqual([
       {
         kind: 'set',

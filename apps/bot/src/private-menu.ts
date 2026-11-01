@@ -11,15 +11,6 @@ export type PrivateTelegramMenuButton =
   | { readonly text: string; readonly callbackData: string; readonly url?: never }
   | { readonly text: string; readonly url: string; readonly callbackData?: never };
 
-// A stable link resolves the current Owner setting when clicked, including in old bot messages.
-export const TELEGRAM_WITHDRAWAL_CHAT_URL =
-  'https://owner.fetanagent.com/v1/public/withdrawal-chat';
-
-export const TELEGRAM_WITHDRAWAL_BUTTON: PrivateTelegramMenuButton = {
-  text: '💸 Withdraw',
-  url: TELEGRAM_WITHDRAWAL_CHAT_URL,
-};
-
 export interface PrivateTelegramMenu {
   readonly text: string;
   readonly buttons: readonly PrivateTelegramMenuButton[];
@@ -52,7 +43,7 @@ export function renderPlayerRegistrationMenu(
     text:
       selectedPlayerId === null
         ? TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT
-        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}\nWithdrawals are handled manually. Tap Withdraw to chat with the handler; no request is submitted here.`,
+        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}`,
     buttons:
       selectedPlayerId === null
         ? [{ text: '➕ Add Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA }]
@@ -61,7 +52,6 @@ export function renderPlayerRegistrationMenu(
               text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
               callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
             },
-            TELEGRAM_WITHDRAWAL_BUTTON,
           ],
   };
 }

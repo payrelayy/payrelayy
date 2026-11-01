@@ -27,13 +27,12 @@ describe('English-only private customer menu', () => {
     );
   });
 
-  it('shows the saved Player ID with Deposit followed by manual Withdraw', () => {
+  it('shows the saved Player ID without adding a website link to the static menu', () => {
     expect(renderPlayerRegistrationMenu(callbackData, '28379330').text).toBe(
-      'FetanAgent\nPlayer ID: 28379330\nWithdrawals are handled manually. Tap Withdraw to chat with the handler; no request is submitted here.',
+      'FetanAgent\nPlayer ID: 28379330',
     );
     expect(renderPlayerRegistrationMenu(callbackData, '28379330').buttons).toEqual([
       { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '💸 Withdraw', url: 'https://owner.fetanagent.com/v1/public/withdrawal-chat' },
     ]);
   });
 

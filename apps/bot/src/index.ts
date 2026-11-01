@@ -33,6 +33,7 @@ import {
   TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
 } from './telegram-customer-copy.js';
 import { loadTelegramPaymentMethods } from './telegram-payment-methods.js';
+import { loadTelegramWithdrawalContact } from './telegram-withdrawal-contact.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
@@ -317,7 +318,17 @@ async function deliverPlayerAction(
       }
       return;
     }
-    const menuButtons = await availableMenuButtons(presentation.menu.buttons);
+    const hasSavedPlayer =
+      (result.outcome === 'menu' && result.selectedPlayerId !== null) ||
+      result.outcome === 'player_selection_saved';
+    const [availableButtons, withdrawalUrl] = await Promise.all([
+      availableMenuButtons(presentation.menu.buttons),
+      hasSavedPlayer
+        ? loadTelegramWithdrawalContact(config.supportContactUrl)
+        : Promise.resolve(null),
+    ]);
+    const menuButtons: PrivateTelegramMenuButton[] = [...availableButtons];
+    if (withdrawalUrl) menuButtons.push({ text: '💸 Withdraw', url: withdrawalUrl });
     let keyboard = menuButtons.length > 0 ? inlineMenu(menuButtons) : undefined;
     if (
       presentation.menu.buttons.some(isDepositMenuButton) &&

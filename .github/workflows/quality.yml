@@ -118,6 +118,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-kemerbet-signin-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-deposit-instruction-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-routine-drain-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-owner-device-health-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh

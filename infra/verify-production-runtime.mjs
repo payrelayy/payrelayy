@@ -834,7 +834,7 @@ assert.equal(
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='50129afcee54c65eabc193260bb16ffb9da071a5'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2709,6 +2709,7 @@ for (const source of [workflow, quality]) {
 const routineDrainRotation = await read(
   'infra/operations/fetanagent-production-v2-routine-drain-helper-rotation-v1.sh',
 );
+const routineDrainHelperDigest = '08e3e3271eb05a0954794c9d2b5c7b7d7ddec3bb8cfb5233a5b8deacefda399f';
 const routineDrainRunbook = await read(
   'infra/operations/production-routine-credit-restart-recovery.md',
 );
@@ -2716,7 +2717,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='50129afcee54c65eabc193260bb16ffb9da071a5'",
   `readonly PREDECESSOR_SHA256='${depositInstructionHelperDigest}'`,
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  `readonly SUCCESSOR_SHA256='${routineDrainHelperDigest}'`,
   "readonly SOURCE_REVIEW='routine-drain-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2729,7 +2730,7 @@ assert.doesNotMatch(routineDrainRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\
 for (const value of [
   '50129afcee54c65eabc193260bb16ffb9da071a5',
   depositInstructionHelperDigest,
-  helperDigest,
+  routineDrainHelperDigest,
   'ROTATE EXACT PRODUCTION V2 ROUTINE DRAIN HELPER V1',
 ]) {
   assert.ok(routineDrainRunbook.includes(value));
@@ -2738,6 +2739,44 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-routine-drain-helper-rotation-v1\.sh/u,
+  );
+}
+const ownerDeviceHealthRotation = await read(
+  'infra/operations/fetanagent-production-v2-owner-device-health-helper-rotation-v1.sh',
+);
+const ownerDeviceHealthRunbook = await read(
+  'infra/operations/production-owner-device-health-release.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'",
+  `readonly PREDECESSOR_SHA256='${routineDrainHelperDigest}'`,
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-device-health-release-guard-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER DEVICE HEALTH HELPER V1',
+]) {
+  assert.ok(
+    ownerDeviceHealthRotation.includes(value),
+    `owner device health rotation is missing ${value}`,
+  );
+}
+assert.doesNotMatch(ownerDeviceHealthRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  'ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7',
+  routineDrainHelperDigest,
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 OWNER DEVICE HEALTH HELPER V1',
+  'grant its EXECUTE privilege back to `fetanagent_receiver_sms_ingest`',
+]) {
+  assert.ok(ownerDeviceHealthRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-owner-device-health-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

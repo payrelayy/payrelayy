@@ -12,6 +12,7 @@ import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 import { PostgresOwnerPaymentMethods } from './owner-payment-methods.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
+import { PostgresOwnerDeviceHealth } from './owner-device-health.js';
 import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
 import { PostgresOwnerTelebirrExecutionApprovals } from './owner-telebirr-execution-approvals.js';
 import { PostgresOwnerRoutineTelebirrProcessing } from './owner-routine-telebirr-processing.js';
@@ -36,6 +37,7 @@ export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
+  readonly deviceHealth?: Pick<PostgresOwnerDeviceHealth, 'status'> | undefined;
   readonly companionExecutionReadiness?:
     Pick<PostgresOwnerCompanionExecutionReadiness, 'status'> | undefined;
   readonly executionApprovals?:
@@ -89,7 +91,8 @@ export interface OwnerControlPostgresRuntime {
         'readCbeBirrProvisioningSnapshot' | 'upgradeCbeBirrProtection'
       >
     >;
-  readonly paymentMethods?: Pick<PostgresOwnerPaymentMethods, 'list' | 'set' | 'publicStatus'>;
+  readonly paymentMethods?: Pick<PostgresOwnerPaymentMethods, 'list' | 'set' | 'publicStatus'> &
+    Partial<Pick<PostgresOwnerPaymentMethods, 'availability' | 'setAvailability'>>;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
@@ -222,6 +225,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)', 'execute') as companion_lookup_issue_allowed,
     has_function_privilege(current_user, 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)', 'execute') as companion_lookup_status_allowed,
     has_function_privilege(current_user, 'app.get_owner_companion_connection_status(uuid)', 'execute') as companion_connection_status_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_companion_kemerbet_session_status(uuid)')::oid, 'execute'), true) as companion_session_status_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_receiver_sms_device_status(uuid)')::oid, 'execute'), true) as receiver_phone_status_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 'execute'), true) as companion_execution_readiness_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 'execute'), true) as execution_approval_list_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 'execute'), true) as execution_approval_write_allowed,
@@ -368,6 +373,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_provider_deposit_controls(uuid)', 'execute') as provider_controls_list_allowed,
     has_function_privilege(current_user, 'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)', 'execute') as provider_controls_set_allowed,
     has_function_privilege(current_user, 'app.public_provider_deposit_controls()', 'execute') as provider_controls_public_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_deposit_availability(uuid)')::oid, 'execute'), true) as deposit_availability_get_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)')::oid, 'execute'), true) as deposit_availability_set_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false) as cbe_birr_receiver_v2_rotate_allowed,
     -- The metadata function may arrive before this app, and its Owner grant may arrive later.
     -- Either state is safe only while the function stays private and hardened.
@@ -483,6 +490,10 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_withdrawal_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_withdrawal_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_withdrawal_contact()') is not null)::integer
+        + (to_regprocedure('app.get_owner_deposit_availability(uuid)') is not null)::integer
+        + (to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)') is not null)::integer
+        + (to_regprocedure('app.get_owner_companion_kemerbet_session_status(uuid)') is not null)::integer
+        + (to_regprocedure('app.get_owner_receiver_sms_device_status(uuid)') is not null)::integer
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -521,6 +532,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)'::regprocedure
           ,'app.get_agent_platform_companion_exact_five_lookup_status(uuid)'::regprocedure
           ,'app.get_owner_companion_connection_status(uuid)'::regprocedure
+          ,coalesce(to_regprocedure('app.get_owner_companion_kemerbet_session_status(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_receiver_sms_device_status(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 0::oid)
@@ -580,6 +593,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.list_owner_provider_deposit_controls(uuid)'::regprocedure
           ,'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)'::regprocedure
           ,'app.public_provider_deposit_controls()'::regprocedure
+          ,coalesce(to_regprocedure('app.get_owner_deposit_availability(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)')::oid, 0::oid)
         )
     ) as all_other_app_functions_denied
 `;
@@ -677,6 +692,9 @@ export async function createOwnerControlPostgresRuntime(
         )
       : undefined,
     companionConnection: new PostgresOwnerCompanionConnection({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    deviceHealth: new PostgresOwnerDeviceHealth({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     companionExecutionReadiness: new PostgresOwnerCompanionExecutionReadiness({

@@ -28,6 +28,11 @@ export interface OwnerPaymentMethod {
   readonly changedAt: string;
 }
 
+export interface OwnerDepositAvailability {
+  readonly enabled: boolean;
+  readonly changedAt: string;
+}
+
 export interface PaymentMethodsDatabase {
   query(sql: string, values: readonly (boolean | string)[]): Promise<{ rows: readonly unknown[] }>;
 }
@@ -160,6 +165,51 @@ export class PostgresOwnerPaymentMethods {
       throw new OwnerPaymentMethodsUnavailableError();
     }
     return this.list(authUserId);
+  }
+
+  async availability(authUserId: string): Promise<OwnerDepositAvailability> {
+    if (!UUID.test(authUserId)) throw new OwnerPaymentMethodsRejectedError();
+    try {
+      const result = await this.database.query(
+        'select enabled, changed_at from app.get_owner_deposit_availability($1::uuid)',
+        [authUserId],
+      );
+      if (result.rows.length !== 1) throw new OwnerPaymentMethodsUnavailableError();
+      const row = result.rows[0];
+      if (!row || typeof row !== 'object' || Array.isArray(row))
+        throw new OwnerPaymentMethodsUnavailableError();
+      const value = row as Record<string, unknown>;
+      if (
+        typeof value.enabled !== 'boolean' ||
+        !(value.changed_at instanceof Date) ||
+        !Number.isFinite(value.changed_at.getTime())
+      )
+        throw new OwnerPaymentMethodsUnavailableError();
+      return Object.freeze({ enabled: value.enabled, changedAt: value.changed_at.toISOString() });
+    } catch (error) {
+      if (error instanceof OwnerPaymentMethodsRejectedError) throw error;
+      throw new OwnerPaymentMethodsUnavailableError();
+    }
+  }
+
+  async setAvailability(
+    authUserId: string,
+    requestId: string,
+    enabled: boolean,
+  ): Promise<OwnerDepositAvailability> {
+    if (!UUID.test(authUserId) || !UUID_V4.test(requestId) || typeof enabled !== 'boolean')
+      throw new OwnerPaymentMethodsRejectedError();
+    try {
+      await this.database.query(
+        'select app.set_owner_deposit_availability($1::uuid,$2::uuid,$3::boolean)',
+        [authUserId, requestId, enabled],
+      );
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P0001')
+        throw new OwnerPaymentMethodsConflictError();
+      throw new OwnerPaymentMethodsUnavailableError();
+    }
+    return this.availability(authUserId);
   }
 
   async publicStatus(): Promise<Readonly<Record<PaymentMethodCode, boolean>>> {

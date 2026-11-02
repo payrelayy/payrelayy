@@ -23,6 +23,7 @@ const FUNCTIONS = [
   'app.load_receiver_sms_device_enrollment(text)',
   'app.record_receiver_sms_payment_event(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
   'app.record_receiver_sms_payment_event_with_display(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer,text,text)',
+  'app.record_receiver_sms_device_status(text,text,text,timestamptz,text,text)',
 ] as const;
 const oids = FUNCTIONS.map((value) => `pg_catalog.to_regprocedure('${value}')`).join(',');
 
@@ -62,18 +63,20 @@ export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `
              'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN') or
            pg_catalog.has_any_column_privilege(current_user, relation.oid,
              'SELECT,INSERT,UPDATE,REFERENCES'))))) as no_base_access,
-    (select count(*) between 2 and 3
+    (select count(*) between 3 and 4
       and pg_catalog.to_regprocedure('${FUNCTIONS[0]}') is not null
       and pg_catalog.to_regprocedure('${FUNCTIONS[1]}') is not null
+      and pg_catalog.to_regprocedure('${FUNCTIONS[3]}') is not null
       and pg_catalog.bool_and(routine.prosecdef
       and routine.prokind = 'f' and owner.rolname = 'postgres'
       and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[])
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_roles owner on owner.oid = routine.proowner
       where routine.oid in (${oids})) as functions_hardened,
-    (select count(*) between 2 and 3
+    (select count(*) between 3 and 4
       and pg_catalog.to_regprocedure('${FUNCTIONS[0]}') is not null
       and pg_catalog.to_regprocedure('${FUNCTIONS[1]}') is not null
+      and pg_catalog.to_regprocedure('${FUNCTIONS[3]}') is not null
       from pg_catalog.pg_proc routine
       where routine.oid in (${oids}) and
         pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE'))

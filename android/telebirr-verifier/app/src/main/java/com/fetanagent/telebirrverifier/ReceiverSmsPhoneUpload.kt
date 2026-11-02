@@ -9,6 +9,8 @@ import java.time.Instant
 internal object ReceiverSmsBridgeProtocol {
   const val PATH = "/v1/receiver-sms/events:upload"
   const val CONTENT_TYPE = "application/vnd.fetanagent.receiver-sms-event.v1+json"
+  const val STATUS_PATH = "/v1/receiver-sms/status:report"
+  const val STATUS_CONTENT_TYPE = "application/vnd.fetanagent.receiver-sms-status.v1+json"
   const val MAX_REQUEST_BYTES = 8 * 1_024
   const val MAX_RESPONSE_BYTES = 4 * 1_024
 }
@@ -49,8 +51,10 @@ internal class FixedReceiverSmsHttpsExchange(
   private val executor: DeviceBridgeHttpsExecutor = PlatformDeviceBridgeHttpsExecutor,
 ) : DeviceBridgeExchange {
   override fun post(path: String, contentType: String, body: ByteArray): DeviceBridgeRawResponse {
-    require(path == ReceiverSmsBridgeProtocol.PATH &&
-      contentType == ReceiverSmsBridgeProtocol.CONTENT_TYPE &&
+    require(((path == ReceiverSmsBridgeProtocol.PATH &&
+      contentType == ReceiverSmsBridgeProtocol.CONTENT_TYPE) ||
+      (path == ReceiverSmsBridgeProtocol.STATUS_PATH &&
+      contentType == ReceiverSmsBridgeProtocol.STATUS_CONTENT_TYPE)) &&
       body.size in 1..ReceiverSmsBridgeProtocol.MAX_REQUEST_BYTES)
     val url = URI("https", null, FixedDeviceBridgeHttpsExchange.ORIGIN_HOST, 443,
       path, null, null).toURL()

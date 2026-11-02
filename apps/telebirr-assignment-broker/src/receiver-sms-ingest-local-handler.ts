@@ -83,7 +83,8 @@ export function createReceiverSmsIngestLocalHandler(broker: Broker) {
   if (
     !broker ||
     typeof broker.loadEnrollment !== 'function' ||
-    typeof broker.verifyAndRecord !== 'function'
+    typeof broker.verifyAndRecord !== 'function' ||
+    typeof broker.verifyAndRecordStatus !== 'function'
   )
     throw new Error();
   return async (
@@ -118,6 +119,18 @@ export function createReceiverSmsIngestLocalHandler(broker: Broker) {
         const kind = await broker.verifyAndRecord({
           publicKeySpki: value.input.publicKeySpki,
           signedEvent: value.input.signedEvent,
+        });
+        return response(200, { kind });
+      }
+      if (value.operation === 'verify_and_record_status') {
+        if (
+          !exact(value.input, ['publicKeySpki', 'signedStatus']) ||
+          typeof value.input.publicKeySpki !== 'string'
+        )
+          return response(400, { code: 'invalid_request' });
+        const kind = await broker.verifyAndRecordStatus({
+          publicKeySpki: value.input.publicKeySpki,
+          signedStatus: value.input.signedStatus,
         });
         return response(200, { kind });
       }

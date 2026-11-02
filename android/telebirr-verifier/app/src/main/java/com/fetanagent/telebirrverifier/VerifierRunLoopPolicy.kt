@@ -19,8 +19,10 @@ data class VerifierLoopDecision(
  * signed work remain the stopping boundaries.
  */
 class VerifierRunLoopPolicy(
+  private val heartbeatIntervalMillis: Long = HEARTBEAT_INTERVAL_MILLIS,
   private val jitterFraction: () -> Double = { ThreadLocalRandom.current().nextDouble() },
 ) {
+  init { require(heartbeatIntervalMillis in 1_000L..HEARTBEAT_INTERVAL_MILLIS) }
   private var previousStatus: StatusProjection? = null
   private var equivalentStatusCount = 0
   private var lastHeartbeatStatus: StatusProjection? = null
@@ -40,7 +42,7 @@ class VerifierRunLoopPolicy(
       lastHeartbeatStatus != projection ||
         lastHeartbeatAtMillis == null ||
         monotonicNowMillis < requireNotNull(lastHeartbeatAtMillis) ||
-        monotonicNowMillis - requireNotNull(lastHeartbeatAtMillis) >= HEARTBEAT_INTERVAL_MILLIS
+        monotonicNowMillis - requireNotNull(lastHeartbeatAtMillis) >= heartbeatIntervalMillis
 
     val baseDelay = baseDelayMillis(status, equivalentStatusCount)
     return if (baseDelay == null) {

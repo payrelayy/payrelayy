@@ -52,6 +52,7 @@ import {
   type RoutineDepositHttpStoreDiagnostic,
 } from './routine-deposit-http-store.js';
 import { startRoutineDepositQueue } from './routine-deposit-runner.js';
+import { runCompanionSessionStatusReporter } from './session-status-reporter.js';
 import type { RoutineDepositWorkerResult } from './routine-deposit-worker.js';
 import { shouldRunExactFiveLookup, shouldRunPlayerValidation } from './worker-mode.js';
 
@@ -278,7 +279,9 @@ export async function runWindowsCompanion(): Promise<void> {
     releaseSha: config.releaseSha,
   });
   sessionJournal.record({ category: 'process', state: 'started' });
+  let latestLocalSessionState: LocalKemerBetSessionEvent['state'] = 'starting';
   const reportSession = (event: LocalKemerBetSessionEvent): void => {
+    latestLocalSessionState = event.state;
     sessionJournal.record({ category: 'session', state: event.state, reason: event.reason });
     report(event);
   };
@@ -335,6 +338,39 @@ export async function runWindowsCompanion(): Promise<void> {
   }
   const lookupAbort = new AbortController();
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
+  const sessionStatusSource = {
+    isSignedInVerified: () => session.isSignedInVerified(),
+    state: () =>
+      latestLocalSessionState === 'login_required' ||
+      latestLocalSessionState === 'failed' ||
+      latestLocalSessionState === 'stopped'
+        ? ('sign_in_needed' as const)
+        : latestLocalSessionState === 'review_paused'
+          ? ('review_paused' as const)
+          : ('checking' as const),
+  };
+  const sessionStatusAccountId =
+    config.routineExpectedPlatformAgentAccountId ??
+    config.executionV2ExpectedPlatformAgentAccountId;
+  let sessionStatusReporterStarted = false;
+  const startSessionStatusReporter = (
+    device: Awaited<ReturnType<typeof loadCompanionDeviceSigningRuntime>>,
+  ) => {
+    if (sessionStatusReporterStarted || lookupAbort.signal.aborted || !sessionStatusAccountId)
+      return;
+    sessionStatusReporterStarted = true;
+    void runCompanionSessionStatusReporter({
+      device,
+      source: sessionStatusSource,
+      platformAgentAccountId: sessionStatusAccountId,
+      signal: lookupAbort.signal,
+    }).catch(() => undefined);
+  };
+  // An already paired Companion can report "sign-in needed" before its first
+  // successful KemerBet login. This has no lookup or financial capability.
+  void loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot })
+    .then(startSessionStatusReporter)
+    .catch(() => undefined);
   let guardedShutdown: GuardedPrePermitShutdown | undefined;
   const enrollmentPromise = session.verified.then(async (verified) => {
     if (!verified) return;
@@ -350,6 +386,7 @@ export async function runWindowsCompanion(): Promise<void> {
       if (!enrollment.devicePaired) return;
       stage = 'device_runtime';
       const baseDevice = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+      startSessionStatusReporter(baseDevice);
       if (config.executionV2Enabled) stage = 'execution_handoff';
       const handoff = config.executionV2Enabled
         ? await loadWindowsCompanionExecutionHandoff(

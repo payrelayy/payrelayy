@@ -204,6 +204,8 @@ function runtimeFixture() {
     },
   );
   const runtime: CompanionDeviceSigningRuntime = {
+    sessionStatusEndpoint:
+      'https://device.fetanagent.com/v1/companion/device/kemerbet-session:report',
     certificate: { bodyDigest: sha('c') } as SignedCompanionEnrollmentCertificate,
     pollEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH}`,
     resultEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH}`,

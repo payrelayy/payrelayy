@@ -68,6 +68,7 @@ describe('private receiver SMS ingestion', () => {
         {
           loadEnrollment: async () => f.enrollment,
           recordPayment,
+          recordStatus: async () => true,
         },
         () => '2026-10-20T14:47:03.000Z',
         fingerprintSecret,
@@ -99,6 +100,7 @@ describe('private receiver SMS ingestion', () => {
         {
           loadEnrollment: async () => f.enrollment,
           recordPayment,
+          recordStatus: async () => true,
         },
         () => '2026-10-20T14:47:03.000Z',
         fingerprintSecret,
@@ -129,6 +131,7 @@ describe('private receiver SMS ingestion', () => {
       {
         loadEnrollment: async () => f.enrollment,
         recordPayment,
+        recordStatus: async () => true,
       },
       () => '2026-10-20T14:47:03.000Z',
       fingerprintSecret,
@@ -144,6 +147,7 @@ describe('private receiver SMS ingestion', () => {
       {
         loadEnrollment: async () => undefined,
         recordPayment,
+        recordStatus: async () => true,
       },
       () => '2026-10-20T14:47:03.000Z',
       fingerprintSecret,

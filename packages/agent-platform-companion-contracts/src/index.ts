@@ -23,6 +23,8 @@ export const AGENT_PLATFORM_COMPANION_PAIRING_PATH =
   '/v1/companion/device/enrollments:pair' as const;
 export const AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH =
   '/v1/companion/device/lookup-assignments:poll' as const;
+export const AGENT_PLATFORM_COMPANION_SESSION_STATUS_PATH =
+  '/v1/companion/device/kemerbet-session:report' as const;
 export const AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH =
   '/v1/companion/device/lookup-results:submit' as const;
 export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH =
@@ -1806,6 +1808,37 @@ export function digestCompanionLookupPollContent(
         ]),
       )
     : undefined;
+}
+
+export type CompanionKemerBetSessionReportState =
+  'signed_in_verified' | 'sign_in_needed' | 'checking' | 'review_paused';
+
+/** The signed request carries only a bounded local session state, never credentials. */
+export function digestCompanionSessionStatusContent(
+  certificateBodyDigestCandidate: unknown,
+  platformAgentAccountIdCandidate: unknown,
+  stateCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  const platformAgentAccountId = platformAgentAccountIdCandidate;
+  if (
+    !certificateBodyDigest ||
+    typeof platformAgentAccountId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      platformAgentAccountId,
+    ) ||
+    !['signed_in_verified', 'sign_in_needed', 'checking', 'review_paused'].includes(
+      stateCandidate as string,
+    )
+  )
+    return undefined;
+  return sha256(
+    encodeFields('fetanagent:companion:session-status-content:v1', [
+      ['certificateBodyDigest', certificateBodyDigest],
+      ['platformAgentAccountId', platformAgentAccountId],
+      ['state', stateCandidate as string],
+    ]),
+  );
 }
 
 /** Binds a credential read to the paired certificate and exact configured agent account. */

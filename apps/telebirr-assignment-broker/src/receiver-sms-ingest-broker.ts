@@ -5,6 +5,7 @@ import { protectReceiverSmsDisplayReference } from '@fetanagent/deposit-referenc
 
 import {
   verifyReceiverSmsEvent,
+  verifyReceiverSmsStatus,
   type ReceiverSmsVerifiedEvent,
   type ReceiverSmsVerifiedPayment,
 } from '@fetanagent/telebirr-verification-foundation';
@@ -22,6 +23,14 @@ export interface ReceiverSmsIngestDatabase {
       readonly masked: string;
     };
   }): Promise<'recorded' | 'exact_replay' | 'conflict'>;
+  recordStatus(input: {
+    readonly deviceId: string;
+    readonly keyId: string;
+    readonly state: 'ready' | 'attention';
+    readonly observedAt: string;
+    readonly bodyDigest: string;
+    readonly devicePublicKeySpkiSha256: string;
+  }): Promise<boolean>;
 }
 
 const DEVICE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
@@ -42,6 +51,7 @@ export function createReceiverSmsIngestBroker(
     !database ||
     typeof database.loadEnrollment !== 'function' ||
     typeof database.recordPayment !== 'function' ||
+    typeof database.recordStatus !== 'function' ||
     typeof now !== 'function' ||
     !/^[0-9a-f]{64}$/u.test(fingerprintSecret) ||
     (displayEncryptionSecret !== undefined &&
@@ -105,6 +115,30 @@ export function createReceiverSmsIngestBroker(
             }
           : {}),
       });
+    },
+    async verifyAndRecordStatus(input: {
+      readonly publicKeySpki: string;
+      readonly signedStatus: unknown;
+    }): Promise<'recorded' | 'review'> {
+      if (!SPKI.test(input.publicKeySpki)) return 'review';
+      const key = Buffer.from(input.publicKeySpki, 'base64url');
+      if (key.toString('base64url') !== input.publicKeySpki) return 'review';
+      const body =
+        input.signedStatus && typeof input.signedStatus === 'object' && 'body' in input.signedStatus
+          ? input.signedStatus.body
+          : undefined;
+      const deviceId =
+        body && typeof body === 'object' && 'deviceId' in body ? body.deviceId : undefined;
+      if (typeof deviceId !== 'string' || !DEVICE_ID.test(deviceId)) return 'review';
+      const enrollment = await database.loadEnrollment(deviceId);
+      if (!enrollment) return 'review';
+      const verified = verifyReceiverSmsStatus(input.signedStatus, key, enrollment, now());
+      if (!verified) return 'review';
+      const stored = await database.recordStatus({
+        ...verified,
+        devicePublicKeySpkiSha256: `sha256:${createHash('sha256').update(key).digest('hex')}`,
+      });
+      return stored ? 'recorded' : 'review';
     },
   });
 }

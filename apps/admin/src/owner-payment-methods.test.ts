@@ -124,4 +124,21 @@ describe('Owner payment-method adapter', () => {
     });
     await expect(control.publicStatus()).resolves.toEqual({ cbe_birr: false, telebirr: true });
   });
+
+  it('resumes all deposits with one audited request and returns the saved state', async () => {
+    const query = vi.fn<PaymentMethodsDatabase['query']>(async (sql, values) => {
+      if (sql.includes('set_owner_deposit_availability')) {
+        expect(values).toEqual([owner, request, true]);
+        return { rows: [{ set_owner_deposit_availability: true }] };
+      }
+      expect(values).toEqual([owner]);
+      return { rows: [{ enabled: true, changed_at: at }] };
+    });
+    const control = new PostgresOwnerPaymentMethods({ query });
+    await expect(control.setAvailability(owner, request, true)).resolves.toEqual({
+      enabled: true,
+      changedAt: at.toISOString(),
+    });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
 });

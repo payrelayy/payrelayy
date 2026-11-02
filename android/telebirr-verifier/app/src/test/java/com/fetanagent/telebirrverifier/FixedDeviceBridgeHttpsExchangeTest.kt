@@ -10,12 +10,14 @@ import org.junit.Test
 
 class FixedDeviceBridgeHttpsExchangeTest {
   @Test
-  fun `shared HTTPS transport admits both paid routes without widening arbitrary media types`() {
+  fun `shared HTTPS transport admits the receiver status report without arbitrary media types`() {
     listOf(
       DeviceBridgeProtocol.CONTENT_TYPE,
       RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
       RoutinePaidBridgeProtocol.CONTENT_TYPE,
       RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE,
+      ReceiverSmsBridgeProtocol.CONTENT_TYPE,
+      ReceiverSmsBridgeProtocol.STATUS_CONTENT_TYPE,
     ).forEach { contentType ->
       assertTrue(isAllowedDeviceBridgeContentType(contentType))
     }

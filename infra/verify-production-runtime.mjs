@@ -818,14 +818,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '830f233f5acb24674fc93c2dd6ad7d93a54ffc15'/gu)].length,
+  [...workflow.matchAll(/status '50129afcee54c65eabc193260bb16ffb9da071a5'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='830f233f5acb24674fc93c2dd6ad7d93a54ffc15'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='50129afcee54c65eabc193260bb16ffb9da071a5'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2633,6 +2633,7 @@ const kemerbetSigninRotation = await read(
 );
 const kemerbetSigninRunbook = await read('infra/operations/production-kemerbet-signin-release.md');
 const previousHelperDigest = '24dbb0be96253a173906da6e99bfc3242444286d2c3cd337ec1bf88cd018b218';
+const depositInstructionHelperDigest = '7227d02fc9eee8e5ce4189e955ea32a2971ff76b3d330602e5536c9ef908bc19';
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='b19f437aeaeb79fe3e1bb460dd35019a2ba5e1ea'",
@@ -2671,7 +2672,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='830f233f5acb24674fc93c2dd6ad7d93a54ffc15'",
   `readonly PREDECESSOR_SHA256='${previousHelperDigest}'`,
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  `readonly SUCCESSOR_SHA256='${depositInstructionHelperDigest}'`,
   "readonly SOURCE_REVIEW='deposit-instruction-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2684,7 +2685,7 @@ assert.doesNotMatch(depositInstructionRotation, /\b(?:docker|psql|rm|sed|chmod|c
 for (const value of [
   '830f233f5acb24674fc93c2dd6ad7d93a54ffc15',
   previousHelperDigest,
-  helperDigest,
+  depositInstructionHelperDigest,
   'ROTATE EXACT PRODUCTION V2 DEPOSIT INSTRUCTION HELPER V1',
 ]) {
   assert.ok(depositInstructionRunbook.includes(value));
@@ -2693,6 +2694,40 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-deposit-instruction-helper-rotation-v1\.sh/u,
+  );
+}
+const routineDrainRotation = await read(
+  'infra/operations/fetanagent-production-v2-routine-drain-helper-rotation-v1.sh',
+);
+const routineDrainRunbook = await read(
+  'infra/operations/production-routine-credit-restart-recovery.md',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='50129afcee54c65eabc193260bb16ffb9da071a5'",
+  `readonly PREDECESSOR_SHA256='${depositInstructionHelperDigest}'`,
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='routine-drain-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 ROUTINE DRAIN HELPER V1',
+]) {
+  assert.ok(routineDrainRotation.includes(value), `routine drain rotation is missing ${value}`);
+}
+assert.doesNotMatch(routineDrainRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '50129afcee54c65eabc193260bb16ffb9da071a5',
+  depositInstructionHelperDigest,
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 ROUTINE DRAIN HELPER V1',
+]) {
+  assert.ok(routineDrainRunbook.includes(value));
+}
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-routine-drain-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

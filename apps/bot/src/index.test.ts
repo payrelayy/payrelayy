@@ -1113,7 +1113,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(replies[0]!.text).toContain('Saved Player ID: PLAYER-DEMO-42');
     expect(replies[0]!.text).not.toContain('2519000000');
-    expect(replies[0]!.text).not.toContain('Choose one available method');
+    expect(replies[0]!.text).toContain('Send 100–25,000 ETB using one method.');
     expect(replies[0]!.text).not.toContain(
       'Valid for 1 hour. Check the receiver name before paying.',
     );
@@ -1125,8 +1125,14 @@ describe('Telegram admission, private action, and ingress composition', () => {
         text: replies[0]!.text.slice(entity.offset, entity.offset + entity.length),
       })),
     ).toEqual([
+      { type: 'bold', text: '💰 FetanAgent deposit' },
+      { type: 'bold', text: 'Send 100–25,000 ETB' },
+      { type: 'bold', text: 'TeleBirr' },
       { type: 'code', text: '900000042' },
+      { type: 'bold', text: 'CBE Birr' },
       { type: 'code', text: '900000043' },
+      { type: 'bold', text: 'Saved Player ID:' },
+      { type: 'code', text: 'PLAYER-DEMO-42' },
     ]);
     expect(runtime.instructionRecords).toHaveLength(1);
     expect(runtime.instructionRecords[0]).toEqual([expect.anything(), '123456', '123456789', 42]);
@@ -1197,7 +1203,14 @@ describe('Telegram admission, private action, and ingress composition', () => {
       replies[0]!.options?.entities?.map((entity) =>
         replies[0]!.text.slice(entity.offset, entity.offset + entity.length),
       ),
-    ).toEqual(['900000043']);
+    ).toEqual([
+      '💰 FetanAgent deposit',
+      'Send 100–25,000 ETB',
+      'CBE Birr',
+      '900000043',
+      'Saved Player ID:',
+      'PLAYER-DEMO-42',
+    ]);
     expect(runtime.instructionRecords).toHaveLength(0);
   });
 

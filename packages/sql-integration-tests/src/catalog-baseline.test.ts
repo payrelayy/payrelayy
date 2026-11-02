@@ -208,6 +208,7 @@ const ownerBrowserIdleSessionMigrationName = '20261101013000_owner_browser_idle_
 const manualWithdrawalContactMigrationName = '20261101013001_manual_withdrawal_contact.sql';
 const ownerKemerbetAutoSigninMigrationName =
   '20261101204815_owner_kemerbet_auto_signin_credentials.sql';
+const routineReleaseDrainMigrationName = '20261102151000_routine_deposit_release_drain.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -700,7 +701,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerSubmittedPaymentsFastListMigrationName &&
         name !== ownerBrowserIdleSessionMigrationName &&
         name !== manualWithdrawalContactMigrationName &&
-        name !== ownerKemerbetAutoSigninMigrationName,
+        name !== ownerKemerbetAutoSigninMigrationName &&
+        name !== routineReleaseDrainMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10518,6 +10520,16 @@ describe('100 ETB production deposit policy cutover', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerKemerbetAutoSigninMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, routineReleaseDrainMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [routineReleaseDrainMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(

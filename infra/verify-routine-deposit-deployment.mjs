@@ -43,6 +43,7 @@ const [
   liveNoMoneyPollMigration,
   isolationMigration,
   isolatedRecoveryMigration,
+  releaseDrainMigration,
   activateSql,
   stoppedRestoreSql,
   cbeStoppedResumeSql,
@@ -85,6 +86,7 @@ const [
   read('supabase/migrations/20261009210922_routine_no_money_poll_yields_during_live_deposits.sql'),
   read('supabase/migrations/20261024083926_isolate_uncertain_routine_credits.sql'),
   read('supabase/migrations/20261024085932_allow_isolated_review_recovery.sql'),
+  read('supabase/migrations/20261102151000_routine_deposit_release_drain.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
   read('infra/sql/production-stopped-sms-runtime-restore.sql'),
   read('infra/sql/production-receiver-sms-cbe-stopped-resume.sql'),
@@ -252,6 +254,13 @@ assert.match(migration, /create role fetanagent_routine_deposit_broker\s+\n?\s*n
 assert.match(migration, /create role fetanagent_routine_deposit_broker_runtime\s+\n?\s*nologin/iu);
 assert.match(migration, /session_user <> 'postgres'/u);
 assert.match(migration, /create function app\.execute_agent_platform_routine_deposit_command/u);
+assert.match(releaseDrainMigration, /create table app\.routine_deposit_release_drain/u);
+assert.match(releaseDrainMigration, /for share;/u);
+assert.match(releaseDrainMigration, /pg_catalog\.clock_timestamp\(\)/u);
+assert.match(
+  releaseDrainMigration,
+  /The routine broker changed before release-drain installation/u,
+);
 assert.match(migration, /approved_history_match_count = 1/u);
 assert.match(migration, /exact_player_credit_match/u);
 assert.match(

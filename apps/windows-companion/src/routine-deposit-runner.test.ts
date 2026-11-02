@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const selected = vi.hoisted(() => ({ runOnce: vi.fn() }));
+const selected = vi.hoisted(() => ({ runOnce: vi.fn(), needsRecovery: vi.fn(() => false) }));
 vi.mock('./routine-deposit-worker.js', () => ({ createRoutineDepositWorker: () => selected }));
 
 import {
@@ -12,6 +12,7 @@ describe('automatic routine queue loop', () => {
   afterEach(() => {
     vi.useRealTimers();
     selected.runOnce.mockReset();
+    selected.needsRecovery.mockReset().mockReturnValue(false);
   });
 
   function fixture() {
@@ -20,6 +21,7 @@ describe('automatic routine queue loop', () => {
       stop: vi.fn(async () => undefined),
       pauseForReview: vi.fn(),
       dismissSettledRoutineSuccess: vi.fn(async () => undefined),
+      resetAfterContainedRoutineDeposit: vi.fn(async () => undefined),
       executeRoutineOneUseDeposit: vi.fn(),
       scanRoutineDepositHistory: vi.fn(),
       isSignedInVerified: vi.fn(() => true),
@@ -115,7 +117,7 @@ describe('automatic routine queue loop', () => {
     expect(order).toEqual(['financial_idle', 'find_started', 'find_completed', 'financial_stop']);
   });
 
-  it('keeps Player verification and later credits running after one durable Owner review', async () => {
+  it('claims the next credit immediately after one durable Owner review', async () => {
     vi.useFakeTimers();
     const { options, session } = fixture();
     const order: string[] = [];
@@ -135,7 +137,8 @@ describe('automatic routine queue loop', () => {
     const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
     await vi.advanceTimersByTimeAsync(200);
     await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
-    expect(order).toEqual(['first_credit_reviewed', 'player_verified', 'next_credit_completed']);
+    expect(order).toEqual(['first_credit_reviewed', 'next_credit_completed']);
+    expect(runReadOnlyIdleWorkOnce).not.toHaveBeenCalled();
     expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(selected.runOnce).toHaveBeenCalledTimes(3);
   });
@@ -368,6 +371,25 @@ describe('automatic routine queue loop', () => {
     expect(selected.runOnce).toHaveBeenCalledTimes(1);
     expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(session.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a pending server containment while KemerBet is signed out', async () => {
+    vi.useFakeTimers();
+    const { options, session, controller } = fixture();
+    session.isSignedInVerified.mockReturnValue(false);
+    selected.needsRecovery.mockReturnValue(true);
+    selected.runOnce
+      .mockResolvedValueOnce({ status: 'temporarily_unavailable' })
+      .mockImplementationOnce(async () => {
+        selected.needsRecovery.mockReturnValue(false);
+        return { status: 'contained', reason: 'execution_uncertain' };
+      });
+    const queue = startRoutineDepositQueue(options);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(selected.runOnce).toHaveBeenCalledTimes(2);
+    expect(session.pauseForReview).not.toHaveBeenCalled();
+    controller.abort();
+    await expect(queue.done).resolves.toEqual({ status: 'stopped' });
   });
 
   it('cannot turn a reporting error into a retry or lose the shutdown', async () => {

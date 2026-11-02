@@ -1468,7 +1468,6 @@ jobs:
             *) exit 1 ;;
           esac
           psql -X --file="$preflight" >/dev/null
-          psql -X --file=infra/sql/production-cbe-live-cutover-idle.sql >/dev/null
           fingerprint="$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
             --file=infra/sql/production-financial-switch-fingerprint.sql)"
           [[ "$fingerprint" == '${{ steps.payment_profile.outputs.fingerprint }}' ]]
@@ -1477,6 +1476,40 @@ jobs:
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
               "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '830f233f5acb24674fc93c2dd6ad7d93a54ffc15'"
+
+      - name: Drain routine credit leases before activation
+        id: routine_drain
+        if: inputs.mode == 'deploy-inert' && (inputs.confirm_financial_switch_profile == 'cbe-live-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-v1')
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_release_drain
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          psql -X --set=release_sha="$GITHUB_SHA" \
+            --file=infra/sql/production-routine-release-drain-arm.sql >/dev/null
+          echo 'armed=true' >>"$GITHUB_OUTPUT"
+          # The arm UPDATE waits for any in-flight lease transaction. New leases
+          # now receive a signed empty result; existing credits may finish.
+          for attempt in {1..90}; do
+            if psql -X --set=release_sha="$GITHUB_SHA" \
+              --file=infra/sql/production-routine-release-drain-idle.sql \
+              >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo '::error::An active or unresolved credit did not drain before deployment.'
+          exit 1
 
       - name: Atomically activate production and switch the public edge
         id: activate
@@ -1716,6 +1749,26 @@ jobs:
           PGSERVICEFILE: /dev/null
           PGPASSFILE: /dev/null
         run: psql -X --file=infra/sql/production-receiver-sms-runtimes-disable.sql >/dev/null
+
+      - name: Release routine credit drain after activation or rollback
+        if: always() && steps.routine_drain.outputs.armed == 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_release_disarm
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          psql -X --set=release_sha="$GITHUB_SHA" \
+            --file=infra/sql/production-routine-release-drain-disarm.sql >/dev/null
 
   operate:
     name: Inspect or stop production runtime

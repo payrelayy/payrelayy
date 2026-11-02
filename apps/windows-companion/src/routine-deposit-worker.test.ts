@@ -77,6 +77,7 @@ function fixture(lease = makeLease()) {
   } satisfies RoutineDepositExecutionStore;
   const session = {
     dismissSettledRoutineSuccess: vi.fn(async () => undefined),
+    resetAfterContainedRoutineDeposit: vi.fn(async () => undefined),
     executeRoutineOneUseDeposit: vi.fn(
       async (
         _player: string,
@@ -365,6 +366,35 @@ describe('routine production serial deposit worker', () => {
     expect(store.pause).toHaveBeenCalledWith(lease, 'execution_uncertain');
   });
 
+  it('contains a fence request interrupted by a server restart before leasing another payment', async () => {
+    const { worker, store, lease, session } = fixture();
+    store.fenceFinalAction.mockRejectedValueOnce(new Error('gateway restarting'));
+    store.pause.mockRejectedValueOnce(new Error('gateway restarting'));
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(worker.needsRecovery()).toBe(true);
+    expect(store.leaseNext).toHaveBeenCalledTimes(1);
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
+    expect(session.resetAfterContainedRoutineDeposit).not.toHaveBeenCalled();
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
+    expect(worker.needsRecovery()).toBe(false);
+    expect(store.leaseNext).toHaveBeenCalledTimes(1);
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
+    expect(session.resetAfterContainedRoutineDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not lease another payment until the contained transfer form is cleared', async () => {
+    const { worker, store, session } = fixture();
+    store.fenceFinalAction.mockRejectedValueOnce(new Error('gateway restarting'));
+    session.resetAfterContainedRoutineDeposit.mockRejectedValueOnce(
+      new Error('provider unavailable'),
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(worker.needsRecovery()).toBe(true);
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
+    expect(store.pause).toHaveBeenCalledTimes(1);
+    expect(store.leaseNext).toHaveBeenCalledTimes(1);
+  });
+
   it('routes a locally uncertain Transfer to Owner review and keeps the next lease available', async () => {
     const { worker, store, session, lease } = fixture();
     store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
@@ -490,12 +520,17 @@ describe('routine production serial deposit worker', () => {
     expect(session.executeRoutineOneUseDeposit).not.toHaveBeenCalled();
   });
 
-  it('stays paused locally after a post-lease database failure even if pause notification fails', async () => {
+  it('retries durable containment after a post-lease database failure', async () => {
     const { worker, store } = fixture();
     store.confirmModal.mockRejectedValueOnce(new Error('offline'));
     store.pause.mockRejectedValueOnce(new Error('offline'));
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(worker.needsRecovery()).toBe(true);
+    expect(await worker.runOnce()).toEqual({
+      status: 'contained',
+      reason: 'reconciliation_uncertain',
+    });
+    expect(worker.needsRecovery()).toBe(false);
     expect(store.leaseNext).toHaveBeenCalledTimes(1);
   });
 

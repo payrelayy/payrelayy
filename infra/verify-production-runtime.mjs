@@ -2769,6 +2769,7 @@ for (const value of [
   routineDrainHelperDigest,
   helperDigest,
   'ROTATE EXACT PRODUCTION V2 OWNER DEVICE HEALTH HELPER V1',
+  'grant its EXECUTE privilege back to `fetanagent_receiver_sms_ingest`',
 ]) {
   assert.ok(ownerDeviceHealthRunbook.includes(value));
 }

@@ -8,6 +8,16 @@ stale. The workflow now checks the running release, but the installed helper
 also needs an exact predecessor refresh before activation can carry the signed
 routine transport.
 
+The device-status migration granted
+`app.record_receiver_sms_device_status(text,text,text,timestamptz,text,text)`
+to `fetanagent_receiver_sms_ingest`. The running predecessor broker rejects
+new callable functions outside its exact catalog allowlist. It became unhealthy
+after migration. The new grant was temporarily revoked from that group, and
+the predecessor broker and device bridge recovered. Restore the grant only
+after the successor server release is active; its broker allowlist includes
+the status function. Until restoration, the receiver phone cannot report its
+new health state, but existing SMS payment ingestion remains available.
+
 | Boundary                                    | Exact value                                                                           |
 | ------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Production Droplet                          | `593344964`                                                                           |
@@ -40,6 +50,9 @@ routine transport.
    last-moment idle, switch fingerprint, activation, and health checks.
 5. Verify the exact server release, public Owner reachability, unchanged
    financial switches, empty active and unresolved work, and carried routine
-   marker. Install the signed receiver SMS verifier on the paired phone and
-   the same-commit Windows Companion on its host, then verify fresh signed
-   status reports on Owner Home. No real payment is needed as a release test.
+   marker. Verify the status function has only the `postgres` EXECUTE grant,
+   then grant its EXECUTE privilege back to `fetanagent_receiver_sms_ingest`.
+   Confirm the broker and device bridge remain healthy. Install the signed
+   receiver SMS verifier on the paired phone and the same-commit Windows
+   Companion on its host, then verify fresh signed status reports on Owner
+   Home. No real payment is needed as a release test.

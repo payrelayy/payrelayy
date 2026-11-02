@@ -28,7 +28,8 @@ class VerifierForegroundService : Service() {
   private lateinit var executor: ScheduledExecutorService
   private val loopStarted = AtomicBoolean(false)
   private val loopGeneration = AtomicLong(0L)
-  private val policy = VerifierRunLoopPolicy()
+  private val policy = VerifierRunLoopPolicy(heartbeatIntervalMillis =
+    if (BuildConfig.RECEIVER_SMS_ENABLED) 30_000L else VerifierRunLoopPolicy.HEARTBEAT_INTERVAL_MILLIS)
 
   override fun onCreate() {
     super.onCreate()

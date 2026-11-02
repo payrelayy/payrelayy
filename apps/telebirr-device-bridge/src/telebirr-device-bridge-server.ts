@@ -33,6 +33,10 @@ import {
   RECEIVER_SMS_UPLOAD_MAX_REQUEST_BYTES,
   RECEIVER_SMS_UPLOAD_PATH,
 } from './receiver-sms-upload-bridge.js';
+import {
+  RECEIVER_SMS_STATUS_CONTENT_TYPE,
+  RECEIVER_SMS_STATUS_PATH,
+} from './receiver-sms-status-bridge.js';
 
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST = '0.0.0.0' as const;
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT = 8084 as const;
@@ -140,16 +144,21 @@ function declaredBodyLength(
     routineAvailable && path !== undefined ? routineRequestLimits.get(path) : undefined;
   const paidPoll = paidPollAvailable && path === ROUTINE_PAID_POLL_PATH;
   const paidUpload = paidUploadAvailable && path === ROUTINE_PAID_UPLOAD_PATH;
-  const receiverSms = receiverSmsAvailable && path === RECEIVER_SMS_UPLOAD_PATH;
-  const expectedContentType = receiverSms
-    ? RECEIVER_SMS_UPLOAD_CONTENT_TYPE
-    : paidUpload
-      ? ROUTINE_PAID_UPLOAD_CONTENT_TYPE
-      : paidPoll
-        ? ROUTINE_PAID_POLL_CONTENT_TYPE
-        : routineLimit === undefined
-          ? TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE
-          : ROUTINE_NO_MONEY_CONTENT_TYPE;
+  const receiverSms =
+    receiverSmsAvailable &&
+    (path === RECEIVER_SMS_UPLOAD_PATH || path === RECEIVER_SMS_STATUS_PATH);
+  const expectedContentType =
+    path === RECEIVER_SMS_STATUS_PATH && receiverSms
+      ? RECEIVER_SMS_STATUS_CONTENT_TYPE
+      : receiverSms
+        ? RECEIVER_SMS_UPLOAD_CONTENT_TYPE
+        : paidUpload
+          ? ROUTINE_PAID_UPLOAD_CONTENT_TYPE
+          : paidPoll
+            ? ROUTINE_PAID_POLL_CONTENT_TYPE
+            : routineLimit === undefined
+              ? TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE
+              : ROUTINE_NO_MONEY_CONTENT_TYPE;
   if (
     method !== 'POST' ||
     typeof path !== 'string' ||
@@ -205,7 +214,8 @@ function safeResponse(
     | typeof ROUTINE_NO_MONEY_CONTENT_TYPE
     | typeof ROUTINE_PAID_POLL_CONTENT_TYPE
     | typeof ROUTINE_PAID_UPLOAD_CONTENT_TYPE
-    | typeof RECEIVER_SMS_UPLOAD_CONTENT_TYPE,
+    | typeof RECEIVER_SMS_UPLOAD_CONTENT_TYPE
+    | typeof RECEIVER_SMS_STATUS_CONTENT_TYPE,
 ): TelebirrDeviceBridgeHttpResponse {
   const routine = routineType !== undefined;
   if (
@@ -288,7 +298,12 @@ function safeResponse(
               parsed.pairedPhoneEvidenceVerified !== true ||
               !('outcome' in parsed) ||
               parsed.outcome !== 'receiver_sms_recorded')) ||
+          (routineType === RECEIVER_SMS_STATUS_CONTENT_TYPE &&
+            (candidate.statusCode !== 202 ||
+              !('outcome' in parsed) ||
+              parsed.outcome !== 'receiver_sms_status_recorded')) ||
           (candidate.statusCode === 202 &&
+            routineType !== RECEIVER_SMS_STATUS_CONTENT_TYPE &&
             (!('sourceAuthenticationPerformed' in parsed) ||
               parsed.sourceAuthenticationPerformed !== false))
         )
@@ -346,6 +361,11 @@ function safeResponse(
           if (actual.length !== expected.length || actual.some((key) => !expected.includes(key)))
             throw new Error();
         }
+        if (
+          routineType === RECEIVER_SMS_STATUS_CONTENT_TYPE &&
+          Object.keys(parsed).sort().join(',') !== 'advisoryOnly,financialActionAllowed,outcome'
+        )
+          throw new Error();
       } else {
         if (
           Object.keys(parsed).length !== 1 ||
@@ -374,7 +394,8 @@ function writeResponse(
     | typeof ROUTINE_NO_MONEY_CONTENT_TYPE
     | typeof ROUTINE_PAID_POLL_CONTENT_TYPE
     | typeof ROUTINE_PAID_UPLOAD_CONTENT_TYPE
-    | typeof RECEIVER_SMS_UPLOAD_CONTENT_TYPE,
+    | typeof RECEIVER_SMS_UPLOAD_CONTENT_TYPE
+    | typeof RECEIVER_SMS_STATUS_CONTENT_TYPE,
 ): void {
   const selected = safeResponse(source, routineType);
   target.writeHead(selected.statusCode, {
@@ -429,7 +450,8 @@ export function createTelebirrDeviceBridgeHttpServer(
         const paidUpload =
           paidUploadHandler !== undefined && request.url === ROUTINE_PAID_UPLOAD_PATH;
         const receiverSms =
-          receiverSmsHandler !== undefined && request.url === RECEIVER_SMS_UPLOAD_PATH;
+          receiverSmsHandler !== undefined &&
+          (request.url === RECEIVER_SMS_UPLOAD_PATH || request.url === RECEIVER_SMS_STATUS_PATH);
         const expectedBytes =
           headers &&
           declaredBodyLength(
@@ -470,15 +492,17 @@ export function createTelebirrDeviceBridgeHttpServer(
             headers,
             body,
           }),
-          receiverSms
-            ? RECEIVER_SMS_UPLOAD_CONTENT_TYPE
-            : paidUpload
-              ? ROUTINE_PAID_UPLOAD_CONTENT_TYPE
-              : paidPoll
-                ? ROUTINE_PAID_POLL_CONTENT_TYPE
-                : routine
-                  ? ROUTINE_NO_MONEY_CONTENT_TYPE
-                  : undefined,
+          receiverSms && request.url === RECEIVER_SMS_STATUS_PATH
+            ? RECEIVER_SMS_STATUS_CONTENT_TYPE
+            : receiverSms
+              ? RECEIVER_SMS_UPLOAD_CONTENT_TYPE
+              : paidUpload
+                ? ROUTINE_PAID_UPLOAD_CONTENT_TYPE
+                : paidPoll
+                  ? ROUTINE_PAID_POLL_CONTENT_TYPE
+                  : routine
+                    ? ROUTINE_NO_MONEY_CONTENT_TYPE
+                    : undefined,
         );
       } catch {
         if (!target.headersSent) {

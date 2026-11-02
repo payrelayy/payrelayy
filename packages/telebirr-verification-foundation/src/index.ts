@@ -167,6 +167,12 @@ export {
   type ReceiverSmsVerifiedPayment,
 } from './receiver-sms-observation.js';
 export {
+  RECEIVER_SMS_STATUS_PROTOCOL_MODE,
+  digestReceiverSmsStatusBody,
+  verifyReceiverSmsStatus,
+  type ReceiverSmsVerifiedStatus,
+} from './receiver-sms-status.js';
+export {
   ROUTINE_NO_MONEY_POLL_MODE,
   ROUTINE_NO_MONEY_POLL_TRANSCRIPT,
   canonicalRoutineNoMoneyPollBodyBytes,

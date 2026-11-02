@@ -334,12 +334,15 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="system-overview-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Live work and settings are checked here. A Companion check-in does not prove KemerBet is signed in, and a recent SMS does not prove the receiver phone is online.</p>
+          <p class="receipt-label">Live work and settings are checked here. Device reports become unknown when they are stale.</p>
           <p class="owner-attention" id="system-overview-attention" role="status" aria-live="polite">Sign in to check work that needs attention.</p>
           <div class="owner-alert-list" id="system-overview-alerts"></div>
           <p class="request-meta" id="system-overview-pauses"></p>
           <dl class="overview-grid" id="system-overview-facts"></dl>
           <p class="request-meta">Automatic Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
+          <p class="request-meta">Companion KemerBet sign-in: <strong id="system-overview-kemerbet-session">Sign in to check.</strong></p>
+          <p class="request-meta">TeleBirr SMS verifier: <strong id="system-overview-telebirr-phone">Sign in to check.</strong></p>
+          <p class="request-meta">CBE Birr SMS verifier: <strong id="system-overview-cbe-phone">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
         </section>
@@ -571,7 +574,12 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="payment-methods-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Turn a method off to stop new deposits and automatic Player credits for it. Received SMS and payments needing review stay visible under Payments &amp; SMS.</p>
+          <p class="receipt-label">Pause new deposits for both methods here. Payments already submitted continue through normal processing. Turning on enables both methods when they are ready. Individual method controls below remain available.</p>
+          <div class="request-card" id="deposit-availability-card">
+            <h3>Accept deposits</h3>
+            <p id="deposit-availability-status" role="status" aria-live="polite">Sign in to check.</p>
+            <button id="deposit-availability-toggle" type="button" disabled>Checking…</button>
+          </div>
           <div class="request-list" id="payment-methods-list"></div>
           <p class="request-meta" id="payment-methods-feedback" role="status" aria-live="polite">Sign in to load payment methods.</p>
         </section>
@@ -1348,9 +1356,14 @@ const systemOverviewAlerts = document.querySelector('#system-overview-alerts');
 const systemOverviewPauses = document.querySelector('#system-overview-pauses');
 const systemOverviewFacts = document.querySelector('#system-overview-facts');
 const systemOverviewCompanion = document.querySelector('#system-overview-companion');
+const systemOverviewKemerbetSession = document.querySelector('#system-overview-kemerbet-session');
+const systemOverviewTelebirrPhone = document.querySelector('#system-overview-telebirr-phone');
+const systemOverviewCbePhone = document.querySelector('#system-overview-cbe-phone');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
 let systemOverviewLoadGeneration = 0;
 let systemOverviewPollTimer;
+let latestDeviceHealth = null;
+let latestHomeDepositAvailability = null;
 let latestSystemOverview;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
 const receiverSmsOldBadge = document.querySelector('#receiver-sms-old-badge');
@@ -1414,6 +1427,9 @@ const receiverList = document.querySelector('#receiver-list');
 const paymentMethodsList = document.querySelector('#payment-methods-list');
 const paymentMethodsFeedback = document.querySelector('#payment-methods-feedback');
 const paymentMethodsRefresh = document.querySelector('#payment-methods-refresh');
+const depositAvailabilityStatus = document.querySelector('#deposit-availability-status');
+const depositAvailabilityToggle = document.querySelector('#deposit-availability-toggle');
+let depositAvailability = null;
 const receiverForm = document.querySelector('#receiver-form');
 const receiverFeedback = document.querySelector('#receiver-feedback');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
@@ -2566,6 +2582,10 @@ function clearReceivers() {
 }
 
 function clearPaymentMethods() {
+  depositAvailability = null;
+  depositAvailabilityStatus.textContent = 'Sign in to check.';
+  depositAvailabilityToggle.textContent = 'Checking…';
+  depositAvailabilityToggle.disabled = true;
   paymentMethodsList.replaceChildren();
   paymentMethodsFeedback.textContent = 'Sign in to load payment methods.';
 }
@@ -3876,6 +3896,11 @@ function signOut(message = 'Signed out.') {
   systemOverviewLoadGeneration += 1;
   latestSystemOverview = undefined;
   systemOverviewCompanion.textContent = 'Sign in to check.';
+  systemOverviewKemerbetSession.textContent = 'Sign in to check.';
+  systemOverviewTelebirrPhone.textContent = 'Sign in to check.';
+  systemOverviewCbePhone.textContent = 'Sign in to check.';
+  latestDeviceHealth = null;
+  latestHomeDepositAvailability = null;
   systemOverviewFacts.replaceChildren();
   systemOverviewAlerts.replaceChildren();
   systemOverviewPauses.textContent = '';
@@ -4383,6 +4408,27 @@ function validPaymentMethod(value) {
   return value;
 }
 
+function validDepositAvailability(value) {
+  return value && typeof value === 'object' &&
+    typeof value.enabled === 'boolean' &&
+    typeof value.changedAt === 'string' && Number.isFinite(Date.parse(value.changedAt));
+}
+
+function renderDepositAvailability(value, methods) {
+  depositAvailability = value;
+  const unavailable = methods.filter((method) =>
+    !method.ownerEnabled || method.readiness !== 'ready');
+  depositAvailabilityStatus.className = value.enabled && unavailable.length === 0
+    ? 'status-ok' : 'request-meta';
+  depositAvailabilityStatus.textContent = !value.enabled
+    ? 'Off — new deposits are paused. Submitted payments continue processing.'
+    : unavailable.length === 0
+      ? 'On — TeleBirr and CBE Birr accept new deposits.'
+      : 'On — ' + unavailable.length + ' method(s) unavailable. Check the details below.';
+  depositAvailabilityToggle.textContent = value.enabled ? 'Pause all deposits' : 'Turn on deposits';
+  depositAvailabilityToggle.disabled = false;
+}
+
 function renderPaymentMethods(methods) {
   paymentMethodsList.replaceChildren();
   for (const method of methods) {
@@ -4392,9 +4438,11 @@ function renderPaymentMethods(methods) {
     const label = method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
     title.textContent = label;
     const status = document.createElement('p');
-    status.className = method.ownerEnabled && method.readiness === 'ready'
+    status.className = depositAvailability?.enabled && method.ownerEnabled && method.readiness === 'ready'
       ? 'status-ok' : 'request-meta';
-    status.textContent = method.ownerEnabled && method.readiness === 'ready'
+    status.textContent = !depositAvailability?.enabled
+      ? 'New deposits paused for all methods'
+      : method.ownerEnabled && method.readiness === 'ready'
       ? 'On — accepting deposits'
       : method.ownerEnabled
         ? 'Unavailable — ' + paymentMethodReadinessText[method.readiness]
@@ -4434,26 +4482,72 @@ function renderPaymentMethods(methods) {
 
 async function loadPaymentMethods() {
   paymentMethodsRefresh.disabled = true;
+  depositAvailabilityToggle.disabled = true;
   try {
-    const response = await ownerRequest('/v1/owner/payment-methods', {
-      method: 'GET', headers: {},
-    });
-    if (!response.ok) throw new Error('payment_methods');
-    const payload = await response.json();
+    const [response, availabilityResponse] = await Promise.all([
+      ownerRequest('/v1/owner/payment-methods', { method: 'GET', headers: {} }),
+      ownerRequest('/v1/owner/deposit-availability', { method: 'GET', headers: {} }),
+    ]);
+    if (!response.ok || !availabilityResponse.ok) throw new Error('payment_methods');
+    const [payload, availabilityPayload] = await Promise.all([
+      response.json(), availabilityResponse.json(),
+    ]);
     if (!payload || !Array.isArray(payload.methods) || payload.methods.length !== 2)
       throw new Error('payment_methods');
+    if (!availabilityPayload || !validDepositAvailability(availabilityPayload.availability))
+      throw new Error('deposit_availability');
     const methods = payload.methods.map(validPaymentMethod);
     if (methods.some((method) => !method) ||
       new Set(methods.map((method) => method.providerCode)).size !== 2)
       throw new Error('payment_methods');
+    renderDepositAvailability(availabilityPayload.availability, methods);
     renderPaymentMethods(methods);
     paymentMethodsFeedback.textContent = 'Updated just now.';
   } catch (error) {
+    depositAvailability = null;
+    depositAvailabilityStatus.textContent = 'Deposit status unavailable. Refresh before making a change.';
+    depositAvailabilityToggle.disabled = true;
     paymentMethodsList.replaceChildren();
     if (!isSignedOutError(error))
       paymentMethodsFeedback.textContent = 'Payment method status is unavailable. Refresh before making a change.';
   } finally {
     paymentMethodsRefresh.disabled = false;
+  }
+}
+
+async function setDepositAvailability() {
+  if (!depositAvailability || depositAvailabilityToggle.disabled) return;
+  const enabled = !depositAvailability.enabled;
+  const requestId = crypto.randomUUID();
+  depositAvailabilityToggle.disabled = true;
+  depositAvailabilityStatus.textContent = enabled
+    ? 'Checking both methods and resuming deposits…' : 'Pausing new deposits…';
+  try {
+    const response = await ownerRequest('/v1/owner/deposit-availability', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-deposit-availability-v1',
+        'x-idempotency-key': requestId,
+      },
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_deposit_availability', enabled, requestId,
+      }),
+    });
+    if (!response.ok) {
+      await loadPaymentMethods();
+      depositAvailabilityStatus.textContent = response.status === 409
+        ? 'Could not resume: a method is not ready. Check the details below.'
+        : 'The change could not be confirmed. Refresh and try again.';
+      return;
+    }
+    await loadPaymentMethods();
+    await loadSystemOverview();
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      await loadPaymentMethods();
+      depositAvailabilityStatus.textContent = 'The change could not be confirmed. Refresh and try again.';
+    }
   }
 }
 
@@ -7041,6 +7135,7 @@ function renderOwnerAlerts() {
     value.depositExecutionMode !== null;
   const depositsLive = value.paymentVerificationMode === 'live' &&
     value.depositExecutionMode === 'live';
+  const depositsAccepting = depositsLive && latestHomeDepositAvailability?.enabled !== false;
   const paused = [];
   if (!settingsKnown) {
     add('Deposit settings cannot be confirmed',
@@ -7049,6 +7144,8 @@ function renderOwnerAlerts() {
   } else if (!depositsLive) {
     paused.push('Deposit processing is paused by the current settings');
   }
+  if (latestHomeDepositAvailability?.enabled === false)
+    paused.push('New deposits paused by Owner');
   const methodLabels = { telebirr: 'TeleBirr', cbe_birr: 'CBE Birr' };
   const methodReasons = {
     provider_unavailable: 'The payment provider is unavailable.',
@@ -7060,7 +7157,7 @@ function renderOwnerAlerts() {
   const methodPauseReasons = ['payments_paused','sms_route_paused',
     'verification_paused','credit_worker_paused'];
   const offlineMethods = value.paymentMethods.filter((method) =>
-    depositsLive && method.ownerEnabled && method.readiness === 'credit_worker_offline');
+    depositsAccepting && method.ownerEnabled && method.readiness === 'credit_worker_offline');
   if (offlineMethods.length > 0) {
     add('Automatic credit worker is offline',
       offlineMethods.map((method) => methodLabels[method.providerCode]).join(' and ') +
@@ -7071,7 +7168,7 @@ function renderOwnerAlerts() {
     const label = methodLabels[method.providerCode];
     if (!method.ownerEnabled) {
       paused.push(label + ' is off by Owner setting');
-    } else if (!depositsLive || methodPauseReasons.includes(method.readiness)) {
+    } else if (!depositsAccepting || methodPauseReasons.includes(method.readiness)) {
       paused.push(label + ' is paused by current settings');
     } else if (method.readiness !== 'ready' &&
         method.readiness !== 'credit_worker_offline') {
@@ -7130,6 +7227,23 @@ function renderOwnerAlerts() {
         'advanced', 'kemerbet-companion-title', 'Open Companion');
     }
   }
+  if (depositsAccepting && latestDeviceHealth &&
+      !['active','checking'].includes(latestDeviceHealth.companion?.state)) {
+    add('KemerBet sign-in needs a check',
+      latestDeviceHealth?.companion?.state === 'signed_out'
+        ? 'The Companion reports that KemerBet sign-in is needed.'
+        : 'No fresh verified Companion KemerBet sign-in report is available.',
+      'warning', latestDeviceHealth?.companion?.reportedAt || null,
+      'system', 'kemerbet-signin-title', 'Open KemerBet sign-in');
+  }
+  if (depositsAccepting && latestDeviceHealth && latestDeviceHealth.receiverPhone?.state !== 'active') {
+    add('Receiver SMS phone needs a check',
+      latestDeviceHealth?.receiverPhone?.state === 'attention'
+        ? 'The paired phone reports an SMS verifier problem.'
+        : 'No fresh paired-phone SMS verifier report is available.',
+      'warning', latestDeviceHealth?.receiverPhone?.reportedAt || null,
+      'system', 'routine-processing-title', 'Open receiver phone');
+  }
   alerts.sort((a, b) => (a.severity === 'critical' ? -1 : 1) -
     (b.severity === 'critical' ? -1 : 1));
   for (const alert of alerts) {
@@ -7157,8 +7271,7 @@ function renderOwnerAlerts() {
   systemOverviewAttention.textContent = alerts.length > 0
     ? alerts.length + (alerts.length === 1 ? ' issue needs' : ' issues need') +
         ' Owner attention. Alerts clear when the next check confirms recovery.'
-    : 'No issues detected in monitored work. Receiver-phone and bot connectivity ' +
-        'are not directly monitored here.';
+    : 'No issues detected in monitored work.';
 }
 
 async function loadSystemOverview() {
@@ -7172,14 +7285,38 @@ async function loadSystemOverview() {
   if (!latestSystemOverview)
     systemOverviewAttention.textContent = 'Checking work that needs attention…';
   try {
-    const response = await ownerRequest('/v1/owner/system-overview',
-      { method: 'GET', headers: {} });
+    const [response, healthResponse, availabilityResponse] = await Promise.all([
+      ownerRequest('/v1/owner/system-overview', { method: 'GET', headers: {} }),
+      ownerRequest('/v1/owner/device-health', { method: 'GET', headers: {} }).catch(() => null),
+      ownerRequest('/v1/owner/deposit-availability', { method: 'GET', headers: {} }).catch(() => null),
+    ]);
     if (!response.ok) throw new Error('system_overview');
     const value = await response.json();
     if (!validSystemOverview(value)) throw new Error('system_overview');
+    const healthPayload = healthResponse?.ok ? await healthResponse.json().catch(() => null) : null;
+    const availabilityPayload = availabilityResponse?.ok ?
+      await availabilityResponse.json().catch(() => null) : null;
     if (generation !== ownerAuthGeneration || loadGeneration !== systemOverviewLoadGeneration ||
         !accessToken) return;
     latestSystemOverview = value;
+    const health = healthPayload?.health;
+    const healthLabel = (status, companion) => {
+      if (!status || !['active','signed_out','checking','attention','unknown'].includes(status.state))
+        return 'Unknown';
+      const label = status.state === 'active' ? (companion ? 'Signed in' : 'Active') :
+        status.state === 'signed_out' ? 'Signed out' :
+        status.state === 'checking' ? 'Checking' :
+        status.state === 'attention' ? 'Needs attention' : 'Unknown';
+      return label + (typeof status.reportedAt === 'string'
+        ? ' · reported ' + transactionDate(status.reportedAt) : '');
+    };
+    systemOverviewKemerbetSession.textContent = healthLabel(health?.companion, true);
+    systemOverviewTelebirrPhone.textContent = healthLabel(health?.receiverPhone, false);
+    systemOverviewCbePhone.textContent = healthLabel(health?.receiverPhone, false);
+    const masterEnabled = validDepositAvailability(availabilityPayload?.availability)
+      ? availabilityPayload.availability.enabled : null;
+    latestHomeDepositAvailability = masterEnabled === null ? null : { enabled: masterEnabled };
+    latestDeviceHealth = health || null;
     const modeLabel = (mode) => mode === 'live' ? 'Live' :
       mode === 'dry_run' ? 'Dry run' : mode === 'disabled' ? 'Off' : 'Unknown';
     systemOverviewFacts.replaceChildren();
@@ -7191,8 +7328,9 @@ async function loadSystemOverview() {
         value.depositExecutionMode !== 'live' ||
         ['payments_paused','sms_route_paused','verification_paused',
           'credit_worker_paused'].includes(method.readiness);
-      systemOverviewFact(label + ' deposits', method.ownerEnabled
-        ? (paused ? 'Paused' : method.readiness === 'ready' ? 'Ready' : 'Needs attention') : 'Off');
+      systemOverviewFact(label + ' deposits', masterEnabled === false ? 'Paused' :
+        masterEnabled === null ? 'Unknown' : method.ownerEnabled
+          ? (paused ? 'Paused' : method.readiness === 'ready' ? 'Ready' : 'Needs attention') : 'Off');
     }
     systemOverviewFact('Separate TeleBirr receipt lookup',modeLabel(value.telebirrReceiptLookupMode));
     systemOverviewFact('Open deposit jobs',String(value.openDepositJobs));
@@ -7211,6 +7349,11 @@ async function loadSystemOverview() {
     if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration &&
         !isSignedOutError(error)) {
       latestSystemOverview = undefined;
+      latestDeviceHealth = null;
+      latestHomeDepositAvailability = null;
+      systemOverviewKemerbetSession.textContent = 'Unknown';
+      systemOverviewTelebirrPhone.textContent = 'Unknown';
+      systemOverviewCbePhone.textContent = 'Unknown';
       renderOwnerAlerts();
       systemOverviewStatus.textContent = 'System status is unavailable. Refresh to try again.';
     }
@@ -8372,6 +8515,7 @@ kemerbetReadinessCohortForm.addEventListener('submit', async (event) => {
 });
 receiverRefreshButton.addEventListener('click', loadReceivers);
 paymentMethodsRefresh.addEventListener('click', loadPaymentMethods);
+depositAvailabilityToggle.addEventListener('click', () => void setDepositAvailability());
 receiverForm.elements.providerCode.addEventListener('change', updateReceiverAccountReferenceFormat);
 updateReceiverAccountReferenceFormat();
 receiverForm.addEventListener('submit', async (event) => {

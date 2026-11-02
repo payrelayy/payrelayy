@@ -51,7 +51,7 @@ device.fetanagent.com {
 
 	@companion_device_bridge {
 		method POST
-		path /v1/companion/device/enrollments:pair /v1/companion/device/lookup-assignments:poll /v1/companion/device/lookup-results:submit /v1/companion/device/player-validations:poll /v1/companion/device/player-validations:submit /v1/companion/device/kemerbet-signin:read /v2/companion/device/execution-assignments:poll /v2/companion/device/execution-authorities:consume /v2/companion/device/execution-results:submit /v2/companion/device/execution-status:query /v3/companion/device/routine-deposits:command
+		path /v1/companion/device/enrollments:pair /v1/companion/device/lookup-assignments:poll /v1/companion/device/lookup-results:submit /v1/companion/device/player-validations:poll /v1/companion/device/player-validations:submit /v1/companion/device/kemerbet-signin:read /v1/companion/device/kemerbet-session:report /v2/companion/device/execution-assignments:poll /v2/companion/device/execution-authorities:consume /v2/companion/device/execution-results:submit /v2/companion/device/execution-status:query /v3/companion/device/routine-deposits:command
 		header Content-Type application/vnd.fetanagent.companion-device-bridge+json
 		header Accept application/vnd.fetanagent.companion-device-bridge+json
 	}
@@ -148,6 +148,24 @@ device.fetanagent.com {
 	handle @production_receiver_sms_upload {
 		request_body {
 			max_size 8KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+
+	@production_receiver_sms_status {
+		method POST
+		path /v1/receiver-sms/status:report
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.receiver-sms-status.v1+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+
+	handle @production_receiver_sms_status {
+		request_body {
+			max_size 4KiB
 		}
 		reverse_proxy telebirr-device-bridge:8084 {
 			transport http {

@@ -203,6 +203,8 @@ function runtimeFixture() {
       result.body.requestId === expectedAssignment.body.requestId,
   );
   const runtime: CompanionDeviceSigningRuntime = {
+    sessionStatusEndpoint:
+      'https://device.fetanagent.com/v1/companion/device/kemerbet-session:report',
     certificate: { bodyDigest: sha('c') } as SignedCompanionEnrollmentCertificate,
     pollEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH}`,
     resultEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH}`,

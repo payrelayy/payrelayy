@@ -552,6 +552,15 @@ assert.match(
   gatewayCaddyfile,
   /handle @production_receiver_sms_upload \{[\s\S]*?max_size 8KiB[\s\S]*?reverse_proxy telebirr-device-bridge:8084/u,
 );
+assert.match(gatewayCaddyfile, /\/v1\/companion\/device\/kemerbet-session:report/u);
+assert.match(
+  gatewayCaddyfile,
+  /@production_receiver_sms_status \{[\s\S]*?method POST[\s\S]*?path \/v1\/receiver-sms\/status:report[\s\S]*?application\/vnd\.fetanagent\.receiver-sms-status\.v1\+json[\s\S]*?X-FetanAgent-Deployment-Target\} == "production"/u,
+);
+assert.match(
+  gatewayCaddyfile,
+  /handle @production_receiver_sms_status \{[\s\S]*?max_size 4KiB[\s\S]*?reverse_proxy telebirr-device-bridge:8084/u,
+);
 assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
 
 assert.match(compose, /^name: fetanagent-production$/mu);

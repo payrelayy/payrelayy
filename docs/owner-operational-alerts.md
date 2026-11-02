@@ -30,9 +30,14 @@ no Telegram or other external alert.
   long browser action can defer the next poll. A check-in alone does not prove
   that the KemerBet page is signed in.
 
+The Home page also reads signed Companion KemerBet session reports and signed
+receiver SMS phone reports every 30 seconds. Reports older than 90 seconds are
+shown as **Unknown**. The phone runs one SMS verifier for both TeleBirr and CBE
+Birr, so both status lines reflect the same paired device. A running phone can
+still need attention if its SMS cycle fails. These reports contain no SMS text,
+payment reference, or KemerBet credential.
+
 The server returns checked facts, not payment identifiers or a command to
 execute work. The Owner page treats an unavailable or malformed check as unknown,
-never as healthy. The page does not currently have direct idle heartbeats for the
-receiver SMS phone or the bot, so it does not infer their connectivity from the
-absence of SMS or customer traffic. A full Owner-site outage cannot be reported
-inside the Owner page itself.
+never as healthy. A full Owner-site outage cannot be reported inside the Owner
+page itself.

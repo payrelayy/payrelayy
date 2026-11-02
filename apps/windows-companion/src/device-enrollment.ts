@@ -19,6 +19,7 @@ import {
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
   AGENT_PLATFORM_COMPANION_HTTP_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_SESSION_STATUS_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
@@ -949,6 +950,7 @@ export type CompanionLookupRequestPath =
 
 export type CompanionDeviceRequestPath =
   | CompanionLookupRequestPath
+  | typeof AGENT_PLATFORM_COMPANION_SESSION_STATUS_PATH
   | typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH
   | typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH
   | typeof AGENT_PLATFORM_COMPANION_KEMERBET_SIGNIN_PATH
@@ -969,6 +971,7 @@ export type ExactFiveCompanionLookupOutcomes = readonly [
 export interface CompanionDeviceSigningRuntime {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   readonly pollEndpoint: string;
+  readonly sessionStatusEndpoint: string;
   readonly resultEndpoint: string;
   readonly playerValidationPollEndpoint: string;
   readonly playerValidationResultEndpoint: string;
@@ -1167,6 +1170,7 @@ export async function loadCompanionDeviceSigningRuntime(
   ): SignedCompanionHttpRequest => {
     if (
       (path !== AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH &&
+        path !== AGENT_PLATFORM_COMPANION_SESSION_STATUS_PATH &&
         path !== AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH &&
         path !== AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH &&
         path !== AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH &&
@@ -1587,6 +1591,10 @@ export async function loadCompanionDeviceSigningRuntime(
   return Object.freeze({
     certificate,
     pollEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH),
+    sessionStatusEndpoint: endpointFor(
+      enrollment.endpoint,
+      AGENT_PLATFORM_COMPANION_SESSION_STATUS_PATH,
+    ),
     resultEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH),
     playerValidationPollEndpoint: endpointFor(
       enrollment.endpoint,

@@ -8,6 +8,7 @@ import {
 } from '@fetanagent/telebirr-verification-foundation';
 
 import type { ReceiverSmsUploadDependencies } from './receiver-sms-upload-bridge.js';
+import type { ReceiverSmsStatusDependencies } from './receiver-sms-status-bridge.js';
 
 function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return (
@@ -117,7 +118,7 @@ async function exchange(operation: string, input: unknown): Promise<unknown> {
 /** Public bridge receives only metadata; the private broker rechecks the phone signature. */
 export function createReceiverSmsUnixDependencies(
   now: () => string = () => new Date().toISOString(),
-): ReceiverSmsUploadDependencies {
+): ReceiverSmsUploadDependencies & ReceiverSmsStatusDependencies {
   return Object.freeze({
     now,
     async loadEnrollment(deviceId: string) {
@@ -138,6 +139,15 @@ export function createReceiverSmsUnixDependencies(
           result.kind !== 'conflict' &&
           result.kind !== 'review')
       )
+        throw new Error();
+      return result.kind;
+    },
+    async recordStatus(input: Parameters<ReceiverSmsStatusDependencies['recordStatus']>[0]) {
+      const result = await exchange('verify_and_record_status', {
+        publicKeySpki: input.publicKeySpki,
+        signedStatus: input.signedStatus,
+      });
+      if (!exact(result, ['kind']) || (result.kind !== 'recorded' && result.kind !== 'review'))
         throw new Error();
       return result.kind;
     },

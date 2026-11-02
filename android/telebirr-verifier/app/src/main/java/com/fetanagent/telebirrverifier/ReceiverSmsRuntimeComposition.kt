@@ -59,7 +59,13 @@ internal object ReceiverSmsRuntimeComposition {
           else -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "sms_upload_review")
         }
       },
-      heartbeat = null,
+      heartbeat = VerifierRuntimeHeartbeat { status ->
+        val receipt = runCatching {
+          enrollmentStore.loadEnrolled(signer, identity, nowUtc())
+        }.getOrNull() ?: return@VerifierRuntimeHeartbeat DeviceBridgeHeartbeatResult.EnrollmentRejected
+        ReceiverSmsStatusHeartbeat(receipt.body.deviceId, identity,
+          FixedReceiverSmsHttpsExchange()).send(status)
+      },
       close = capture::close,
     )
   }

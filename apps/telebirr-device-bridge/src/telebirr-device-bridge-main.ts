@@ -16,6 +16,10 @@ import { createRoutinePaidPollUnixDependencies } from './local-routine-paid-poll
 import { createRoutinePaidUploadBridgeHandler } from './routine-paid-upload-bridge.js';
 import { createRoutinePaidUploadUnixDependencies } from './local-routine-paid-poll-broker-client.js';
 import { createReceiverSmsUploadBridgeHandler } from './receiver-sms-upload-bridge.js';
+import {
+  createReceiverSmsStatusBridgeHandler,
+  RECEIVER_SMS_STATUS_PATH,
+} from './receiver-sms-status-bridge.js';
 import { createReceiverSmsUnixDependencies } from './local-receiver-sms-broker-client.js';
 
 export async function runTelebirrDeviceBridgeMain(
@@ -84,8 +88,13 @@ export async function runTelebirrDeviceBridgeMain(
       : {}),
     ...(receiverSmsMode === 'true'
       ? {
-          createReceiverSmsHandler: () =>
-            createReceiverSmsUploadBridgeHandler(createReceiverSmsUnixDependencies()),
+          createReceiverSmsHandler: () => {
+            const dependencies = createReceiverSmsUnixDependencies();
+            const upload = createReceiverSmsUploadBridgeHandler(dependencies);
+            const status = createReceiverSmsStatusBridgeHandler(dependencies);
+            return (request: Parameters<typeof upload>[0]) =>
+              request.path === RECEIVER_SMS_STATUS_PATH ? status(request) : upload(request);
+          },
         }
       : {}),
   });

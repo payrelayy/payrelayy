@@ -27,6 +27,7 @@ import {
   type PaymentMethodCode,
 } from './owner-payment-methods.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
+import { OwnerDeviceHealthRejectedError } from './owner-device-health.js';
 import {
   OwnerCompanionExecutionReadinessRejectedError,
   OwnerCompanionExecutionReadinessUnavailableError,
@@ -194,6 +195,7 @@ const OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-telebirr-device-p
 const OWNER_ROUTINE_TELEBIRR_PAIRING_CSRF_HEADER_VALUE = 'owner-routine-telebirr-pairing-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_PAYMENT_METHODS_CSRF_HEADER_VALUE = 'owner-payment-methods-v1';
+const OWNER_DEPOSIT_AVAILABILITY_CSRF_HEADER_VALUE = 'owner-deposit-availability-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
 const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
@@ -773,6 +775,21 @@ export function buildOwnerControlApp(
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
         OWNER_PAYMENT_METHODS_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validDepositAvailabilityMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_DEPOSIT_AVAILABILITY_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -1493,6 +1510,56 @@ export function buildOwnerControlApp(
     }
   });
 
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/deposit-availability',
+    async (request, reply) => {
+      if (Object.keys(request.query).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      try {
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const availability = await dependencies.runtime.paymentMethods?.availability?.(authUserId);
+        if (!availability) throw new OwnerPaymentMethodsUnavailableError();
+        return reply.header('cache-control', 'no-store').send({ availability });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPaymentMethodsRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post('/v1/owner/deposit-availability', async (request, reply) => {
+    const body = exactObject(request.body, ['confirmation', 'enabled', 'requestId']);
+    if (
+      body?.confirmation !== 'owner_confirmed_deposit_availability' ||
+      typeof body.enabled !== 'boolean' ||
+      !validDepositAvailabilityMutationHeaders(request.raw.rawHeaders, body.requestId)
+    )
+      return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const availability = await dependencies.runtime.paymentMethods?.setAvailability?.(
+        authUserId,
+        body.requestId as string,
+        body.enabled,
+      );
+      if (!availability) throw new OwnerPaymentMethodsUnavailableError();
+      return reply.header('cache-control', 'no-store').send({ availability });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerPaymentMethodsRejectedError
+      )
+        return reply.code(403).send({ error: 'forbidden' });
+      if (error instanceof OwnerPaymentMethodsConflictError)
+        return reply.code(409).send({ error: 'payment_method_not_ready' });
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
   app.post('/v1/owner/receiver-accounts/rotate', async (request, reply) => {
     try {
       const body = exactObject(request.body, [
@@ -2137,6 +2204,28 @@ export function buildOwnerControlApp(
         ) {
           return reply.code(403).send({ error: 'forbidden' });
         }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/device-health',
+    async (request, reply) => {
+      try {
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (Object.keys(request.query).length !== 0)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (!dependencies.runtime.deviceHealth)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const health = await dependencies.runtime.deviceHealth.status(authUserId);
+        return reply.header('cache-control', 'no-store').code(200).send({ health });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerDeviceHealthRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

@@ -12,6 +12,8 @@ const RECORD_WITH_DISPLAY = `select app.record_receiver_sms_payment_event_with_d
   $1::text,$2::text,$3::text,$4::bigint,$5::timestamptz,$6::timestamptz,$7::timestamptz,
   $8::text,$9::text,$10::text,$11::text,$12::text,$13::integer,
   $14::text,$15::text) as status`;
+const RECORD_STATUS = `select app.record_receiver_sms_device_status(
+  $1::text,$2::text,$3::text,$4::timestamptz,$5::text,$6::text) as recorded`;
 
 function row(value: unknown): Record<string, unknown> | undefined {
   return value !== null &&
@@ -94,6 +96,20 @@ export function createReceiverSmsIngestPostgresDatabase(
       )
         throw new Error();
       return value.status;
+    },
+    async recordStatus(input: Parameters<ReceiverSmsIngestDatabase['recordStatus']>[0]) {
+      const result = await client.query(RECORD_STATUS, [
+        input.deviceId,
+        input.keyId,
+        input.state,
+        input.observedAt,
+        input.bodyDigest,
+        input.devicePublicKeySpkiSha256,
+      ]);
+      const value = result.rows.length === 1 ? row(result.rows[0]) : undefined;
+      if (!value || Object.keys(value).length !== 1 || typeof value.recorded !== 'boolean')
+        throw new Error();
+      return value.recorded;
     },
   });
 }

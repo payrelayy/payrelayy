@@ -40,6 +40,7 @@ import {
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   buildTelegramCombinedPaymentPrompt,
   isTelegramCombinedPaymentPromptReply,
+  telegramDepositInstructionEntities,
   telegramReceiverNumberCodeEntities,
   buildTelegramTelebirrPaymentPrompt,
   parseTelegramTelebirrPaymentPromptReply,
@@ -120,7 +121,7 @@ describe('private Telegram action reducers', () => {
     expect(prompt).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(prompt).not.toContain('2519000000');
     expect(prompt).toContain('Saved Player ID: PLAYER-DEMO-42');
-    expect(prompt).toContain('Send 100–25,000 ETB.');
+    expect(prompt).toContain('Send 100–25,000 ETB using one method.');
     expect(prompt).not.toContain('Choose one available method');
     expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(prompt).toContain('After paying, send your receipt or reference here.');
@@ -135,10 +136,32 @@ describe('private Telegram action reducers', () => {
       { type: 'code', text: '900000042' },
       { type: 'code', text: '900000043' },
     ]);
+    expect(
+      telegramDepositInstructionEntities(prompt).map((entity) => ({
+        type: entity.type,
+        text: prompt.slice(entity.offset, entity.offset + entity.length),
+      })),
+    ).toEqual([
+      { type: 'bold', text: '💰 FetanAgent deposit' },
+      { type: 'bold', text: 'Send 100–25,000 ETB' },
+      { type: 'bold', text: 'TeleBirr' },
+      { type: 'code', text: '900000042' },
+      { type: 'bold', text: 'CBE Birr' },
+      { type: 'code', text: '900000043' },
+      { type: 'bold', text: 'Saved Player ID:' },
+      { type: 'code', text: 'PLAYER-DEMO-42' },
+    ]);
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
       true,
     );
-    const previousCard = prompt.replace(`\n${copyHint}\n`, '');
+    const priorCopyHintCard = prompt.replace(
+      'Send 100–25,000 ETB using one method.',
+      'Send 100–25,000 ETB.',
+    );
+    expect(
+      isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: priorCopyHintCard }),
+    ).toBe(true);
+    const previousCard = priorCopyHintCard.replace(`\n${copyHint}\n`, '');
     expect(
       isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: previousCard }),
     ).toBe(true);
@@ -205,7 +228,7 @@ describe('private Telegram action reducers', () => {
     expect(
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
-        text: prompt.replace('Send 100–25,000 ETB.', 'Send any amount.'),
+        text: prompt.replace('Send 100–25,000 ETB using one method.', 'Send any amount.'),
       }),
     ).toBe(false);
     const cbeOnly = buildTelegramCombinedPaymentPrompt({
@@ -228,6 +251,7 @@ describe('private Telegram action reducers', () => {
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
         text: cbeOnly
+          .replace('Send 100–25,000 ETB using one method.', 'Send 100–25,000 ETB.')
           .replace(`\n${copyHint}\n`, '')
           .replace(
             'After paying, send your receipt or reference here.',

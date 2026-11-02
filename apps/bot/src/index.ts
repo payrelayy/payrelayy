@@ -77,7 +77,7 @@ import {
   TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
-  telegramReceiverNumberCodeEntities,
+  telegramDepositInstructionEntities,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
 import { renderTelegramOutcomeActions, type PrivateTelegramMenuButton } from './private-menu.js';
@@ -243,7 +243,7 @@ function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboa
 
 function replyOptions(keyboard?: InlineKeyboard, text?: string) {
   if (keyboard) return { reply_markup: keyboard };
-  const entities = text ? telegramReceiverNumberCodeEntities(text) : [];
+  const entities = text ? telegramDepositInstructionEntities(text) : [];
   return entities.length > 0 ? { entities } : undefined;
 }
 

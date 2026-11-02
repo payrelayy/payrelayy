@@ -164,6 +164,40 @@ export function telegramReceiverNumberCodeEntities(
   }));
 }
 
+/** Style the current deposit card without changing its reply-parsed text. */
+export function telegramDepositInstructionEntities(
+  text: string,
+): Array<{ type: 'bold' | 'code'; offset: number; length: number }> {
+  const numberEntities = telegramReceiverNumberCodeEntities(text);
+  const title = '💰 FetanAgent deposit';
+  const amount = 'Send 100–25,000 ETB';
+  if (!text.startsWith(`${title}\n${amount} using one method.\n`)) return numberEntities;
+
+  const entities: Array<{ type: 'bold' | 'code'; offset: number; length: number }> = [
+    { type: 'bold', offset: 0, length: title.length },
+    { type: 'bold', offset: title.length + 1, length: amount.length },
+    ...numberEntities,
+  ];
+  for (const match of text.matchAll(/(?:^|\n)(TeleBirr|CBE Birr)(?=\n)/gu)) {
+    entities.push({
+      type: 'bold',
+      offset: match.index + match[0].length - match[1]!.length,
+      length: match[1]!.length,
+    });
+  }
+  const playerId = /(?:^|\n)(Saved Player ID: )([^\s]+)(?=\n|$)/u.exec(text);
+  if (playerId) {
+    const labelOffset = playerId.index + (playerId[0].startsWith('\n') ? 1 : 0);
+    entities.push({ type: 'bold', offset: labelOffset, length: 'Saved Player ID:'.length });
+    entities.push({
+      type: 'code',
+      offset: labelOffset + playerId[1]!.length,
+      length: playerId[2]!.length,
+    });
+  }
+  return entities.sort((left, right) => left.offset - right.offset);
+}
+
 /** One payable card, with each Owner-configured receiver kept under its own provider. */
 function renderTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
@@ -171,6 +205,7 @@ function renderTelegramCombinedPaymentPrompt(
   localNumbers: boolean,
   conciseProofText: boolean,
   includeCopyHint = false,
+  singleMethodWording = false,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -192,7 +227,11 @@ function renderTelegramCombinedPaymentPrompt(
     throw new Error('The combined payment prompt is unavailable.');
   return [
     '💰 FetanAgent deposit',
-    previousWording ? 'Choose one available method. Send 100–25,000 ETB.' : 'Send 100–25,000 ETB.',
+    previousWording
+      ? 'Choose one available method. Send 100–25,000 ETB.'
+      : singleMethodWording
+        ? 'Send 100–25,000 ETB using one method.'
+        : 'Send 100–25,000 ETB.',
     ...input.receivers.flatMap((receiver) => [
       '',
       receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
@@ -218,7 +257,7 @@ function renderTelegramCombinedPaymentPrompt(
 export function buildTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
 ): string {
-  return renderTelegramCombinedPaymentPrompt(input, false, true, true, true);
+  return renderTelegramCombinedPaymentPrompt(input, false, true, true, true, true);
 }
 
 export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
@@ -240,9 +279,17 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
     // Customers can still reply to cards issued before the amount change.
     const replyText = message.text.replace('Send 25–25,000 ETB.', 'Send 100–25,000 ETB.');
     const input = { playerId, receivers };
-    const currentPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true, true);
+    const currentPrompt = buildTelegramCombinedPaymentPrompt(input);
+    const priorPromptWithCopyHint = renderTelegramCombinedPaymentPrompt(
+      input,
+      false,
+      true,
+      true,
+      true,
+    );
     const previousPrompt = renderTelegramCombinedPaymentPrompt(input, false, true, true);
     return replyText === currentPrompt ||
+      replyText === priorPromptWithCopyHint ||
       replyText === previousPrompt ||
       replyText ===
         previousPrompt.replace(

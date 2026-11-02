@@ -310,6 +310,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-withdraw-payment-results-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-kemerbet-signin-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-deposit-instruction-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-routine-drain-helper-rotation-v1.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets
@@ -1244,7 +1245,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '830f233f5acb24674fc93c2dd6ad7d93a54ffc15'"
+              "sudo -n '$helper' status '50129afcee54c65eabc193260bb16ffb9da071a5'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1475,7 +1476,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '830f233f5acb24674fc93c2dd6ad7d93a54ffc15'"
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '50129afcee54c65eabc193260bb16ffb9da071a5'"
 
       - name: Drain routine credit leases before activation
         id: routine_drain

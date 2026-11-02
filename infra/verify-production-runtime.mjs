@@ -827,7 +827,7 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '50129afcee54c65eabc193260bb16ffb9da071a5'/gu)].length,
+  [...workflow.matchAll(/status 'ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );

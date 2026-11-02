@@ -180,7 +180,7 @@ create function app.record_receiver_sms_device_status(
   p_device_id text, p_key_id text, p_state text,
   p_observed_at timestamptz, p_body_digest text,
   p_public_key_digest text
-) returns boolean language plpgsql security definer set search_path = pg_catalog
+) returns boolean language plpgsql security definer set search_path = pg_catalog, pg_temp
 as $$
 declare v_enrollment_id uuid;
 declare v_now timestamptz := pg_catalog.clock_timestamp();

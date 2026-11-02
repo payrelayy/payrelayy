@@ -209,6 +209,8 @@ const manualWithdrawalContactMigrationName = '20261101013001_manual_withdrawal_c
 const ownerKemerbetAutoSigninMigrationName =
   '20261101204815_owner_kemerbet_auto_signin_credentials.sql';
 const routineReleaseDrainMigrationName = '20261102151000_routine_deposit_release_drain.sql';
+const ownerDepositAvailabilityMigrationName = '20261102215837_owner_deposit_availability.sql';
+const ownerDeviceHealthMigrationName = '20261102220034_owner_device_health.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -702,7 +704,9 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerBrowserIdleSessionMigrationName &&
         name !== manualWithdrawalContactMigrationName &&
         name !== ownerKemerbetAutoSigninMigrationName &&
-        name !== routineReleaseDrainMigrationName,
+        name !== routineReleaseDrainMigrationName &&
+        name !== ownerDepositAvailabilityMigrationName &&
+        name !== ownerDeviceHealthMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10531,6 +10535,18 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [routineReleaseDrainMigrationName],
     );
+    for (const migrationName of [
+      ownerDepositAvailabilityMigrationName,
+      ownerDeviceHealthMigrationName,
+    ]) {
+      await postCutoverClient.query(
+        await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
+      );
+      await postCutoverClient.query(
+        'insert into sql_integration.applied_migrations (filename) values ($1)',
+        [migrationName],
+      );
+    }
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10656,6 +10672,75 @@ describe('100 ETB production deposit policy cutover', () => {
         (select count(*)::text from app.routine_telebirr_runtime_events) as events`,
     );
     expect(transport.rows).toEqual([{ active: false, events: '0' }]);
+  });
+
+  it('pauses both public deposit methods and resumes both with one Owner request', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      const switchesBefore = await postCutoverClient.query<{
+        feature_key: string;
+        mode: string;
+      }>(`select feature_key, mode from app.feature_switches order by feature_key`);
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      const pauseRequestId = randomUUID();
+      const paused = await postCutoverClient.query<{ enabled: boolean }>(
+        'select app.set_owner_deposit_availability($1::uuid,$2::uuid,false) as enabled',
+        [ownerAuthUserId, pauseRequestId],
+      );
+      expect(paused.rows).toEqual([{ enabled: false }]);
+      const publicPaused = await postCutoverClient.query<{
+        provider_code: string;
+        accepting: boolean;
+      }>('select * from app.public_provider_deposit_controls()');
+      expect(publicPaused.rows).toEqual([
+        { provider_code: 'cbe_birr', accepting: false },
+        { provider_code: 'telebirr', accepting: false },
+      ]);
+      await postCutoverClient.query('reset role');
+
+      // This disposable transaction isolates the Owner switch from the
+      // independently tested receiver, worker, and execution readiness rules.
+      await postCutoverClient.query('update app.owner_provider_deposit_controls set enabled=false');
+      await postCutoverClient.query(`create or replace function
+        app.owner_provider_deposit_readiness(p_provider_code text)
+        returns text language sql security definer set search_path=pg_catalog
+        as $$ select 'ready'::text $$`);
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      const resumeRequestId = randomUUID();
+      const resumed = await postCutoverClient.query<{ enabled: boolean }>(
+        'select app.set_owner_deposit_availability($1::uuid,$2::uuid,true) as enabled',
+        [ownerAuthUserId, resumeRequestId],
+      );
+      expect(resumed.rows).toEqual([{ enabled: true }]);
+      const replay = await postCutoverClient.query<{ enabled: boolean }>(
+        'select app.set_owner_deposit_availability($1::uuid,$2::uuid,true) as enabled',
+        [ownerAuthUserId, resumeRequestId],
+      );
+      expect(replay.rows).toEqual([{ enabled: true }]);
+      const publicResumed = await postCutoverClient.query<{
+        provider_code: string;
+        accepting: boolean;
+      }>('select * from app.public_provider_deposit_controls()');
+      expect(publicResumed.rows).toEqual([
+        { provider_code: 'cbe_birr', accepting: true },
+        { provider_code: 'telebirr', accepting: true },
+      ]);
+      await postCutoverClient.query('reset role');
+      const controls = await postCutoverClient.query<{ provider_code: string; enabled: boolean }>(
+        'select provider_code, enabled from app.owner_provider_deposit_controls order by provider_code',
+      );
+      expect(controls.rows).toEqual([
+        { provider_code: 'cbe_birr', enabled: true },
+        { provider_code: 'telebirr', enabled: true },
+      ]);
+      const switchesAfter = await postCutoverClient.query<{
+        feature_key: string;
+        mode: string;
+      }>(`select feature_key, mode from app.feature_switches order by feature_key`);
+      expect(switchesAfter.rows).toEqual(switchesBefore.rows);
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
   });
 
   it('expires Owner browser sessions by human activity and the original Auth sign-in', async () => {
@@ -10823,7 +10908,10 @@ describe('100 ETB production deposit policy cutover', () => {
     expect(functionList).toBeDefined();
     expect(template).toBeDefined();
     const signatures = [...functionList!.matchAll(/'([^']+)'/gu)].map((match) => match[1]!);
-    expect(signatures).toHaveLength(3);
+    expect(signatures).toHaveLength(4);
+    expect(signatures[3]).toBe(
+      'app.record_receiver_sms_device_status(text,text,text,timestamptz,text,text)',
+    );
     const oids = signatures
       .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
       .join(',');

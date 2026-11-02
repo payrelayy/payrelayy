@@ -311,6 +311,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-kemerbet-signin-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-deposit-instruction-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-routine-drain-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-owner-device-health-helper-rotation-v1.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets

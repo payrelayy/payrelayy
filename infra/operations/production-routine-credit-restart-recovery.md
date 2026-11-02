@@ -48,7 +48,7 @@ the service restart.
    and require `predecessor-exact; no production runtime changed`, then run
    `rotate` with `ROTATE EXACT PRODUCTION V2 ROUTINE DRAIN HELPER V1`.
    Inspect again and require `successor-exact; rotation complete; no production
-   runtime changed`. Do not change a financial switch during rotation.
+runtime changed`. Do not change a financial switch during rotation.
 4. Check the live queue for leased jobs and unresolved attempts. Resolve any
    existing case separately; do not trigger a transfer for verification.
 5. Dispatch `production-runtime.yml` from the passing main commit with

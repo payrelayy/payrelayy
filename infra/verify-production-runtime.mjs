@@ -2633,7 +2633,8 @@ const kemerbetSigninRotation = await read(
 );
 const kemerbetSigninRunbook = await read('infra/operations/production-kemerbet-signin-release.md');
 const previousHelperDigest = '24dbb0be96253a173906da6e99bfc3242444286d2c3cd337ec1bf88cd018b218';
-const depositInstructionHelperDigest = '7227d02fc9eee8e5ce4189e955ea32a2971ff76b3d330602e5536c9ef908bc19';
+const depositInstructionHelperDigest =
+  '7227d02fc9eee8e5ce4189e955ea32a2971ff76b3d330602e5536c9ef908bc19';
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='b19f437aeaeb79fe3e1bb460dd35019a2ba5e1ea'",

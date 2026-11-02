@@ -67,6 +67,9 @@ const [
   cbeLivePreflightSql,
   cbeStoppedPreflightSql,
   cbeLiveCutoverIdleSql,
+  routineReleaseDrainArmSql,
+  routineReleaseDrainIdleSql,
+  routineReleaseDrainDisarmSql,
   financialSwitchFingerprintSql,
   paidPollActivateSql,
   paidPollDisableSql,
@@ -144,6 +147,9 @@ const [
   read('infra/sql/production-cbe-live-runtime-preflight.sql'),
   read('infra/sql/production-cbe-stopped-runtime-preflight.sql'),
   read('infra/sql/production-cbe-live-cutover-idle.sql'),
+  read('infra/sql/production-routine-release-drain-arm.sql'),
+  read('infra/sql/production-routine-release-drain-idle.sql'),
+  read('infra/sql/production-routine-release-drain-disarm.sql'),
   read('infra/sql/production-financial-switch-fingerprint.sql'),
   read('infra/sql/production-routine-paid-poll-activate.sql'),
   read('infra/sql/production-routine-paid-poll-disable.sql'),
@@ -617,7 +623,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  19,
+  21,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -758,7 +764,17 @@ assert.equal(
   3,
   'the stopped CBE profile must be checked before, immediately before, and after cutover',
 );
-assert.match(workflow, /production-cbe-live-cutover-idle\.sql/u);
+assert.match(workflow, /production-routine-release-drain-arm\.sql/u);
+assert.match(workflow, /production-routine-release-drain-idle\.sql/u);
+assert.match(workflow, /production-routine-release-drain-disarm\.sql/u);
+assert.ok(
+  workflow.indexOf('Drain routine credit leases before activation') <
+    workflow.indexOf('Atomically activate production and switch the public edge'),
+);
+assert.ok(
+  workflow.indexOf('Release routine credit drain after activation or rollback') >
+    workflow.indexOf('Roll back a failed production activation'),
+);
 assert.match(workflow, /production-financial-switch-fingerprint\.sql/u);
 assert.match(
   workflow,
@@ -3078,6 +3094,14 @@ assert.match(cbeLiveCutoverIdleSql, /begin transaction isolation level serializa
 assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_jobs job/u);
 assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_execution_attempts attempt/u);
 assert.match(cbeLiveCutoverIdleSql, /rollback;/u);
+assert.match(routineReleaseDrainArmSql, /update app\.routine_deposit_release_drain/u);
+assert.match(routineReleaseDrainIdleSql, /job\.status = 'leased'/u);
+assert.match(
+  routineReleaseDrainIdleSql,
+  /attempt\.status in \('prepared', 'final_action_fenced', 'reconciliation_required'\)/u,
+);
+assert.doesNotMatch(routineReleaseDrainIdleSql, /job\.status = 'queued'/u);
+assert.match(routineReleaseDrainDisarmSql, /release_sha = ''/u);
 for (const [feature, mode] of [
   ['cbe_birr_authoritative_verification', 'live'],
   ['deposit_execution', 'live'],

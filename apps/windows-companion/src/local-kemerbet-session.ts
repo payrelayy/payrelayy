@@ -134,6 +134,8 @@ export interface LocalKemerBetSession {
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
   /** Close the exact success result only after the server has settled or isolated its attempt. */
   dismissSettledRoutineSuccess(): Promise<void>;
+  /** Leave a durably isolated payment's form before claiming another payment. */
+  resetAfterContainedRoutineDeposit(): Promise<void>;
   scanRoutineDepositHistory(
     playerId: string,
     amountMinor: number,
@@ -1022,6 +1024,19 @@ export async function startLocalKemerBetSession(
         operationInProgress = false;
         notePlayerWorkCompleted();
       }
+    },
+    async resetAfterContainedRoutineDeposit() {
+      const page = localPage;
+      if (terminal || stopping || reviewPaused || operationInProgress || !page)
+        throw new Error('The guarded KemerBet page cannot be reset.');
+      if (classifyPageUrl(page.url()) === 'login') {
+        await observePage(page);
+        return;
+      }
+      if (!signedInVerified) throw new Error('The guarded KemerBet page is not verified.');
+      // The broker has already isolated this one-use attempt. This navigation cannot
+      // submit Transfer and removes a prepared form before the next Player is leased.
+      await resetVerifiedAgentPage(page);
     },
     async scanRoutineDepositHistory(
       playerId: string,

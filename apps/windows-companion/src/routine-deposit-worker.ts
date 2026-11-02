@@ -128,7 +128,9 @@ export interface RoutineDepositWorkerOptions {
   readonly store: RoutineDepositExecutionStore;
   readonly session: Pick<
     LocalKemerBetSession,
-    'executeRoutineOneUseDeposit' | 'dismissSettledRoutineSuccess'
+    | 'executeRoutineOneUseDeposit'
+    | 'dismissSettledRoutineSuccess'
+    | 'resetAfterContainedRoutineDeposit'
   >;
   readonly signal: AbortSignal;
   readonly now?: () => number;
@@ -214,6 +216,10 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   let busy = false;
   let pauseReason: LocalRoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
+  let pendingContainment:
+    | { lease: RoutineDepositLease; reason: 'execution_uncertain' | 'reconciliation_uncertain' }
+    | undefined;
+  let pendingPageReset: 'execution_uncertain' | 'reconciliation_uncertain' | undefined;
 
   async function pause(
     lease: RoutineDepositLease | null,
@@ -246,17 +252,37 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     lease: RoutineDepositLease,
     reason: 'execution_uncertain' | 'reconciliation_uncertain',
   ): Promise<RoutineDepositWorkerResult> {
-    try {
-      // The signed broker response is the proof that this one-use attempt is now
-      // either confirmed or in durable Owner review. Never continue on a timeout.
-      await options.store.pause(lease, reason);
-    } catch {
-      pauseReason = 'database_unavailable';
-      return Object.freeze({ status: 'paused', reason: 'database_unavailable' });
+    pendingContainment = { lease, reason };
+    return resumeContainment();
+  }
+
+  async function resumeContainment(): Promise<RoutineDepositWorkerResult> {
+    if (pendingContainment) {
+      const { lease, reason } = pendingContainment;
+      try {
+        // A lost gateway response can leave a prepared or fenced attempt on the
+        // server. Repeat only the idempotent review handoff, never the fence or Transfer.
+        await options.store.pause(lease, reason);
+      } catch {
+        // Keep this binding locally and retry its signed containment when the
+        // bridge returns. No later payment may be leased before it is isolated.
+        return Object.freeze({ status: 'temporarily_unavailable' });
+      }
+      pendingContainment = undefined;
+      awaitingReconciliation = undefined;
+      pendingPageReset = reason;
     }
-    awaitingReconciliation = undefined;
-    const dismissFailure = await dismissSettledResult();
-    if (dismissFailure) return dismissFailure;
+    if (!pendingPageReset) return Object.freeze({ status: 'idle' });
+    const reason = pendingPageReset;
+    try {
+      await options.session.dismissSettledRoutineSuccess();
+      await options.session.resetAfterContainedRoutineDeposit();
+    } catch {
+      // The payment is already isolated, but the old form may still be visible.
+      // Retry the guarded reset before allowing any new browser work.
+      return Object.freeze({ status: 'temporarily_unavailable' });
+    }
+    pendingPageReset = undefined;
     return Object.freeze({ status: 'contained', reason });
   }
 
@@ -283,6 +309,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   }
 
   return Object.freeze({
+    needsRecovery: () => pendingContainment !== undefined || pendingPageReset !== undefined,
     async runOnce(): Promise<RoutineDepositWorkerResult> {
       if (busy) return Object.freeze({ status: 'busy' });
       if (pauseReason) return Object.freeze({ status: 'paused', reason: pauseReason });
@@ -290,6 +317,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
       busy = true;
       let lease: RoutineDepositLease | null = null;
       try {
+        if (pendingContainment || pendingPageReset) return await resumeContainment();
         if (awaitingReconciliation) {
           lease = awaitingReconciliation;
           return await finalizeModal(lease);

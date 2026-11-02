@@ -23,13 +23,14 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
     LocalKemerBetSession,
     | 'executeRoutineOneUseDeposit'
     | 'dismissSettledRoutineSuccess'
+    | 'resetAfterContainedRoutineDeposit'
     | 'isSignedInVerified'
     | 'pauseForReview'
     | 'stop'
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
-  /** Runs after an empty lease, contained uncertainty, or a failed pre-lease request. */
+  /** Runs after an empty lease or a failed pre-lease request. */
   readonly runReadOnlyIdleWorkOnce?: () => Promise<unknown>;
 }
 
@@ -54,14 +55,14 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
       while (!controller.signal.aborted) {
         // A signed launch proof does not mean KemerBet is still authenticated. Stop claiming
         // work when its page returns to login; verified payments remain queued in the database.
-        if (!options.session.isSignedInVerified()) {
+        if (!options.session.isSignedInVerified() && !worker.needsRecovery()) {
           lastLeaseWasIdle = false;
           await delay(idleDelayMs, controller.signal);
           continue;
         }
         if (lastLeaseWasIdle && options.runReadOnlyIdleWorkOnce) {
-          // A confirmed credit claims the next ready payment first. An empty lease
-          // or durably contained uncertainty gives read-only Find a browser slot.
+          // Offer Find only when the financial lease itself was empty. A contained
+          // payment may have another credit queued directly behind it.
           lastLeaseWasIdle = false;
           await options.runReadOnlyIdleWorkOnce();
           if (controller.signal.aborted) break;
@@ -69,7 +70,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
         }
         // The await is the execution sequence: confirmation finishes before the next run.
         const result = await worker.runOnce();
-        lastLeaseWasIdle = result.status === 'idle' || result.status === 'contained';
+        lastLeaseWasIdle = result.status === 'idle';
         try {
           options.report?.(result);
         } catch {
@@ -102,7 +103,8 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           continue;
         }
         consecutiveUnavailable = 0;
-        if (result.status !== 'completed') await delay(idleDelayMs, controller.signal);
+        if (result.status !== 'completed' && result.status !== 'contained')
+          await delay(idleDelayMs, controller.signal);
       }
       return Object.freeze({ status: 'stopped' });
     } finally {

@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'/gu)].length,
+  [...workflow.matchAll(/status '26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2744,6 +2744,12 @@ for (const source of [workflow, quality]) {
 const ownerDeviceHealthRotation = await read(
   'infra/operations/fetanagent-production-v2-owner-device-health-helper-rotation-v1.sh',
 );
+const receiverSmsPairingRotation = await read(
+  'infra/operations/fetanagent-production-v2-receiver-sms-helper-rotation-v1.sh',
+);
+const receiverSmsPairingRunbook = await read(
+  'infra/operations/production-receiver-sms-simple-pairing-release.md',
+);
 const ownerDeviceHealthRunbook = await read(
   'infra/operations/production-owner-device-health-release.md',
 );
@@ -2751,7 +2757,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7'",
   `readonly PREDECESSOR_SHA256='${routineDrainHelperDigest}'`,
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='cc3524c917dbaa72c13b79445d7ff1be8ae78fb2a8d1d6af46c670f737fb1ab7'",
   "readonly SOURCE_REVIEW='owner-device-health-release-guard-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2767,7 +2773,7 @@ assert.doesNotMatch(ownerDeviceHealthRotation, /\b(?:docker|psql|rm|sed|chmod|ch
 for (const value of [
   'ba5c6e20b252cb9d7bf7d06248b2c2f5dede44b7',
   routineDrainHelperDigest,
-  helperDigest,
+  'cc3524c917dbaa72c13b79445d7ff1be8ae78fb2a8d1d6af46c670f737fb1ab7',
   'ROTATE EXACT PRODUCTION V2 OWNER DEVICE HEALTH HELPER V1',
   'grant its EXECUTE privilege back to `fetanagent_receiver_sms_ingest`',
 ]) {
@@ -2777,6 +2783,36 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-owner-device-health-helper-rotation-v1\.sh/u,
+  );
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf'",
+  "readonly PREDECESSOR_SHA256='cc3524c917dbaa72c13b79445d7ff1be8ae78fb2a8d1d6af46c670f737fb1ab7'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='receiver-sms-simple-pairing-release-guard-v1'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 RECEIVER SMS SIMPLE PAIRING HELPER V1',
+]) {
+  assert.ok(
+    receiverSmsPairingRotation.includes(value),
+    `receiver SMS helper rotation is missing ${value}`,
+  );
+}
+assert.doesNotMatch(receiverSmsPairingRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf',
+  'cc3524c917dbaa72c13b79445d7ff1be8ae78fb2a8d1d6af46c670f737fb1ab7',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 RECEIVER SMS SIMPLE PAIRING HELPER V1',
+])
+  assert.ok(receiverSmsPairingRunbook.includes(value));
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

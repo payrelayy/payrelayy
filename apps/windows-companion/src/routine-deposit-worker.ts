@@ -22,7 +22,7 @@ export interface RoutineDepositPolicy {
   readonly provider: 'telebirr' | 'receiver_sms';
   readonly platformCode: 'kemerbet';
   readonly currencyCode: 'ETB';
-  readonly minimumAmountMinor: 10000;
+  readonly minimumAmountMinor: 2500 | 10000;
   readonly maximumAmountMinor: 2500000;
   readonly playerScope: 'all_active_deposit_eligible';
   readonly playerOwnershipRequired: false;
@@ -147,7 +147,7 @@ export function isRoutineDepositPolicy(candidate: unknown): candidate is Routine
     (policy.provider === 'telebirr' || policy.provider === 'receiver_sms') &&
     policy.platformCode === 'kemerbet' &&
     policy.currencyCode === 'ETB' &&
-    policy.minimumAmountMinor === 10000 &&
+    (policy.minimumAmountMinor === 2500 || policy.minimumAmountMinor === 10000) &&
     policy.maximumAmountMinor === 2500000 &&
     policy.playerScope === 'all_active_deposit_eligible' &&
     policy.playerOwnershipRequired === false &&

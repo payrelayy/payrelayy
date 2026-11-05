@@ -1113,7 +1113,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(replies[0]!.text).toContain('Saved Player ID: PLAYER-DEMO-42');
     expect(replies[0]!.text).not.toContain('2519000000');
-    expect(replies[0]!.text).toContain('Send 100–25,000 ETB using one method.');
+    expect(replies[0]!.text).toContain('Send 25–25,000 ETB using one method.');
     expect(replies[0]!.text).not.toContain(
       'Valid for 1 hour. Check the receiver name before paying.',
     );
@@ -1126,7 +1126,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       })),
     ).toEqual([
       { type: 'bold', text: '💰 FetanAgent deposit' },
-      { type: 'bold', text: 'Send 100–25,000 ETB' },
+      { type: 'bold', text: 'Send 25–25,000 ETB' },
       { type: 'bold', text: 'TeleBirr' },
       { type: 'code', text: '900000042' },
       { type: 'bold', text: 'CBE Birr' },
@@ -1205,7 +1205,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       ),
     ).toEqual([
       '💰 FetanAgent deposit',
-      'Send 100–25,000 ETB',
+      'Send 25–25,000 ETB',
       'CBE Birr',
       '900000043',
       'Saved Player ID:',

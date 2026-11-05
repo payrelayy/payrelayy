@@ -2003,7 +2003,7 @@ describe('customer web deposit flow', () => {
       headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
       payload: form({
         _csrf: csrfToken,
-        amountEtb: '100.00',
+        amountEtb: '25.00',
         playerId: 'PLAYER-DEMO-42',
         requestKey,
       }),
@@ -2011,12 +2011,12 @@ describe('customer web deposit flow', () => {
 
     expect(response.statusCode).toBe(200);
     expect(openDeposit).toHaveBeenCalledWith({
-      amountMinor: '10000',
+      amountMinor: '2500',
       authUserId,
       playerId: 'PLAYER-DEMO-42',
       requestKey,
     });
-    expect(response.body).toContain('Send 100.00 ETB');
+    expect(response.body).toContain('Send 25.00 ETB');
     expect(response.body).toContain('***1234');
     expect(response.body).toContain(`name="depositToken" value="${depositToken}"`);
     expect(response.body).toContain('name="transactionReference"');
@@ -2126,7 +2126,7 @@ describe('customer web deposit flow', () => {
       headers: mutationHeaders(cookie),
       payload: form({
         _csrf: csrfToken,
-        amountEtb: '99.99',
+        amountEtb: '24.99',
         playerId: 'PLAYER-DEMO-42',
         requestKey,
       }),

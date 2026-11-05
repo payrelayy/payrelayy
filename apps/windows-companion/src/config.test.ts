@@ -182,12 +182,12 @@ describe('Windows companion configuration', () => {
     const environment = {
       ...base,
       INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000',
+      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
     };
     const config = loadWindowsCompanionConfig(environment);
     expect(config.routineNoMoneyPreflight).toEqual({
       playerId: 'SAMPLE-PLAYER',
-      amountMinor: 10000,
+      amountMinor: 2500,
     });
     expect(JSON.stringify(redactedWindowsCompanionConfig(config))).not.toContain('SAMPLE-PLAYER');
     expect(environment).not.toHaveProperty('INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID');
@@ -197,7 +197,7 @@ describe('Windows companion configuration', () => {
       { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '10000' },
       {
         INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
-        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '9999',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2499',
       },
       {
         INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'BAD PLAYER',

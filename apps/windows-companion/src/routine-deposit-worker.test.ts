@@ -19,7 +19,7 @@ const policy: RoutineDepositPolicy = Object.freeze({
   provider: 'telebirr',
   platformCode: 'kemerbet',
   currencyCode: 'ETB',
-  minimumAmountMinor: 10000,
+  minimumAmountMinor: 2500,
   maximumAmountMinor: 2500000,
   playerScope: 'all_active_deposit_eligible',
   playerOwnershipRequired: false,
@@ -121,6 +121,7 @@ function fixture(lease = makeLease()) {
 describe('routine production serial deposit worker', () => {
   it('accepts persistent routine policy, not fixed pilot or quotas', () => {
     expect(isRoutineDepositPolicy(policy)).toBe(true);
+    expect(isRoutineDepositPolicy({ ...policy, minimumAmountMinor: 10000 })).toBe(true);
     expect(
       isRoutineDepositPolicy({
         ...policy,
@@ -241,8 +242,7 @@ describe('routine production serial deposit worker', () => {
   });
 
   it.each([
-    { amountMinor: 2500 },
-    { amountMinor: 9999 },
+    { amountMinor: 2499 },
     { amountMinor: 2500001 },
     { amountMinor: 10000.1 },
     { paymentVerified: false },

@@ -19,8 +19,8 @@ export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 TeleBirr';
 export const TELEGRAM_GUIDED_CBE_BUTTON_TEXT = '💳 CBE Birr';
 export const TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT = '💰 Deposit';
 
-const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 100–25,000 ETB in TeleBirr.';
-const PREVIOUS_TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
+const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
+const PREVIOUS_TELEBIRR_AMOUNT_TEXT = 'Amount: choose 100–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
 const TELEBIRR_PRESENTATION_WINDOW_TEXT =
   'These payment details remain valid for 1 hour. Send the receipt or reference after paying.';
@@ -170,7 +170,7 @@ export function telegramDepositInstructionEntities(
 ): Array<{ type: 'bold' | 'code'; offset: number; length: number }> {
   const numberEntities = telegramReceiverNumberCodeEntities(text);
   const title = '💰 FetanAgent deposit';
-  const amount = 'Send 100–25,000 ETB';
+  const amount = 'Send 25–25,000 ETB';
   if (!text.startsWith(`${title}\n${amount} using one method.\n`)) return numberEntities;
 
   const entities: Array<{ type: 'bold' | 'code'; offset: number; length: number }> = [
@@ -228,10 +228,10 @@ function renderTelegramCombinedPaymentPrompt(
   return [
     '💰 FetanAgent deposit',
     previousWording
-      ? 'Choose one available method. Send 100–25,000 ETB.'
+      ? 'Choose one available method. Send 25–25,000 ETB.'
       : singleMethodWording
-        ? 'Send 100–25,000 ETB using one method.'
-        : 'Send 100–25,000 ETB.',
+        ? 'Send 25–25,000 ETB using one method.'
+        : 'Send 25–25,000 ETB.',
     ...input.receivers.flatMap((receiver) => [
       '',
       receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
@@ -277,7 +277,7 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
   if (!playerId) return undefined;
   try {
     // Customers can still reply to cards issued before the amount change.
-    const replyText = message.text.replace('Send 25–25,000 ETB.', 'Send 100–25,000 ETB.');
+    const replyText = message.text.replace('Send 100–25,000 ETB', 'Send 25–25,000 ETB');
     const input = { playerId, receivers };
     const currentPrompt = buildTelegramCombinedPaymentPrompt(input);
     const priorPromptWithCopyHint = renderTelegramCombinedPaymentPrompt(
@@ -327,7 +327,7 @@ function renderTelegramTelebirrPaymentPrompt(
 
   return [
     '💰 TeleBirr deposit',
-    'Send 100–25,000 ETB to:',
+    'Send 25–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
@@ -356,7 +356,7 @@ function renderTelegramCbeSmsPaymentPrompt(
     throw new Error('The CBE Birr payment prompt is unavailable.');
   return [
     '💳 CBE Birr deposit',
-    'Send 100–25,000 ETB to:',
+    'Send 25–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
@@ -384,7 +384,7 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     };
-    const replyText = message.text.replace('Send 25–25,000 ETB to:', 'Send 100–25,000 ETB to:');
+    const replyText = message.text.replace('Send 100–25,000 ETB to:', 'Send 25–25,000 ETB to:');
     return [true, false].some((localNumber) => {
       const currentPrompt = renderTelegramCbeSmsPaymentPrompt(input, localNumber);
       const recentPrompt = currentPrompt.replace(
@@ -489,40 +489,37 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     });
-    const previousAmountPrompt = priorPrompt.replace(
+    const previousPilotPrompt = priorPrompt.replace(
       TELEBIRR_AMOUNT_TEXT,
-      PREVIOUS_TELEBIRR_AMOUNT_TEXT,
-    );
-    const previousPilotPrompt = previousAmountPrompt.replace(
-      PREVIOUS_TELEBIRR_AMOUNT_TEXT,
       PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT,
     );
-    const legacyPrompt = previousAmountPrompt.replace(
+    const legacyPrompt = priorPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       LEGACY_TELEBIRR_WINDOW_TEXT,
     );
-    const previousWindowPrompt = previousAmountPrompt.replace(
+    const previousWindowPrompt = priorPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       PREVIOUS_TELEBIRR_WINDOW_TEXT,
     );
-    const previousMediaPrompt = previousAmountPrompt.replace(
+    const previousMediaPrompt = priorPrompt.replace(
       CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
     );
-    const replyText = message.text.replace('Send 25–25,000 ETB to:', 'Send 100–25,000 ETB to:');
+    const replyText = message.text
+      .replace('Send 100–25,000 ETB to:', 'Send 25–25,000 ETB to:')
+      .replace(PREVIOUS_TELEBIRR_AMOUNT_TEXT, TELEBIRR_AMOUNT_TEXT);
     return currentPrompts.includes(replyText) ||
-      message.text === priorPrompt ||
-      message.text === previousAmountPrompt ||
-      message.text === previousPilotPrompt ||
-      message.text === legacyPrompt ||
-      message.text === previousWindowPrompt ||
-      message.text === previousMediaPrompt ||
-      message.text ===
+      replyText === priorPrompt ||
+      replyText === previousPilotPrompt ||
+      replyText === legacyPrompt ||
+      replyText === previousWindowPrompt ||
+      replyText === previousMediaPrompt ||
+      replyText ===
         previousPilotPrompt.replace(
           CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
           PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
         ) ||
-      message.text ===
+      replyText ===
         legacyPrompt.replace(
           CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
           PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,

@@ -1608,7 +1608,7 @@ describe('persistent routine TeleBirr policy controls', () => {
       provider: 'telebirr',
       platformCode: 'kemerbet',
       currencyCode: 'ETB',
-      minimumAmountMinor: 10000,
+      minimumAmountMinor: 2500,
       maximumAmountMinor: 2500000,
       freshnessWindowSeconds: 3600,
       playerScope: 'all_active_deposit_eligible',

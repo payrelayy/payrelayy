@@ -49,7 +49,7 @@ const policy = Object.freeze({
   provider: 'telebirr' as const,
   platformCode: 'kemerbet' as const,
   currencyCode: 'ETB' as const,
-  minimumAmountMinor: 10000 as const,
+  minimumAmountMinor: 2500 as const,
   maximumAmountMinor: 2500000 as const,
   playerScope: 'all_active_deposit_eligible' as const,
   playerOwnershipRequired: false as const,
@@ -157,7 +157,7 @@ describe('routine deposit protocol', () => {
       operation: 'fence',
     } as const;
 
-    for (const amountMinor of [10_000, 10_001, 2_500_000]) {
+    for (const amountMinor of [2_500, 2_501, 10_000, 2_500_000]) {
       expect(
         decodeRoutineDepositCommand({
           ...commandBase,
@@ -165,7 +165,7 @@ describe('routine deposit protocol', () => {
         }),
       ).toBeDefined();
     }
-    for (const amountMinor of [9_999, 2_500_001, 10_000.5]) {
+    for (const amountMinor of [2_499, 2_500_001, 10_000.5]) {
       expect(
         decodeRoutineDepositCommand({
           ...commandBase,
@@ -331,6 +331,33 @@ describe('routine deposit protocol', () => {
     expect(decodeSignedRoutineDepositResponse(tampered)).toBeUndefined();
     expect(publicKey).toHaveLength(91);
     publicKey.fill(0);
+  });
+
+  it('accepts signed policies on either side of the cutover and rejects a lease below its policy', () => {
+    const command = leaseCommand();
+    const oldPolicy = { ...policy, minimumAmountMinor: 10000 as const };
+    const { publicKey, response } = signedLeaseResponse(command, oldPolicy);
+    expect(
+      verifySignedRoutineDepositResponse(
+        response,
+        response.signerKeyId,
+        publicKey,
+        command,
+        new Date('2026-10-05T12:00:30.000Z'),
+      ),
+    ).toEqual(response);
+    expect(
+      decodeRoutineDepositResponseBody({
+        ...response.body,
+        result: { ...response.body.result, amountMinor: 9999 },
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeRoutineDepositResponseBody({
+        ...response.body,
+        result: { ...response.body.result, policy, amountMinor: 2499 },
+      }),
+    ).toBeUndefined();
   });
 
   it('accepts only the paired receiver SMS policy and its SMS amount source', () => {

@@ -217,6 +217,7 @@ const ownerDeviceHealthMigrationName = '20261102220034_owner_device_health.sql';
 const receiverSmsPhoneRenewalMigrationName = '20261105192000_receiver_sms_phone_renewal.sql';
 const receiverSmsSimplePairingMigrationName =
   '20261105212827_receiver_sms_simple_permanent_pairing.sql';
+const autoDeposit25EtbMigrationName = '20261105232427_auto_deposit_minimum_25_etb.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -714,7 +715,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerDepositAvailabilityMigrationName &&
         name !== ownerDeviceHealthMigrationName &&
         name !== receiverSmsPhoneRenewalMigrationName &&
-        name !== receiverSmsSimplePairingMigrationName,
+        name !== receiverSmsSimplePairingMigrationName &&
+        name !== autoDeposit25EtbMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10278,7 +10280,7 @@ registerVerificationSettlementSqlTests(
   () => createSqlIntegrationClient(environment),
 );
 
-describe('100 ETB production deposit policy cutover', () => {
+describe('production deposit policy cutovers', () => {
   let postCutoverClient: Client;
   let postCutoverOwnerAdminId: string;
 
@@ -10557,6 +10559,13 @@ describe('100 ETB production deposit policy cutover', () => {
         [migrationName],
       );
     }
+    await postCutoverClient.query(
+      await readFile(join(environment.migrationsDirectory, autoDeposit25EtbMigrationName), 'utf8'),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [autoDeposit25EtbMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10675,7 +10684,29 @@ describe('100 ETB production deposit policy cutover', () => {
         from app.deposit_policy_versions where status='active'`,
     );
     expect(policy.rows).toEqual([
-      { minimum_amount_minor: '10000', maximum_amount_minor: '2500000' },
+      { minimum_amount_minor: '2500', maximum_amount_minor: '2500000' },
+    ]);
+    const policyHistory = await postCutoverClient.query<{
+      version: number;
+      minimum_amount_minor: string;
+      status: string;
+    }>(`select version,minimum_amount_minor::text,status
+      from app.deposit_policy_versions order by version`);
+    expect(policyHistory.rows).toEqual([
+      { version: 1, minimum_amount_minor: '2500', status: 'inactive' },
+      { version: 2, minimum_amount_minor: '10000', status: 'inactive' },
+      { version: 3, minimum_amount_minor: '2500', status: 'active' },
+    ]);
+    const currentAuthorization = await postCutoverClient.query<{
+      minimum_amount_minor: string;
+      event_kind: string;
+    }>(`select authz.minimum_amount_minor::text, event.event_kind
+      from app.routine_telebirr_processing_events event
+      join app.routine_telebirr_processing_authorizations authz
+        on authz.id = event.authorization_id
+      order by event.event_sequence desc limit 1`);
+    expect(currentAuthorization.rows).toEqual([
+      { minimum_amount_minor: '2500', event_kind: 'authorize' },
     ]);
     const expected = await listMigrationsLexically(environment.migrationsDirectory);
     const applied = await postCutoverClient.query<{ filename: string }>(

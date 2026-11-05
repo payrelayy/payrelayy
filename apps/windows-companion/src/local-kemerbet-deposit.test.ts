@@ -49,6 +49,8 @@ describe('routine receipt-derived amount binding', () => {
   });
 
   it.each([
+    [2500, '25.00'],
+    [9999, '99.99'],
     [10000, '100.00'],
     [10001, '100.01'],
     [1999999, '19999.99'],
@@ -58,7 +60,7 @@ describe('routine receipt-derived amount binding', () => {
     expect(routineDepositAmountText(minor as number)).toBe(text);
   });
 
-  it.each([0, -2500, 9999, 2500001, 10000.1, NaN, Infinity, '10000', null, undefined])(
+  it.each([0, -2500, 2499, 2500001, 10000.1, NaN, Infinity, '10000', null, undefined])(
     'rejects invalid minor-unit amount %s',
     (amount) => {
       expect(isRoutineDepositAmountMinor(amount)).toBe(false);

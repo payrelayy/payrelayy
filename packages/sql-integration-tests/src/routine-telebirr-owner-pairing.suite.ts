@@ -65,6 +65,97 @@ async function fixtureReceiver(client: Client): Promise<void> {
   );
 }
 
+export function registerReceiverSmsSimplePairingSqlTests(
+  getClient: () => Client,
+  getOwnerAuthUserId: () => string,
+): void {
+  describe('receiver SMS simple phone pairing', () => {
+    it('pairs the receiver SMS phone with one durable code and preserves revocation', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await fixtureReceiver(client);
+        const issue = 'select app.issue_owner_receiver_sms_pairing_code($1::uuid,$2::text) as id';
+        const consume = `select * from app.consume_receiver_sms_pairing_code(
+          $1::text,$2::text,$3::text,$4::text,$5::text)`;
+        const codeOne = `sha256:${'1'.repeat(64)}`;
+        const codeTwo = `sha256:${'2'.repeat(64)}`;
+        const codeThree = `sha256:${'3'.repeat(64)}`;
+        const keyDigest = `sha256:${'f'.repeat(64)}`;
+        const fingerprint = keyDigest.slice(7);
+        const deviceId = `routine_device_${fingerprint}`;
+        const keyId = `routine_key_${fingerprint}`;
+        const evidenceOne = `sha256:${'a'.repeat(64)}`;
+        const evidenceTwo = `sha256:${'b'.repeat(64)}`;
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const firstCode = (await client.query(issue, [getOwnerAuthUserId(), codeOne])).rows[0]!;
+          expect(firstCode.id).toMatch(/^[0-9a-f-]{36}$/u);
+          await rejected(client, issue, [randomUUID(), codeTwo]);
+          const secondCode = (await client.query(issue, [getOwnerAuthUserId(), codeTwo])).rows[0]!;
+          expect(secondCode.id).not.toBe(firstCode.id);
+          await rejected(client, consume, [codeOne, evidenceOne, deviceId, keyId, keyDigest]);
+          await rejected(client, consume, [
+            codeTwo,
+            evidenceOne,
+            deviceId,
+            keyId,
+            `sha256:${'e'.repeat(64)}`,
+          ]);
+          const paired = (
+            await client.query(consume, [codeTwo, evidenceOne, deviceId, keyId, keyDigest])
+          ).rows[0]!;
+          expect(paired).toEqual({ enrollment_id: expect.any(String), already_enrolled: false });
+          expect(
+            (await client.query(consume, [codeTwo, evidenceOne, deviceId, keyId, keyDigest])).rows,
+          ).toEqual([{ ...paired, already_enrolled: true }]);
+          await rejected(client, consume, [codeTwo, evidenceTwo, deviceId, keyId, keyDigest]);
+
+          const thirdCode = (await client.query(issue, [getOwnerAuthUserId(), codeThree])).rows[0]!;
+          expect(thirdCode.id).not.toBe(secondCode.id);
+          const repaired = (
+            await client.query(consume, [codeThree, evidenceTwo, deviceId, keyId, keyDigest])
+          ).rows[0]!;
+          expect(repaired.enrollment_id).not.toBe(paired.enrollment_id);
+          expect(repaired.already_enrolled).toBe(false);
+          const active = (await client.query(LIST_ACTIVE_PHONES, [getOwnerAuthUserId()])).rows;
+          expect(active).toHaveLength(1);
+          expect(active[0]!.enrollment_id).toBe(repaired.enrollment_id);
+          const revoked = (
+            await client.query(REVOKE_ENROLLMENT, [getOwnerAuthUserId(), repaired.enrollment_id])
+          ).rows[0]!;
+          expect(revoked.already_revoked).toBe(false);
+          await rejected(client, consume, [codeThree, evidenceTwo, deviceId, keyId, keyDigest]);
+          expect((await client.query(LIST_ACTIVE_PHONES, [getOwnerAuthUserId()])).rows).toEqual([]);
+          await rejected(client, 'select * from app.receiver_sms_pairing_code_revocations');
+        } finally {
+          await client.query('reset session authorization');
+        }
+        const rows = await client.query<{
+          code_expiry: Date;
+          authorization_expiry: Date;
+          prior_revoked: boolean;
+        }>(
+          `
+          select challenge.expires_at as code_expiry,
+            enrollment.valid_until as authorization_expiry,
+            exists (select 1 from app.routine_telebirr_device_enrollment_revocations revoked
+              where revoked.enrollment_id = enrollment.id) as prior_revoked
+          from app.routine_telebirr_device_pairing_challenges challenge
+          join app.routine_telebirr_device_enrollments enrollment
+            on enrollment.pairing_evidence_digest = challenge.pairing_evidence_digest
+          where challenge.pairing_nonce_digest = $1::text
+        `,
+          [codeTwo],
+        );
+        expect(rows.rows).toHaveLength(1);
+        expect(rows.rows[0]!.code_expiry.getUTCFullYear()).toBe(9999);
+        expect(rows.rows[0]!.authorization_expiry.getUTCFullYear()).toBe(9999);
+        expect(rows.rows[0]!.prior_revoked).toBe(true);
+      });
+    });
+  });
+}
+
 export function registerRoutineTelebirrOwnerPairingSqlTests(
   getClient: () => Client,
   getOwnerAuthUserId: () => string,

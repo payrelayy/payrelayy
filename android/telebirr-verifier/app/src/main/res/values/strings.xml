@@ -7,6 +7,12 @@
   <string name="receiver_sms_scope">Incoming TeleBirr and CBE Birr payment SMS only. Sender must be 127 or CBEBirr. This phone does not credit Players; FetanAgent decides deposits separately.</string>
   <string name="receiver_sms_start">Start SMS reader</string>
   <string name="receiver_sms_pairing_heading">Phone connection</string>
+  <string name="receiver_sms_simple_pairing_instructions">Enter the 12-character code from the Owner page. It stays valid until used or replaced. This phone will not need renewal.</string>
+  <string name="receiver_sms_simple_pairing_hint">12-character Owner code</string>
+  <string name="receiver_sms_simple_pairing_button">Pair and start SMS reader</string>
+  <string name="receiver_sms_simple_pairing_invalid">Enter the complete 12-character code from the Owner page.</string>
+  <string name="receiver_sms_simple_pairing_failed">This phone could not be paired. Check the code and internet connection, then try again.</string>
+  <string name="receiver_sms_paired_no_expiry">This phone is paired. No renewal is needed. Enter a new Owner code only if you need to pair it again.</string>
   <string name="receiver_sms_pairing_instructions">Use a fresh package from the authenticated Owner page to connect this phone. Keep the package and proof private.</string>
   <string name="receiver_sms_receipt_heading">Signed phone receipt</string>
   <string name="receiver_sms_receipt_stored_until">Phone connection valid until %1$s. New incoming payment SMS can be uploaded while the SMS reader is on.</string>

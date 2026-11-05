@@ -129,6 +129,11 @@ import {
   OwnerRoutineTelebirrPairingUnavailableError,
 } from './owner-routine-telebirr-pairing.js';
 import {
+  ReceiverSmsSimplePairingRejectedError,
+  ReceiverSmsSimplePairingUnavailableError,
+  type ReceiverSmsSimplePairingRequest,
+} from './owner-receiver-sms-simple-pairing.js';
+import {
   OwnerRoutineTelebirrReceiptNotReadyError,
   OwnerRoutineTelebirrReceiptRejectedError,
   OwnerRoutineTelebirrReceiptUnavailableError,
@@ -2372,6 +2377,59 @@ export function buildOwnerControlApp(
         request.log.warn('Owner routine TeleBirr pairing challenge is unavailable.');
       }
       return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/receiver-sms-pairing-code', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_receiver_sms_pairing_code' ||
+        !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId)
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (!dependencies.runtime.receiverSmsSimplePairing)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const result = await dependencies.runtime.receiverSmsSimplePairing.issue(authUserId);
+      return reply.header('cache-control', 'no-store').code(201).send(result);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof ReceiverSmsSimplePairingRejectedError
+      )
+        return reply.code(403).send({ error: 'forbidden' });
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof ReceiverSmsSimplePairingUnavailableError
+      )
+        request.log.warn('Owner receiver SMS pairing code is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/public/receiver-sms-phone:pair', { bodyLimit: 1_024 }, async (request, reply) => {
+    try {
+      const body = exactObject(request.body, [
+        'code',
+        'deviceId',
+        'keyId',
+        'publicKeySpki',
+        'signature',
+      ]);
+      if (!body) return reply.code(400).send({ error: 'invalid_request' });
+      if (!dependencies.runtime.receiverSmsSimplePairing)
+        return reply.code(503).send({ error: 'temporarily_unavailable' });
+      const result = await dependencies.runtime.receiverSmsSimplePairing.activate(
+        body as unknown as ReceiverSmsSimplePairingRequest,
+      );
+      return reply.header('cache-control', 'no-store').code(200).send(result);
+    } catch (error) {
+      if (error instanceof ReceiverSmsSimplePairingRejectedError)
+        return reply.code(403).send({ error: 'pairing_rejected' });
+      if (error instanceof ReceiverSmsSimplePairingUnavailableError)
+        request.log.warn('Receiver SMS pairing is unavailable.');
+      return reply.code(503).send({ error: 'temporarily_unavailable' });
     }
   });
 

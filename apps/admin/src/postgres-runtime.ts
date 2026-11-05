@@ -28,6 +28,7 @@ import { PostgresOwnerWithdrawalContact } from './owner-withdrawal-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
 import { PostgresOwnerRoutineTelebirrPairing } from './owner-routine-telebirr-pairing.js';
+import { PostgresOwnerReceiverSmsSimplePairing } from './owner-receiver-sms-simple-pairing.js';
 import { PostgresOwnerRoutineTelebirrReceipt } from './owner-routine-telebirr-receipt.js';
 import { PostgresOwnerTelebirrShadowVerificationStatus } from './owner-telebirr-shadow-verification-status.js';
 import { PostgresOwnerBrowserSessions } from './owner-browser-session.js';
@@ -98,6 +99,10 @@ export interface OwnerControlPostgresRuntime {
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
         Partial<Pick<PostgresOwnerRoutineTelebirrPairing, 'revoke' | 'listActivePhones'>>)
     | undefined;
+  readonly receiverSmsSimplePairing?: Pick<
+    PostgresOwnerReceiverSmsSimplePairing,
+    'issue' | 'activate'
+  >;
   readonly routineTelebirrReceipt?: Pick<PostgresOwnerRoutineTelebirrReceipt, 'issue'> | undefined;
   readonly telebirrShadowVerification: Pick<
     PostgresOwnerTelebirrShadowVerificationStatus,
@@ -366,6 +371,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)')::oid, 'execute'), true) as routine_telebirr_receipt_material_exact_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)')::oid, 'execute'), true) as routine_telebirr_enrollment_revoke_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)')::oid, 'execute'), true) as routine_telebirr_phone_inventory_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.issue_owner_receiver_sms_pairing_code(uuid,text)')::oid, 'execute'), true) as receiver_sms_pairing_code_issue_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.consume_receiver_sms_pairing_code(text,text,text,text,text)')::oid, 'execute'), true) as receiver_sms_pairing_code_consume_allowed,
     coalesce(not has_function_privilege(current_user, to_regprocedure('app.consume_routine_telebirr_device_pairing_challenge(uuid,text)')::oid, 'execute'), true) as routine_telebirr_pairing_consume_denied,
     not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
@@ -482,6 +489,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)') is not null)::integer
+        + (to_regprocedure('app.issue_owner_receiver_sms_pairing_code(uuid,text)') is not null)::integer
+        + (to_regprocedure('app.consume_receiver_sms_pairing_code(text,text,text,text,text)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -569,6 +578,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)')::oid, 0::oid)
            ,coalesce(to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.issue_owner_receiver_sms_pairing_code(uuid,text)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.consume_receiver_sms_pairing_code(text,text,text,text,text)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
@@ -804,6 +815,9 @@ export async function createOwnerControlPostgresRuntime(
         )
       : undefined,
     routineTelebirrPairing: new PostgresOwnerRoutineTelebirrPairing({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    receiverSmsSimplePairing: new PostgresOwnerReceiverSmsSimplePairing({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     routineTelebirrReceipt: routineReceiptAdapter,

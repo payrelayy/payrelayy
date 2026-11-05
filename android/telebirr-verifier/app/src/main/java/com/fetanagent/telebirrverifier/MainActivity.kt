@@ -13,6 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.text.InputFilter
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -36,6 +38,7 @@ class MainActivity : Activity() {
   private var routineProofExpiresAt = 0L
   private var routineReceiptInProgress = false
   private var routineReceiptValidUntil: String? = null
+  private var receiverSmsCodeDraft = ""
   private var removeStateObserver: (() -> Unit)? = null
   private val stateRefreshHandler = Handler(Looper.getMainLooper())
   private val refreshOperationalState = Runnable {
@@ -50,7 +53,7 @@ class MainActivity : Activity() {
         Thread(runnable, "fetanagent-device-pairing").apply { isDaemon = true }
       }
     render()
-    if (BuildConfig.VERIFIER_ENABLED) {
+    if (BuildConfig.VERIFIER_ENABLED && !BuildConfig.RECEIVER_SMS_ENABLED) {
       restoreRoutineProof()
       restoreRoutineReceipt()
     }
@@ -221,15 +224,86 @@ class MainActivity : Activity() {
           gravity = Gravity.CENTER
         })
       }
-      if (BuildConfig.VERIFIER_ENABLED && !enrolled &&
-        !RoutineNoMoneyRuntimeComposition.enabled() &&
-        !RoutinePaidRuntimeComposition.enabled()) {
-        addPairingControls()
-      } else if (BuildConfig.VERIFIER_ENABLED) {
-        addOperationalControls(snapshot.operatorEnabled)
+      if (BuildConfig.VERIFIER_ENABLED && BuildConfig.RECEIVER_SMS_ENABLED) {
+        addReceiverSmsPairingControls()
+        if (enrolled) addOperationalControls(snapshot.operatorEnabled)
+      } else {
+        if (BuildConfig.VERIFIER_ENABLED && !enrolled &&
+          !RoutineNoMoneyRuntimeComposition.enabled() &&
+          !RoutinePaidRuntimeComposition.enabled()) {
+          addPairingControls()
+        } else if (BuildConfig.VERIFIER_ENABLED) {
+          addOperationalControls(snapshot.operatorEnabled)
+        }
+        if (BuildConfig.VERIFIER_ENABLED && !snapshot.operatorEnabled) addRoutinePairingControls()
       }
-      if (BuildConfig.VERIFIER_ENABLED && !snapshot.operatorEnabled) addRoutinePairingControls()
     }
+
+  private fun LinearLayout.addReceiverSmsPairingControls() {
+    val permanentlyPaired = runCatching {
+      ReceiverSmsSimplePairing(applicationContext)
+        .isPaired(RoutineNoMoneyRuntimeComposition.identity())
+    }.getOrDefault(false)
+    addView(TextView(context).apply {
+      setText(if (permanentlyPaired) R.string.receiver_sms_paired_no_expiry
+        else R.string.receiver_sms_simple_pairing_instructions)
+      textSize = 16f
+      setPadding(0, 32, 0, 12)
+    })
+    val code = EditText(context).apply {
+      setHint(R.string.receiver_sms_simple_pairing_hint)
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+      filters = arrayOf(InputFilter.AllCaps(), InputFilter.LengthFilter(12))
+      isSingleLine = true
+      setText(receiverSmsCodeDraft)
+      addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+          receiverSmsCodeDraft = s?.toString().orEmpty()
+        }
+        override fun afterTextChanged(s: Editable?) = Unit
+      })
+    }
+    addView(code, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT))
+    addView(Button(context).apply {
+      setText(if (pairingInProgress) R.string.pairing_in_progress
+        else R.string.receiver_sms_simple_pairing_button)
+      isEnabled = !pairingInProgress
+      setOnClickListener { pairReceiverSms(code.text?.toString()?.trim().orEmpty()) }
+    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 16 })
+  }
+
+  private fun pairReceiverSms(code: String) {
+    if (pairingInProgress || !Regex("^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$").matches(code)) {
+      AlertDialog.Builder(this).setMessage(R.string.receiver_sms_simple_pairing_invalid)
+        .setPositiveButton(android.R.string.ok, null).show()
+      return
+    }
+    pairingInProgress = true
+    render()
+    pairingExecutor.execute {
+      val result = runCatching {
+        ReceiverSmsSimplePairing(applicationContext)
+          .pair(code, RoutineNoMoneyRuntimeComposition.identity())
+      }
+      runOnUiThread {
+        pairingInProgress = false
+        if (result.isSuccess) {
+          receiverSmsCodeDraft = ""
+          clearMatchingClipboard(code)
+          runCatching { stateStore.recordStatus(
+            LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "sms_phone_paired")) }
+          if (!stateStore.snapshot().operatorEnabled) requestStart() else render()
+        } else {
+          AlertDialog.Builder(this).setMessage(R.string.receiver_sms_simple_pairing_failed)
+            .setPositiveButton(android.R.string.ok, null).show()
+          render()
+        }
+      }
+    }
+  }
 
   private fun LinearLayout.addRoutinePairingControls() {
     addView(TextView(context).apply {

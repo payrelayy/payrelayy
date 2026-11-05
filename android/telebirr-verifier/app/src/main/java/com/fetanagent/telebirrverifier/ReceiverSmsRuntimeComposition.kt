@@ -16,19 +16,25 @@ internal object ReceiverSmsRuntimeComposition {
 
   fun isEnrolled(context: Context): Boolean = runCatching {
     if (!enabled()) return false
-    val signer = RoutineNoMoneyRuntimeComposition.receiptSigner() ?: return false
     val identity = RoutineNoMoneyRuntimeComposition.identity()
+    if (ReceiverSmsSimplePairing(context).isPaired(identity)) return true
+    val signer = RoutineNoMoneyRuntimeComposition.receiptSigner() ?: return false
     EncryptedRoutineEnrollmentStore.forApplication(context)
       .loadEnrolled(signer, identity, nowUtc()) != null
   }.getOrDefault(false)
 
   fun create(context: Context): VerifierRuntimeSession {
     if (!enabled()) return unavailable("sms_mode_unavailable")
-    val signer = RoutineNoMoneyRuntimeComposition.receiptSigner()
-      ?: return unavailable("sms_trust_unavailable")
     val identity = runCatching { RoutineNoMoneyRuntimeComposition.identity() }.getOrNull()
       ?: return unavailable("sms_device_key_unavailable")
+    val simplePairing = ReceiverSmsSimplePairing(context)
+    val signer = RoutineNoMoneyRuntimeComposition.receiptSigner()
     val enrollmentStore = EncryptedRoutineEnrollmentStore.forApplication(context)
+    val enrolledDeviceId = {
+      simplePairing.deviceId(identity) ?: signer?.let {
+        enrollmentStore.loadEnrolled(it, identity, nowUtc())?.body?.deviceId
+      }
+    }
     val outboxResult = runCatching { ReceiverSmsEncryptedOutbox.forApplication(context) }
     val outbox = outboxResult.getOrNull()
       ?: return unavailable(queueInitializationCode(outboxResult.exceptionOrNull()))
@@ -39,11 +45,10 @@ internal object ReceiverSmsRuntimeComposition {
       return unavailable("sms_capture_unavailable")
     return VerifierRuntimeSession(
       cycle = VerifierRuntimeCycle {
-        val receipt = runCatching {
-          enrollmentStore.loadEnrolled(signer, identity, nowUtc())
-        }.getOrNull() ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
+        val deviceId = runCatching { enrolledDeviceId() }.getOrNull()
+          ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
           LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
-        val result = upload.run(receipt.body.deviceId, identity)
+        val result = upload.run(deviceId, identity)
         val captureFailure = captureCode.getAndSet(null)
         when {
           captureFailure != null && captureFailure != "sms_queued" ->
@@ -60,10 +65,9 @@ internal object ReceiverSmsRuntimeComposition {
         }
       },
       heartbeat = VerifierRuntimeHeartbeat { status ->
-        val receipt = runCatching {
-          enrollmentStore.loadEnrolled(signer, identity, nowUtc())
-        }.getOrNull() ?: return@VerifierRuntimeHeartbeat DeviceBridgeHeartbeatResult.EnrollmentRejected
-        ReceiverSmsStatusHeartbeat(receipt.body.deviceId, identity,
+        val deviceId = runCatching { enrolledDeviceId() }.getOrNull()
+          ?: return@VerifierRuntimeHeartbeat DeviceBridgeHeartbeatResult.EnrollmentRejected
+        ReceiverSmsStatusHeartbeat(deviceId, identity,
           FixedReceiverSmsHttpsExchange()).send(status)
       },
       close = capture::close,

@@ -883,6 +883,17 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
           <details class="device-pairing" aria-labelledby="routine-phone-pairing-title">
             <summary id="routine-phone-pairing-title">Phone setup and recovery</summary>
+            <p class="receipt-label">Create one 12-character code and enter it in the FetanAgent SMS Verifier app.
+              The phone starts reading SMS after pairing. The code has no time limit, works once,
+              and is replaced if you create another. A paired phone needs no scheduled renewal.
+              You can revoke a phone below if it is lost or replaced.</p>
+            <button id="receiver-sms-code-button" type="button" disabled>Create pairing code</button>
+            <p class="request-meta" id="receiver-sms-code-status" role="status"></p>
+            <div class="pairing-receipt" id="receiver-sms-code-wrap" hidden>
+              <output class="pairing-package" id="receiver-sms-code-value"></output>
+              <button id="receiver-sms-code-copy" type="button">Copy code</button>
+            </div>
+            <div hidden>
             <p class="receipt-label">This is separate from the five-Player pilot. Create a twelve-hour
               challenge, paste it directly into the dedicated Android app, then paste its signed
               proof back to this same Owner tab promptly. Sign in before creating the challenge;
@@ -918,8 +929,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <button id="routine-phone-proof-button" type="submit" disabled>Verify and enroll phone</button>
             </form>
             <p class="request-meta" id="routine-phone-enrollment-status" role="status"></p>
+            </div>
             <div class="pairing-receipt" aria-labelledby="routine-receipt-title">
-              <h4 id="routine-receipt-title">Existing phone: signed no-money receipt</h4>
+              <h4 id="routine-receipt-title">Paired phones</h4>
+              <div hidden>
               <p class="receipt-label">Load active phones and select the exact enrollment for this receipt. This does not
                 create a challenge, pair another phone, poll TeleBirr, or enable deposits.
                 The receipt is available only after a separate signer is provisioned.</p>
@@ -933,10 +946,9 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
                 <output class="pairing-package" id="routine-receipt-package"></output>
                 <button id="routine-receipt-copy" type="button">Copy receipt to phone</button>
               </div>
-              <p class="receipt-label">Load the current Owner-linked phones directly.
-                Select the exact enrollment before retrieving a receipt or revoking it; loading does not
-                contact TeleBirr or enable deposits.</p>
-              <button id="routine-phones-load" type="button" disabled>Load active routine phones</button>
+              </div>
+              <p class="receipt-label">Load your paired phones and select the exact one if you need to revoke it.</p>
+              <button id="routine-phones-load" type="button" disabled>Load paired phones</button>
               <p class="request-meta" id="routine-phones-status" role="status"></p>
               <label for="routine-phones-select" id="routine-phones-select-label" hidden>
                 Exact active phone enrollment
@@ -944,10 +956,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               </label>
               <label class="confirmation-row" for="routine-revoke-confirmation">
                 <input id="routine-revoke-confirmation" type="checkbox" />
-                I approve permanently revoking this exact routine phone enrollment. This cannot
-                be undone by retrieving the receipt again; this action never enables deposits.
+                I approve revoking this exact phone. FetanAgent will stop accepting its SMS; a new code is needed
+                to pair it again.
               </label>
-              <button id="routine-revoke-button" type="button" disabled>Revoke this routine phone</button>
+              <button id="routine-revoke-button" type="button" disabled>Revoke this phone</button>
               <p class="request-meta" id="routine-revoke-status" role="status"></p>
             </div>
           </details>
@@ -1467,6 +1479,11 @@ const routineProcessingSave = document.querySelector('#routine-processing-save')
 const routineProcessingStop = document.querySelector('#routine-processing-stop');
 const routineProcessingStatus = document.querySelector('#routine-processing-status');
 const routinePhonePairingStatus = document.querySelector('#routine-phone-pairing-status');
+const receiverSmsCodeButton = document.querySelector('#receiver-sms-code-button');
+const receiverSmsCodeStatus = document.querySelector('#receiver-sms-code-status');
+const receiverSmsCodeWrap = document.querySelector('#receiver-sms-code-wrap');
+const receiverSmsCodeValue = document.querySelector('#receiver-sms-code-value');
+const receiverSmsCodeCopy = document.querySelector('#receiver-sms-code-copy');
 const routinePhoneChallengeForm = document.querySelector('#routine-phone-challenge-form');
 const routinePhoneChallengeConfirmation = document.querySelector('#routine-phone-challenge-confirmation');
 const routinePhoneChallengeButton = document.querySelector('#routine-phone-challenge-button');
@@ -1497,6 +1514,7 @@ let routineProcessingState;
 let routinePhonePairing;
 let routinePhonePairingBusy = false;
 let routinePhoneProofBusy = false;
+let receiverSmsCodeBusy = false;
 let routinePhonePairingExpiryTimer;
 let routineEnrollmentReceipt;
 let routineReceiptBusy = false;
@@ -2730,6 +2748,11 @@ function clearRoutinePhoneChallenge() {
 }
 
 function updateRoutinePhonePairingAvailability() {
+  receiverSmsCodeButton.disabled = !accessToken || receiverSmsCodeBusy;
+  if (!accessToken) {
+    receiverSmsCodeValue.textContent = '';
+    receiverSmsCodeWrap.hidden = true;
+  }
   if (routinePhonePairing && Date.parse(routinePhonePairing.expiresAt) <= Date.now()) {
     clearPendingRoutinePhoneChallengeRequestId();
     clearRoutinePhoneChallenge();
@@ -2833,7 +2856,8 @@ async function loadRoutinePhones() {
       const option = document.createElement('option');
       option.value = phone.enrollmentId;
       option.textContent = phone.deviceId + ' · ' + phone.deviceKeyId + ' · ' +
-        phone.enrollmentId + ' · until ' + new Date(phone.validUntil).toLocaleString();
+        phone.enrollmentId + (phone.validUntil.startsWith('9999-')
+          ? ' · No expiration' : ' · until ' + new Date(phone.validUntil).toLocaleString());
       return option;
     });
     routinePhonesSelect.replaceChildren(...options);
@@ -2841,7 +2865,7 @@ async function loadRoutinePhones() {
     routinePhonesSelectLabel.hidden = inventory.phones.length === 0;
     routinePhonesStatus.textContent = inventory.phones.length === 0
       ? 'No active Owner-linked routine phone enrollment was found.'
-      : inventory.phones.length + ' active routine phone enrollment(s) found. Select the exact one before retrieving a receipt or revoking it.';
+      : inventory.phones.length + ' active paired phone(s) found. Select the exact one before revoking it.';
   } catch (error) {
     if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
       routinePhonesStatus.textContent = 'Active phone inventory is unavailable. No phone was changed.';
@@ -8605,6 +8629,53 @@ routineReceiptCopy.addEventListener('click', async () => {
   }
 });
 routinePhoneProofConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
+receiverSmsCodeButton.addEventListener('click', async () => {
+  if (!accessToken || receiverSmsCodeBusy) return;
+  const generation = ownerAuthGeneration;
+  receiverSmsCodeBusy = true;
+  updateRoutinePhonePairingAvailability();
+  receiverSmsCodeStatus.textContent = 'Creating pairing code…';
+  receiverSmsCodeValue.textContent = '';
+  receiverSmsCodeWrap.hidden = true;
+  try {
+    const requestId = crypto.randomUUID();
+    const response = await ownerRequest('/v1/owner/receiver-sms-pairing-code', {
+      method: 'POST',
+      headers: {
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1',
+        'x-idempotency-key': requestId,
+      },
+      body: JSON.stringify({ confirmation: 'owner_confirmed_receiver_sms_pairing_code', requestId }),
+    });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 201) throw new Error('pairing_code_unavailable');
+    const result = await response.json();
+    if (!result || typeof result !== 'object' || Array.isArray(result) ||
+        Object.keys(result).join(',') !== 'code' ||
+        typeof result.code !== 'string' ||
+        !/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$/.test(result.code))
+      throw new Error('pairing_code_invalid');
+    receiverSmsCodeValue.textContent = result.code;
+    receiverSmsCodeWrap.hidden = false;
+    receiverSmsCodeStatus.textContent = 'Enter this code in the SMS Verifier app. It stays valid until used or replaced.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error))
+      receiverSmsCodeStatus.textContent = 'Pairing code could not be created. Try again.';
+  } finally {
+    receiverSmsCodeBusy = false;
+    updateRoutinePhonePairingAvailability();
+  }
+});
+receiverSmsCodeCopy.addEventListener('click', async () => {
+  const code = receiverSmsCodeValue.textContent;
+  if (!accessToken || !/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$/.test(code)) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    receiverSmsCodeStatus.textContent = 'Code copied. Enter it in the SMS Verifier app.';
+  } catch {
+    receiverSmsCodeStatus.textContent = 'Copy unavailable. Enter the displayed code in the SMS Verifier app.';
+  }
+});
 routinePhoneProofInput.addEventListener('input', updateRoutinePhonePairingAvailability);
 routinePhoneChallengeForm.addEventListener('submit', async (event) => {
   event.preventDefault();

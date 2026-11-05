@@ -28,7 +28,10 @@ import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebir
 import { registerRoutineTelebirrPaidPollRuntimeSqlTests } from './routine-telebirr-paid-poll-runtime.suite.js';
 import { registerRoutineTelebirrPaidAtomicClaimSqlTests } from './routine-telebirr-paid-atomic-claim.suite.js';
 import { registerRoutineTelebirrFinancialActivationSqlTests } from './routine-telebirr-financial-activation.suite.js';
-import { registerRoutineTelebirrOwnerPairingSqlTests } from './routine-telebirr-owner-pairing.suite.js';
+import {
+  registerReceiverSmsSimplePairingSqlTests,
+  registerRoutineTelebirrOwnerPairingSqlTests,
+} from './routine-telebirr-owner-pairing.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
 import { registerExpiredTelebirrPredecessorSqlTests } from './expired-telebirr-predecessor.suite.js';
@@ -212,6 +215,8 @@ const routineReleaseDrainMigrationName = '20261102151000_routine_deposit_release
 const ownerDepositAvailabilityMigrationName = '20261102215837_owner_deposit_availability.sql';
 const ownerDeviceHealthMigrationName = '20261102220034_owner_device_health.sql';
 const receiverSmsPhoneRenewalMigrationName = '20261105192000_receiver_sms_phone_renewal.sql';
+const receiverSmsSimplePairingMigrationName =
+  '20261105212827_receiver_sms_simple_permanent_pairing.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -708,7 +713,8 @@ describe('disposable SQL migration baseline', () => {
         name !== routineReleaseDrainMigrationName &&
         name !== ownerDepositAvailabilityMigrationName &&
         name !== ownerDeviceHealthMigrationName &&
-        name !== receiverSmsPhoneRenewalMigrationName,
+        name !== receiverSmsPhoneRenewalMigrationName &&
+        name !== receiverSmsSimplePairingMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10541,6 +10547,7 @@ describe('100 ETB production deposit policy cutover', () => {
       ownerDepositAvailabilityMigrationName,
       ownerDeviceHealthMigrationName,
       receiverSmsPhoneRenewalMigrationName,
+      receiverSmsSimplePairingMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -10573,6 +10580,11 @@ describe('100 ETB production deposit policy cutover', () => {
   afterAll(async () => {
     await postCutoverClient?.end();
   });
+
+  registerReceiverSmsSimplePairingSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
 
   it('keeps the manual withdrawal contact Owner-controlled and outside financial switches', async () => {
     const privileges = await postCutoverClient.query<{

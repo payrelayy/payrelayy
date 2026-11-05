@@ -5868,6 +5868,86 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('issues the receiver SMS code only to Owner and lets the phone use one public pairing route', async () => {
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receiverSmsSimplePairing: {
+          issue: async (actor) => {
+            calls.push(`issue:${actor}`);
+            return { code: 'ABCDEFGHJKLM' };
+          },
+          activate: async (phone) => {
+            calls.push(`pair:${phone.code}`);
+            return {
+              enrollmentId: 'e14d77f8-24a5-4579-8517-797a69e3c108',
+              deviceId: phone.deviceId,
+              keyId: phone.keyId,
+              alreadyEnrolled: false,
+            };
+          },
+        },
+      }),
+    });
+    const ownerPayload = {
+      confirmation: 'owner_confirmed_receiver_sms_pairing_code',
+      requestId: pilotRequestId,
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/owner/receiver-sms-pairing-code',
+          payload: ownerPayload,
+        })
+      ).statusCode,
+    ).toBe(400);
+    const unauthenticatedHeaders = { ...routineTelebirrPairingMutationHeaders() };
+    delete (unauthenticatedHeaders as Partial<typeof unauthenticatedHeaders>).authorization;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/owner/receiver-sms-pairing-code',
+          headers: unauthenticatedHeaders,
+          payload: ownerPayload,
+        })
+      ).statusCode,
+    ).toBe(403);
+    const issued = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/receiver-sms-pairing-code',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload: ownerPayload,
+    });
+    expect(issued.statusCode).toBe(201);
+    expect(issued.json()).toEqual({ code: 'ABCDEFGHJKLM' });
+    expect(issued.headers['cache-control']).toContain('no-store');
+    const phonePayload = {
+      code: 'ABCDEFGHJKLM',
+      deviceId: 'routine_device_example',
+      keyId: 'routine_key_example',
+      publicKeySpki: 'spki',
+      signature: 'signature',
+    };
+    const paired = await app.inject({
+      method: 'POST',
+      url: '/v1/public/receiver-sms-phone:pair',
+      payload: phonePayload,
+    });
+    expect(paired.statusCode).toBe(200);
+    expect(paired.json()).toEqual({
+      enrollmentId: 'e14d77f8-24a5-4579-8517-797a69e3c108',
+      deviceId: phonePayload.deviceId,
+      keyId: phonePayload.keyId,
+      alreadyEnrolled: false,
+    });
+    expect(paired.headers['cache-control']).toContain('no-store');
+    expect(calls).toEqual([`issue:${authUserId}`, 'pair:ABCDEFGHJKLM']);
+    await app.close();
+  });
+
   it('issues an authenticated routine-only challenge with exact replay and no enrollment', async () => {
     const calls: Array<readonly string[]> = [];
     const receipt = {

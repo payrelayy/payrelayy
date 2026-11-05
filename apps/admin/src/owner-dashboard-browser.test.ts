@@ -1808,6 +1808,33 @@ describe('persistent routine TeleBirr policy controls', () => {
   });
 });
 
+describe('receiver SMS one-code pairing', () => {
+  it('sends the JSON content type required by the Owner pairing endpoint', async () => {
+    const browser = ownerBrowserHarness(503, {
+      randomUUID: () => '11111111-1111-4111-8111-111111111111',
+      fetchOverride: (url) =>
+        url === '/v1/owner/receiver-sms-pairing-code'
+          ? response(201, { code: 'ABCDEFGHJKLM' })
+          : undefined,
+    });
+    await browser.signIn();
+    await browser.element('#receiver-sms-code-button').listeners.get('click')?.({
+      preventDefault() {},
+    });
+
+    const request = browser.fetchCalls.find(
+      ({ url }) => url === '/v1/owner/receiver-sms-pairing-code',
+    );
+    expect(request?.init.headers).toMatchObject({
+      'content-type': 'application/json',
+      'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1',
+      'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+    });
+    expect(browser.element('#receiver-sms-code-value').textContent).toBe('ABCDEFGHJKLM');
+    expect(browser.element('#receiver-sms-code-wrap').hidden).toBe(false);
+  });
+});
+
 describe('routine phone proof handoff', () => {
   const pairingId = '22222222-2222-4222-8222-222222222222';
   const enrollmentId = '33333333-3333-4333-8333-333333333333';

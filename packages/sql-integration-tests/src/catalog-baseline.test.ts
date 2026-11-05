@@ -211,6 +211,7 @@ const ownerKemerbetAutoSigninMigrationName =
 const routineReleaseDrainMigrationName = '20261102151000_routine_deposit_release_drain.sql';
 const ownerDepositAvailabilityMigrationName = '20261102215837_owner_deposit_availability.sql';
 const ownerDeviceHealthMigrationName = '20261102220034_owner_device_health.sql';
+const receiverSmsPhoneRenewalMigrationName = '20261105192000_receiver_sms_phone_renewal.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -706,7 +707,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerKemerbetAutoSigninMigrationName &&
         name !== routineReleaseDrainMigrationName &&
         name !== ownerDepositAvailabilityMigrationName &&
-        name !== ownerDeviceHealthMigrationName,
+        name !== ownerDeviceHealthMigrationName &&
+        name !== receiverSmsPhoneRenewalMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10538,6 +10540,7 @@ describe('100 ETB production deposit policy cutover', () => {
     for (const migrationName of [
       ownerDepositAvailabilityMigrationName,
       ownerDeviceHealthMigrationName,
+      receiverSmsPhoneRenewalMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),

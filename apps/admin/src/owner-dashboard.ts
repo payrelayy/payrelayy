@@ -3094,7 +3094,7 @@ async function submitRoutinePhoneProof() {
     routinePhoneEnrollmentStatus.textContent = 'The proof is invalid or belongs to another challenge. No request was sent.';
     return;
   }
-  if (!window.confirm('Verify this signed proof and enroll only this phone key for routine TeleBirr observation? Assignment polling and all money actions remain disabled.')) return;
+  if (!window.confirm('Verify this signed proof and enroll only this phone key for receiver SMS evidence? This does not change deposit switches, issue assignments, or credit a Player.')) return;
   const generation = ownerAuthGeneration;
   const requestId = pendingRoutinePhoneProofRequestId ?? crypto.randomUUID();
   pendingRoutinePhoneProofRequestId = requestId;
@@ -3119,9 +3119,9 @@ async function submitRoutinePhoneProof() {
     clearPendingRoutinePhoneChallengeRequestId();
     clearRoutinePhoneChallenge();
     routinePhoneChallengeConfirmation.checked = false;
-    routinePhoneEnrollmentStatus.textContent = 'Routine-only phone enrollment confirmed until ' +
+    routinePhoneEnrollmentStatus.textContent = 'Receiver SMS phone enrollment confirmed until ' +
       new Date(receipt.validUntil).toLocaleString() + '. Enrollment ID: ' + receipt.enrollmentId +
-      '. Assignment polling, deposits, and money movement remain disabled.';
+      '. Deposit switches were not changed and no money moved.';
   } catch (error) {
     if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
       routinePhoneEnrollmentStatus.textContent =

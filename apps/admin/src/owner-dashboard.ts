@@ -8642,6 +8642,7 @@ receiverSmsCodeButton.addEventListener('click', async () => {
     const response = await ownerRequest('/v1/owner/receiver-sms-pairing-code', {
       method: 'POST',
       headers: {
+        'content-type': 'application/json',
         'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1',
         'x-idempotency-key': requestId,
       },

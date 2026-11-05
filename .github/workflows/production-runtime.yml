@@ -262,6 +262,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-production-deploy-helper-v2.sh
           bash -n infra/operations/fetanagent-production-v2-receiver-sms-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-receiver-sms-pairing-content-type-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh
@@ -1247,7 +1248,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf'"
+              "sudo -n '$helper' status 'a2392c8a759fec75a3b55ea7c365dcf6741969b5'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1478,7 +1479,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '26dcb91e3a0bbbc5cb23e4011f0c8a4f783745cf'"
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status 'a2392c8a759fec75a3b55ea7c365dcf6741969b5'"
 
       - name: Drain routine credit leases before activation
         id: routine_drain

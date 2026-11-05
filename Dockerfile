@@ -324,7 +324,7 @@ RUN test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
   && printf '%s\n' \
     "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT} bookworm-security main" \
     > /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
-  && apt-get -o Acquire::Check-Valid-Until=false update \
+  && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update \
   && apt-get install --yes --no-install-recommends \
     "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
     "chromium-common=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \

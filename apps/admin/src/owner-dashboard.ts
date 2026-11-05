@@ -887,7 +887,9 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               challenge, paste it directly into the dedicated Android app, then paste its signed
               proof back to this same Owner tab promptly. Sign in before creating the challenge;
               its twelve-hour timer starts only when you create it. Enrollment only records phone key possession; it cannot poll
-              assignments, verify payments, execute deposits, or move money.</p>
+              assignments, verify payments, execute deposits, or move money. A live receiver SMS phone
+              can renew its expired enrollment while the Owner has paused new deposits and no
+              execution work is open.</p>
             <p class="pilot-warning">Do not send the challenge or proof through Telegram, email,
               chat, screenshots, or issue comments. Keep the phone clock set automatically.
               If a submission is uncertain, retry the exact same proof before expiry.</p>
@@ -895,7 +897,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <form id="routine-phone-challenge-form">
               <label class="confirmation-row" for="routine-phone-challenge-confirmation">
                 <input id="routine-phone-challenge-confirmation" type="checkbox" />
-                I approve a routine-only phone challenge while all financial switches remain off.
+                I approve a routine-only phone challenge while new deposits are paused or all
+                financial switches are off.
               </label>
               <button id="routine-phone-challenge-button" type="submit" disabled>Create routine challenge</button>
             </form>
@@ -3091,7 +3094,7 @@ async function submitRoutinePhoneProof() {
     routinePhoneEnrollmentStatus.textContent = 'The proof is invalid or belongs to another challenge. No request was sent.';
     return;
   }
-  if (!window.confirm('Verify this signed proof and enroll only this phone key for routine TeleBirr observation? Assignment polling and all money actions remain disabled.')) return;
+  if (!window.confirm('Verify this signed proof and enroll only this phone key for receiver SMS evidence? This does not change deposit switches, issue assignments, or credit a Player.')) return;
   const generation = ownerAuthGeneration;
   const requestId = pendingRoutinePhoneProofRequestId ?? crypto.randomUUID();
   pendingRoutinePhoneProofRequestId = requestId;
@@ -3116,9 +3119,9 @@ async function submitRoutinePhoneProof() {
     clearPendingRoutinePhoneChallengeRequestId();
     clearRoutinePhoneChallenge();
     routinePhoneChallengeConfirmation.checked = false;
-    routinePhoneEnrollmentStatus.textContent = 'Routine-only phone enrollment confirmed until ' +
+    routinePhoneEnrollmentStatus.textContent = 'Receiver SMS phone enrollment confirmed until ' +
       new Date(receipt.validUntil).toLocaleString() + '. Enrollment ID: ' + receipt.enrollmentId +
-      '. Assignment polling, deposits, and money movement remain disabled.';
+      '. Deposit switches were not changed and no money moved.';
   } catch (error) {
     if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
       routinePhoneEnrollmentStatus.textContent =

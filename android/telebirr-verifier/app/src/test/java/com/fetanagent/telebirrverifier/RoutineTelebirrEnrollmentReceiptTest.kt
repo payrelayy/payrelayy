@@ -157,6 +157,58 @@ class RoutineTelebirrEnrollmentReceiptTest {
     assertTrue(runCatching { completed.stagePending(pending, phone, now) }.isFailure)
   }
 
+  @Test fun `expired phone can stage a new Owner proof with the same key and accept its receipt`() {
+    val root = Files.createTempDirectory("routine-renewal-test-").toFile().also(roots::add)
+    val directory = File(root, "routine-enrollment")
+    val cipher = TestCipher()
+    val store = EncryptedRoutineEnrollmentStore(directory, cipher)
+    val oldProof = proof()
+    val oldReceipt = receipt(body(oldProof))
+    store.stagePending(oldProof, phone, Instant.parse("2026-10-06T12:02:00.000Z").toEpochMilli())
+    store.complete(oldReceipt, signer(), phone, "2026-10-07T12:00:00.000Z")
+
+    val newChallenge = challenge.copy(
+      pairingId = "73a9e5c7-19df-4658-90b9-2157ea2f6880",
+      receiverRevisionId = "06790b8e-e141-49c5-92c6-c353257375e9",
+      receiverVersion = 4,
+      issuedAt = "2026-11-05T12:00:00.000Z",
+      expiresAt = "2026-11-06T00:00:00.000Z",
+    )
+    val renewedProof = RoutineDevicePairingProofFactory.create(
+      challenge = newChallenge,
+      deviceId = oldProof.body.deviceId,
+      identity = phone,
+      issuedAt = "2026-11-05T12:01:00.000Z",
+      expiresAt = "2026-11-05T12:05:00.000Z",
+    )
+    val wrongPhone = JvmP256Identity("different-routine-phone-key")
+    val wrongProof = RoutineDevicePairingProofFactory.create(
+      challenge = newChallenge,
+      deviceId = oldProof.body.deviceId,
+      identity = wrongPhone,
+      issuedAt = "2026-11-05T12:01:00.000Z",
+      expiresAt = "2026-11-05T12:05:00.000Z",
+    )
+    val beforeExpiry = Instant.parse("2026-11-05T11:59:59.000Z").toEpochMilli()
+    val afterExpiry = Instant.parse("2026-11-05T12:02:00.000Z").toEpochMilli()
+    assertTrue(runCatching { store.stagePending(renewedProof, phone, beforeExpiry) }.isFailure)
+    assertTrue(runCatching { store.stagePending(wrongProof, wrongPhone, afterExpiry) }.isFailure)
+    store.stagePending(renewedProof, phone, afterExpiry)
+    val renewedReceipt = receipt(body(renewedProof).copy(
+      enrollmentId = "73a9e5c7-19df-4658-90b9-2157ea2f6880",
+      validFrom = "2026-11-05T12:02:00.000Z",
+      validUntil = "2026-12-05T12:02:00.000Z",
+      issuedAt = "2026-11-05T12:02:01.000Z",
+    ))
+    val renewedSigner = signer().copy(validUntil = "2027-01-03T00:00:00.000Z")
+    store.complete(renewedReceipt, renewedSigner, phone, "2026-11-05T12:03:00.000Z")
+    val restored = EncryptedRoutineEnrollmentStore(directory, cipher)
+    assertEquals(renewedReceipt, restored.loadEnrolled(
+      renewedSigner, phone, "2026-11-05T12:03:00.000Z"))
+    assertTrue(runCatching { restored.loadEnrolled(renewedSigner, wrongPhone,
+      "2026-11-05T12:03:00.000Z") }.isFailure)
+  }
+
   @Test fun `recovers existing Owner enrollment without a pending proof or polling authority`() {
     val signed = receipt(body(proof()))
     val packageValue = "fetanagent-routine-enrollment-receipt-v1." +

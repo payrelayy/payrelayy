@@ -320,17 +320,23 @@ RUN test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
   && test -n "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" \
   && expr "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" : '[0-9]\{8\}T[0-9]\{6\}Z$' >/dev/null \
   && apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates \
-  && printf '%s\n' \
-    "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT} bookworm-security main" \
-    > /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
-  && apt-get -o Acquire::Check-Valid-Until=false update \
+  && apt-get install --yes --no-install-recommends ca-certificates curl \
+  && curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+    --output /tmp/fetanagent-chromium.deb \
+    "https://miroir.blueline.mg/debian-security/pool/updates/main/c/chromium/chromium_${FETANAGENT_CHROMIUM_PACKAGE_VERSION}_amd64.deb" \
+  && curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+    --output /tmp/fetanagent-chromium-common.deb \
+    "https://miroir.blueline.mg/debian-security/pool/updates/main/c/chromium/chromium-common_${FETANAGENT_CHROMIUM_PACKAGE_VERSION}_amd64.deb" \
+  && printf '%s  %s\n' \
+    '3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de' /tmp/fetanagent-chromium.deb \
+    '560f6d013d1c733d4a84e27209d80235968f3672745c27f6ecd2947ac6c12bd8' /tmp/fetanagent-chromium-common.deb \
+    | sha256sum --check --strict - \
   && apt-get install --yes --no-install-recommends \
-    "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
-    "chromium-common=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
+    /tmp/fetanagent-chromium.deb \
+    /tmp/fetanagent-chromium-common.deb \
     fonts-liberation \
   && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control /var/lib/fetanagent/kemerbet-sessions \
-  && rm -f /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
+  && rm -f /tmp/fetanagent-chromium.deb /tmp/fetanagent-chromium-common.deb \
   && rm -rf /var/lib/apt/lists/*
 
 # Docker Compose can otherwise inherit proxy authority from the Docker client's

@@ -1886,7 +1886,9 @@ describe('routine phone proof handoff', () => {
     });
     expect(browser.element('#routine-phone-proof-input').value).toBe('');
     expect(browser.element('#routine-phone-enrollment-status').textContent).toContain(enrollmentId);
-    expect(browser.element('#routine-phone-enrollment-status').textContent).toContain('disabled');
+    expect(browser.element('#routine-phone-enrollment-status').textContent).toContain(
+      'Deposit switches were not changed',
+    );
   });
 
   it('rejects mismatched proof locally and retries an uncertain response with the same proof', async () => {

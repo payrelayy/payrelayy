@@ -39,6 +39,7 @@ class MainActivity : Activity() {
   private var routineReceiptInProgress = false
   private var routineReceiptValidUntil: String? = null
   private var receiverSmsCodeDraft = ""
+  private var receiverSmsPairingExpanded = false
   private var removeStateObserver: (() -> Unit)? = null
   private val stateRefreshHandler = Handler(Looper.getMainLooper())
   private val refreshOperationalState = Runnable {
@@ -250,6 +251,29 @@ class MainActivity : Activity() {
       textSize = 16f
       setPadding(0, 32, 0, 12)
     })
+    if (permanentlyPaired && !receiverSmsPairingExpanded) {
+      addView(Button(context).apply {
+        setText(R.string.receiver_sms_pair_again)
+        setOnClickListener {
+          receiverSmsPairingExpanded = true
+          render()
+        }
+      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT))
+      return
+    }
+    if (permanentlyPaired) {
+      addView(Button(context).apply {
+        setText(R.string.receiver_sms_pairing_cancel)
+        isEnabled = !pairingInProgress
+        setOnClickListener {
+          receiverSmsCodeDraft = ""
+          receiverSmsPairingExpanded = false
+          render()
+        }
+      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
     val code = EditText(context).apply {
       setHint(R.string.receiver_sms_simple_pairing_hint)
       inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
@@ -292,6 +316,7 @@ class MainActivity : Activity() {
         pairingInProgress = false
         if (result.isSuccess) {
           receiverSmsCodeDraft = ""
+          receiverSmsPairingExpanded = false
           clearMatchingClipboard(code)
           runCatching { stateStore.recordStatus(
             LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "sms_phone_paired")) }

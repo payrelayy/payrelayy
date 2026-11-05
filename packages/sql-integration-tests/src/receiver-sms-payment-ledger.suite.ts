@@ -1529,7 +1529,7 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
   getClient: () => Client,
   getOwner: () => string,
 ): void {
-  describe('100–25,000 ETB receiver SMS cutover', () => {
+  describe('25–25,000 ETB receiver SMS cutover', () => {
     it('holds an unmatched submission only after 60 minutes', async () => {
       const client = getClient();
       await client.query('begin');
@@ -1810,7 +1810,7 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
       },
     );
 
-    it.each([10000, 2500000])(
+    it.each([2500, 10000, 2500000])(
       'queues an exact %i minor signed payment once',
       async (amountMinor) => {
         const client = getClient();
@@ -1853,7 +1853,7 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
       },
     );
 
-    it.each([7500, 9999, 2500001, 2500100])(
+    it.each([2499, 2500001, 2500100])(
       'keeps %i minor out of automatic credit and allows one Owner manual approval',
       async (amountMinor) => {
         const client = getClient();

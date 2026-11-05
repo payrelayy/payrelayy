@@ -125,9 +125,9 @@ function previewQuery(request: FastifyRequest): Readonly<Record<string, unknown>
 
 function previewAmount(query: Readonly<Record<string, unknown>>): number {
   const raw = query.amount;
-  if (typeof raw !== 'string' || !/^[0-9]{2,5}$/u.test(raw)) return 100;
+  if (typeof raw !== 'string' || !/^[0-9]{2,5}$/u.test(raw)) return 25;
   const amount = Number(raw);
-  return Number.isSafeInteger(amount) && amount >= 25 && amount <= 25_000 ? amount : 100;
+  return Number.isSafeInteger(amount) && amount >= 25 && amount <= 25_000 ? amount : 25;
 }
 
 function previewStage(

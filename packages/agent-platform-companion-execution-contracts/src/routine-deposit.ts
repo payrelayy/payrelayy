@@ -21,7 +21,7 @@ const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
 const HISTORY_ID = /^[0-9]{6,20}$/u;
 const HISTORY_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u;
-const MINIMUM_AMOUNT_MINOR = 10_000;
+const MINIMUM_AMOUNT_MINOR = 2_500;
 const MAXIMUM_AMOUNT_MINOR = 2_500_000;
 
 type UnknownRecord = Record<string, unknown>;
@@ -63,7 +63,8 @@ interface RoutineDepositProtocolPolicyBase {
   readonly version: 1;
   readonly platformCode: 'kemerbet';
   readonly currencyCode: 'ETB';
-  readonly minimumAmountMinor: 10000;
+  /** Accept the previous signed policy while the Companion is updated ahead of the cutover. */
+  readonly minimumAmountMinor: 2500 | 10000;
   readonly maximumAmountMinor: 2500000;
   readonly playerScope: 'all_active_deposit_eligible';
   readonly playerOwnershipRequired: false;
@@ -335,7 +336,8 @@ function decodePolicy(candidate: unknown): RoutineDepositProtocolPolicy | undefi
     ) ||
     candidate.platformCode !== 'kemerbet' ||
     candidate.currencyCode !== 'ETB' ||
-    candidate.minimumAmountMinor !== MINIMUM_AMOUNT_MINOR ||
+    (candidate.minimumAmountMinor !== MINIMUM_AMOUNT_MINOR &&
+      candidate.minimumAmountMinor !== 10_000) ||
     candidate.maximumAmountMinor !== MAXIMUM_AMOUNT_MINOR ||
     candidate.playerScope !== 'all_active_deposit_eligible' ||
     candidate.playerOwnershipRequired !== false ||
@@ -651,6 +653,7 @@ function decodeResult(
     if (
       !binding ||
       !policy ||
+      binding.amountMinor < policy.minimumAmountMinor ||
       !exactKeys(candidate, [
         'jobId',
         'intentId',

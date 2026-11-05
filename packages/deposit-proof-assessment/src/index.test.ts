@@ -117,7 +117,7 @@ function inputWith(overrides: InputOverrides = {}): DepositProofAssessmentInput 
     checkedAt: assessedAt,
     policyVersion: 'deposit_policy_v1',
     currencyCode: 'ETB',
-    minimumPrincipalAmountMinor: '10000',
+    minimumPrincipalAmountMinor: '2500',
     maximumPrincipalAmountMinor: '2500000',
     automaticFreshnessSeconds: 3600,
     maximumFutureSkewSeconds: 300,
@@ -225,7 +225,7 @@ describe('provider-neutral official deposit proof assessment', () => {
     expect(DEPOSIT_PROOF_ASSESSMENT_CONTRACT_VERSION).toBe(1);
     expect(DEPOSIT_PROOF_REFERENCE_KEY_VERSION).toBe(2);
     expect(DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION).toBe(2);
-    expect(DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR).toBe('10000');
+    expect(DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR).toBe('2500');
     expect(DEPOSIT_PROOF_MAXIMUM_PRINCIPAL_MINOR).toBe('2500000');
     expect(DEPOSIT_PROOF_AUTOMATIC_FRESHNESS_SECONDS).toBe(3600);
     expect(DEPOSIT_PROOF_MAXIMUM_FUTURE_SKEW_SECONDS).toBe(300);
@@ -250,7 +250,7 @@ describe('provider-neutral official deposit proof assessment', () => {
   );
 
   it.each([
-    ['minimum', '10000'],
+    ['minimum', '2500'],
     ['maximum', '2500000'],
   ] as const)('includes the exact %s policy amount boundary', (_label, principalAmountMinor) => {
     expect(
@@ -336,7 +336,7 @@ describe('provider-neutral official deposit proof assessment', () => {
   });
 
   it.each([
-    ['minimumPrincipalAmountMinor', '9999'],
+    ['minimumPrincipalAmountMinor', '2499'],
     ['maximumPrincipalAmountMinor', '2500001'],
     ['automaticFreshnessSeconds', 3599],
     ['maximumFutureSkewSeconds', 301],

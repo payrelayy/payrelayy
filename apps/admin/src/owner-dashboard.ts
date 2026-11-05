@@ -870,7 +870,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <button class="secondary" id="routine-processing-refresh" type="button">Refresh policy</button>
           </div>
           <p class="receipt-label">
-            100–25,000 ETB per automatic deposit, any active deposit-eligible Player, no daily or deposit-count
+            25–25,000 ETB per automatic deposit, any active deposit-eligible Player, no daily or deposit-count
             quota. Process one at a time; uncertain results pause the queue. This policy has no
             expiry. Saving it does not turn payment switches live, but reauthorizing a paused policy
             can resume processing if those switches are already live. The pilot controls below are
@@ -3162,7 +3162,7 @@ async function submitRoutinePhoneProof() {
 function renderRoutineProcessing(value) {
   const expectedPolicy = {
     mode: 'routine_production', version: 1, provider: 'telebirr', platformCode: 'kemerbet',
-    currencyCode: 'ETB', minimumAmountMinor: 10000, maximumAmountMinor: 2500000,
+    currencyCode: 'ETB', minimumAmountMinor: 2500, maximumAmountMinor: 2500000,
     freshnessWindowSeconds: 3600, playerScope: 'all_active_deposit_eligible',
     playerOwnershipRequired: false, dailyQuotaMinor: null, successfulDepositQuota: null,
     maxConcurrentDeposits: 1, amountSource: 'official_receipt_settled_amount',
@@ -3233,7 +3233,7 @@ async function mutateRoutineProcessing(operation) {
     (operation === 'stop' && routineProcessingState?.configurationState !== 'authorized') ||
     (operation === 'save' && (kemerbetAgentProfileLoadState !== 'loaded' || !activeKemerbetAgentProfileId))) return;
   if (operation === 'save' && !window.confirm(
-    'Save a persistent routine TeleBirr policy: 100–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving does not turn payment switches live, but can resume processing if they are already live. Confirm they are off before reauthorizing a paused policy.'
+    'Save a persistent routine TeleBirr policy: 25–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving does not turn payment switches live, but can resume processing if they are already live. Confirm they are off before reauthorizing a paused policy.'
   )) return;
   const selectedGeneration = ownerAuthGeneration;
   const requestId = crypto.randomUUID();

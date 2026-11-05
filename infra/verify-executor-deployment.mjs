@@ -588,16 +588,20 @@ assert.match(dockerfile, /test -n "\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"/);
 assert.match(dockerfile, /test -n "\$\{FETANAGENT_DEBIAN_SECURITY_SNAPSHOT\}"/);
 assert.match(
   dockerfile,
-  /https:\/\/snapshot\.debian\.org\/archive\/debian-security\/\$\{FETANAGENT_DEBIAN_SECURITY_SNAPSHOT\}/,
+  /https:\/\/miroir\.blueline\.mg\/debian-security\/pool\/updates\/main\/c\/chromium\/chromium_\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}_amd64\.deb/,
 );
-assert.match(dockerfile, /Acquire::Check-Valid-Until=false/);
-assert.match(dockerfile, /check-valid-until=no/);
-assert.match(dockerfile, /apt-get install --yes --no-install-recommends ca-certificates/);
+assert.match(dockerfile, /apt-get install --yes --no-install-recommends ca-certificates curl/);
+assert.match(dockerfile, /sha256sum --check --strict -/);
+assert.match(dockerfile, /3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de/);
+assert.match(dockerfile, /560f6d013d1c733d4a84e27209d80235968f3672745c27f6ecd2947ac6c12bd8/);
 assert.match(
   dockerfile,
-  /apt-get install --yes --no-install-recommends[\s\S]*?"chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?"chromium-common=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?fonts-liberation/,
+  /apt-get install --yes --no-install-recommends[\s\S]*?\/tmp\/fetanagent-chromium\.deb[\s\S]*?\/tmp\/fetanagent-chromium-common\.deb[\s\S]*?fonts-liberation/,
 );
-assert.match(dockerfile, /rm -f \/etc\/apt\/sources\.list\.d\/fetanagent-chromium-snapshot\.list/);
+assert.match(
+  dockerfile,
+  /rm -f \/tmp\/fetanagent-chromium\.deb \/tmp\/fetanagent-chromium-common\.deb/,
+);
 assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/);
 assert.match(dockerfile, /ENV HOME=\/tmp/);
 assert.match(

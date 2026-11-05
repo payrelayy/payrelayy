@@ -40,7 +40,18 @@ internal class EncryptedRoutineEnrollmentStore(
     require(nowMillis < java.time.Instant.parse(proof.body.expiresAt).toEpochMilli())
     requireValidLocalProof(proof, identity)
     when (val existing = read()) {
-      is RoutineEnrollmentState.Enrolled -> error("A routine enrollment already exists")
+      is RoutineEnrollmentState.Enrolled -> {
+        // Keep the same non-exportable phone key. A new Owner challenge may replace only an
+        // expired receipt; a still-valid enrollment must continue using its existing binding.
+        require(nowMillis >= java.time.Instant.parse(existing.receipt.body.validUntil).toEpochMilli()) {
+          "A routine enrollment already exists"
+        }
+        require(existing.receipt.body.deviceId == proof.body.deviceId &&
+          existing.receipt.body.keyId == proof.body.keyId &&
+          existing.receipt.body.devicePublicKeySpkiSha256 == proof.body.devicePublicKeySpkiSha256) {
+          "Routine renewal must use the same phone key"
+        }
+      }
       is RoutineEnrollmentState.Pending -> {
         if (existing.proof == proof) return
         require(nowMillis >= java.time.Instant.parse(existing.proof.body.expiresAt).toEpochMilli()) {

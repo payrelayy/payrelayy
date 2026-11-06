@@ -7,6 +7,7 @@ import {
   createReceiverSmsStatusBridgeHandler,
   RECEIVER_SMS_STATUS_CONTENT_TYPE,
   RECEIVER_SMS_STATUS_PATH,
+  type ReceiverSmsStatusDependencies,
 } from './receiver-sms-status-bridge.js';
 
 const now = '2026-11-03T09:00:00.000Z';
@@ -23,7 +24,7 @@ const enrollment = {
   validUntil: '2026-11-04T00:00:00.000Z',
 };
 
-function request(tamper = false) {
+function request(tamper = false, queuedSmsCount?: number) {
   const body = {
     contractVersion: 1,
     protocolMode: 'receiver_sms_status_v1',
@@ -31,6 +32,7 @@ function request(tamper = false) {
     keyId,
     state: 'ready',
     observedAt: now,
+    ...(queuedSmsCount === undefined ? {} : { queuedSmsCount }),
   };
   const bodyDigest = digestReceiverSmsStatusBody(body)!;
   const signedStatus = {
@@ -54,15 +56,20 @@ function request(tamper = false) {
 
 describe('receiver SMS status bridge', () => {
   it('forwards only a signed current paired-phone report', async () => {
-    const recordStatus = vi.fn(async () => 'recorded' as const);
+    const recordStatus = vi.fn(
+      async (_input: Parameters<ReceiverSmsStatusDependencies['recordStatus']>[0]) =>
+        'recorded' as const,
+    );
     const handler = createReceiverSmsStatusBridgeHandler({
       now: () => now,
       loadEnrollment: async () => enrollment,
       recordStatus,
     });
+    expect((await handler(request(false, 17))).statusCode).toBe(202);
+    expect(recordStatus).toHaveBeenCalledOnce();
+    expect(recordStatus.mock.calls[0]?.[0].verified.queuedSmsCount).toBe(17);
+    expect((await handler(request(true, 17))).statusCode).toBe(403);
+    expect(recordStatus).toHaveBeenCalledOnce();
     expect((await handler(request())).statusCode).toBe(202);
-    expect(recordStatus).toHaveBeenCalledOnce();
-    expect((await handler(request(true))).statusCode).toBe(403);
-    expect(recordStatus).toHaveBeenCalledOnce();
   });
 });

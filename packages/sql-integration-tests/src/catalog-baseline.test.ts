@@ -224,6 +224,8 @@ const autoDeposit25EtbMigrationName = '20261105232427_auto_deposit_minimum_25_et
 const restore25EtbTransportMigrationName =
   '20261106000000_restore_routine_transport_after_25_etb_policy.sql';
 const fastPlayerValidationMigrationName = '20261106005305_fast_player_validation_supersession.sql';
+const receiverSmsOwnerQueueCountMigrationName =
+  '20261106192200_receiver_sms_owner_queued_count.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -724,7 +726,8 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSmsSimplePairingMigrationName &&
         name !== autoDeposit25EtbMigrationName &&
         name !== restore25EtbTransportMigrationName &&
-        name !== fastPlayerValidationMigrationName,
+        name !== fastPlayerValidationMigrationName &&
+        name !== receiverSmsOwnerQueueCountMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10594,6 +10597,16 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [fastPlayerValidationMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, receiverSmsOwnerQueueCountMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [receiverSmsOwnerQueueCountMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10986,9 +10999,12 @@ describe('production deposit policy cutovers', () => {
     expect(functionList).toBeDefined();
     expect(template).toBeDefined();
     const signatures = [...functionList!.matchAll(/'([^']+)'/gu)].map((match) => match[1]!);
-    expect(signatures).toHaveLength(4);
+    expect(signatures).toHaveLength(5);
     expect(signatures[3]).toBe(
       'app.record_receiver_sms_device_status(text,text,text,timestamptz,text,text)',
+    );
+    expect(signatures[4]).toBe(
+      'app.record_receiver_sms_device_status_with_queue(text,text,text,timestamptz,text,text,integer)',
     );
     const oids = signatures
       .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
@@ -11015,6 +11031,79 @@ describe('production deposit policy cutovers', () => {
     } finally {
       await postCutoverClient.query('rollback');
       await postCutoverClient.query('reset session authorization');
+    }
+  });
+
+  it('shows a signed phone queue count only to Owner without granting table access', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      const receiver = await postCutoverClient.query<{ id: string; version: number }>(
+        `select receiver.id, receiver.version from app.receiver_accounts receiver
+         join app.payment_providers provider on provider.id = receiver.provider_id
+         where provider.code = 'telebirr' and receiver.status = 'active'
+           and receiver.retired_at is null limit 1`,
+      );
+      expect(receiver.rows).toHaveLength(1);
+      const deviceId = `device_${randomUUID().replaceAll('-', '')}`;
+      const keyId = `key_${randomUUID().replaceAll('-', '')}`;
+      const digest = () => `sha256:${randomUUID().replaceAll('-', '').repeat(2)}`;
+      const publicKeyDigest = digest();
+      await postCutoverClient.query(
+        `insert into app.routine_telebirr_device_enrollments (
+           pairing_evidence_digest,device_id,device_key_id,
+           device_public_key_spki_sha256,receiver_account_id,
+           receiver_account_version,receiver_profile_digest,
+           expected_receiver_name_digest,valid_from,valid_until)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,
+           pg_catalog.clock_timestamp() - interval '1 hour',
+           pg_catalog.clock_timestamp() + interval '1 day')`,
+        [
+          digest(),
+          deviceId,
+          keyId,
+          publicKeyDigest,
+          receiver.rows[0]!.id,
+          receiver.rows[0]!.version,
+          digest(),
+          digest(),
+        ],
+      );
+      await postCutoverClient.query(
+        'set session authorization fetanagent_receiver_sms_ingest_runtime',
+      );
+      try {
+        const recorded = await postCutoverClient.query<{ recorded: boolean }>(
+          `select app.record_receiver_sms_device_status_with_queue(
+             $1::text,$2::text,'ready',pg_catalog.clock_timestamp(),
+             $3::text,$4::text,23) as recorded`,
+          [deviceId, keyId, digest(), publicKeyDigest],
+        );
+        expect(recorded.rows).toEqual([{ recorded: true }]);
+        const access = await postCutoverClient.query<{ direct_read: boolean }>(
+          `select pg_catalog.has_table_privilege(current_user,
+             'app.receiver_sms_device_status','SELECT') as direct_read`,
+        );
+        expect(access.rows).toEqual([{ direct_read: false }]);
+      } finally {
+        await postCutoverClient.query('reset session authorization');
+      }
+      await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      try {
+        const status = await postCutoverClient.query<{ state: string; queued_sms_count: number }>(
+          'select state,queued_sms_count from app.get_owner_receiver_sms_device_status($1::uuid)',
+          [ownerAuthUserId],
+        );
+        expect(status.rows).toEqual([{ state: 'ready', queued_sms_count: 23 }]);
+        const access = await postCutoverClient.query<{ direct_read: boolean }>(
+          `select pg_catalog.has_table_privilege(current_user,
+             'app.receiver_sms_device_status','SELECT') as direct_read`,
+        );
+        expect(access.rows).toEqual([{ direct_read: false }]);
+      } finally {
+        await postCutoverClient.query('reset session authorization');
+      }
+    } finally {
+      await postCutoverClient.query('rollback');
     }
   });
 

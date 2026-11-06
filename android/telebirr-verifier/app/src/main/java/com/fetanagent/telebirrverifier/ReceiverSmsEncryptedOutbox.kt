@@ -18,6 +18,7 @@ internal class ReceiverSmsEncryptedOutbox(
   root: File,
   private val cipher: LivePilotQueueCipher,
   private val maximumPending: Int = 512,
+  private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
   internal class InitializationFailure(val code: String) : IllegalStateException(code)
 
@@ -52,6 +53,7 @@ internal class ReceiverSmsEncryptedOutbox(
       }
     } ?: throw InitializationFailure("sms_queue_list_failed")
     pruneOldAcknowledgements()
+    pruneExpiredPending()
     inspectFiles()
   }
 
@@ -100,6 +102,9 @@ internal class ReceiverSmsEncryptedOutbox(
 
   @Synchronized
   fun nextPending(): Pending? {
+    // Only the serial upload cycle prunes. Capture and health reporting may run while an
+    // upload is in flight, and must not remove the file that upload will acknowledge.
+    pruneExpiredPending()
     for (file in pendingFiles()) {
       val key = file.name.removeSuffix(".sealed")
       val sealed = file.readBytes()
@@ -161,6 +166,21 @@ internal class ReceiverSmsEncryptedOutbox(
 
   @Synchronized
   fun pendingCount(): Int = pendingFiles().size
+
+  @Synchronized
+  fun expirePending() = pruneExpiredPending()
+
+  private fun pruneExpiredPending() {
+    val cutoff = nowMillis() - MAX_PENDING_HOLD_MILLIS
+    val files = directory.listFiles()?.toList()
+      ?: error("Receiver SMS queue is unavailable")
+    files.filter { RECORD_PENDING.matches(it.name) }.forEach { pending ->
+      require(pending.isFile && !Files.isSymbolicLink(pending.toPath()) &&
+        pending.canonicalFile.parentFile == directory.canonicalFile &&
+        pending.length() in 1..MAX_SEALED_BYTES.toLong())
+      if (pending.lastModified() <= cutoff) check(pending.delete())
+    }
+  }
 
   private fun pendingFiles(): List<File> = inspectFiles()
     .filter { RECORD_PENDING.matches(it.name) }
@@ -243,6 +263,7 @@ internal class ReceiverSmsEncryptedOutbox(
     private const val MAX_QUEUE_FILES = 2_048
     private const val MAX_ACKNOWLEDGEMENTS = 512
     private const val ACK_RETENTION_MILLIS = 30L * 24 * 60 * 60_000
+    private const val MAX_PENDING_HOLD_MILLIS = 5L * 60 * 60_000
 
     fun forApplication(context: Context): ReceiverSmsEncryptedOutbox =
       ReceiverSmsEncryptedOutbox(

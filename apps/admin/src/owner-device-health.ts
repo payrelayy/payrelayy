@@ -8,6 +8,7 @@ export interface OwnerDeviceHealthSnapshot {
   readonly receiverPhone: {
     readonly state: OwnerDeviceHealthState;
     readonly reportedAt: string | null;
+    readonly queuedSmsCount: number | null;
   };
   readonly checkedAt: string;
 }
@@ -18,7 +19,7 @@ export class OwnerDeviceHealthUnavailableError extends Error {}
 const COMPANION_SQL =
   'select state, reported_at, checked_at from app.get_owner_companion_kemerbet_session_status($1::uuid)';
 const PHONE_SQL =
-  'select state, reported_at, checked_at from app.get_owner_receiver_sms_device_status($1::uuid)';
+  'select state, reported_at, checked_at, queued_sms_count from app.get_owner_receiver_sms_device_status($1::uuid)';
 
 function timestamp(value: unknown): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime()))
@@ -26,13 +27,14 @@ function timestamp(value: unknown): string {
   return value.toISOString();
 }
 
-function decode(rows: readonly unknown[], allowed: readonly string[]) {
+function decode(rows: readonly unknown[], allowed: readonly string[], withQueue = false) {
   const row = rows.length === 1 ? rows[0] : undefined;
   if (
     !row ||
     typeof row !== 'object' ||
     Array.isArray(row) ||
-    Object.keys(row).sort().join(',') !== 'checked_at,reported_at,state'
+    Object.keys(row).sort().join(',') !==
+      (withQueue ? 'checked_at,queued_sms_count,reported_at,state' : 'checked_at,reported_at,state')
   )
     throw new OwnerDeviceHealthUnavailableError();
   const value = row as Record<string, unknown>;
@@ -41,10 +43,21 @@ function decode(rows: readonly unknown[], allowed: readonly string[]) {
   if (
     (value.state !== null && !allowed.includes(value.state as string)) ||
     (value.state === null) !== (reportedAt === null) ||
-    (reportedAt !== null && Date.parse(reportedAt) > Date.parse(checkedAt) + 30_000)
+    (withQueue && value.state === null && value.queued_sms_count !== null) ||
+    (reportedAt !== null && Date.parse(reportedAt) > Date.parse(checkedAt) + 30_000) ||
+    (withQueue &&
+      value.queued_sms_count !== null &&
+      (!Number.isSafeInteger(value.queued_sms_count) ||
+        (value.queued_sms_count as number) < 0 ||
+        (value.queued_sms_count as number) > 100_000))
   )
     throw new OwnerDeviceHealthUnavailableError();
-  return { state: value.state as string | null, reportedAt, checkedAt };
+  return {
+    state: value.state as string | null,
+    reportedAt,
+    checkedAt,
+    queuedSmsCount: withQueue ? (value.queued_sms_count as number | null) : null,
+  };
 }
 
 function recent(reportedAt: string | null, checkedAt: string): boolean {
@@ -70,10 +83,11 @@ export class PostgresOwnerDeviceHealth {
         'checking',
         'review_paused',
       ]);
-      const phone = decode((await this.database.query(PHONE_SQL, [authUserId])).rows, [
-        'ready',
-        'attention',
-      ]);
+      const phone = decode(
+        (await this.database.query(PHONE_SQL, [authUserId])).rows,
+        ['ready', 'attention'],
+        true,
+      );
       return {
         companion: {
           state: !recent(companion.reportedAt, companion.checkedAt)
@@ -94,6 +108,7 @@ export class PostgresOwnerDeviceHealth {
               ? 'active'
               : 'attention',
           reportedAt: phone.reportedAt,
+          queuedSmsCount: recent(phone.reportedAt, phone.checkedAt) ? phone.queuedSmsCount : null,
         },
         checkedAt: companion.checkedAt,
       };

@@ -3,6 +3,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { createReceiverSmsIngestPostgresDatabase } from './receiver-sms-ingest-postgres.js';
 
 describe('receiver SMS narrow SQL adapter', () => {
+  it('stores the verified queue count without SMS content', async () => {
+    const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
+      rows: [{ recorded: true }],
+    }));
+    const database = createReceiverSmsIngestPostgresDatabase({ query });
+    expect(
+      await database.recordStatus({
+        deviceId: 'receiver_device_001',
+        keyId: 'receiver_key_001',
+        state: 'ready',
+        observedAt: '2026-11-06T19:00:00.000Z',
+        bodyDigest: `sha256:${'a'.repeat(64)}`,
+        devicePublicKeySpkiSha256: `sha256:${'b'.repeat(64)}`,
+        queuedSmsCount: 0,
+      }),
+    ).toBe(true);
+    expect(query.mock.calls[0]?.[0]).toContain('record_receiver_sms_device_status_with_queue');
+    expect(query.mock.calls[0]?.[1]).toHaveLength(7);
+    expect(query.mock.calls[0]?.[1]?.[6]).toBe(0);
+  });
   it('uses the atomic display intake with only ciphertext after the migration', async () => {
     const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
       rows: [{ status: 'recorded' }],

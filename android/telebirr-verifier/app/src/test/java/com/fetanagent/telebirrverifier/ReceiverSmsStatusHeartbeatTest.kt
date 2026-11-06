@@ -23,16 +23,17 @@ class ReceiverSmsStatusHeartbeatTest {
     }
     val result = ReceiverSmsStatusHeartbeat("receiver_phone_01", identity, exchange,
       now = { Instant.parse("2026-11-03T09:00:00Z") })
-      .send(LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "sms_inbox_idle"))
+      .send(LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "sms_inbox_idle"), 17)
     assertEquals(DeviceBridgeHeartbeatResult.Acknowledged, result)
     val outer = StrictJson.parse(requireNotNull(captured)).requireObject(
       setOf("publicKeySpki", "signedStatus"))
     val envelope = outer.value("signedStatus").requireObject(
       setOf("contractVersion", "protocolMode", "bodyDigest", "body", "signature"))
     val report = envelope.value("body").requireObject(setOf("contractVersion",
-      "protocolMode", "deviceId", "keyId", "state", "observedAt"))
+      "protocolMode", "deviceId", "keyId", "state", "observedAt", "queuedSmsCount"))
     assertEquals("ready", report.string("state"))
-    val transcript = """["fetanagent:receiver-sms-status-body:v1",1,"receiver_sms_status_v1","receiver_phone_01","${report.string("keyId")}","ready","2026-11-03T09:00:00.000Z"]"""
+    assertEquals(17, report.int("queuedSmsCount"))
+    val transcript = """["fetanagent:receiver-sms-status-body:v1",1,"receiver_sms_status_v1","receiver_phone_01","${report.string("keyId")}","ready","2026-11-03T09:00:00.000Z",17]"""
     val digest = "sha256:" + MessageDigest.getInstance("SHA-256")
       .digest(transcript.toByteArray(StandardCharsets.UTF_8))
       .joinToString("") { "%02x".format(it) }

@@ -17,6 +17,7 @@ const BODY_KEYS = [
   'state',
   'observedAt',
 ] as const;
+const BODY_KEYS_WITH_QUEUE = [...BODY_KEYS, 'queuedSmsCount'] as const;
 const ENVELOPE_KEYS = [
   'contractVersion',
   'protocolMode',
@@ -42,6 +43,7 @@ export interface ReceiverSmsVerifiedStatus {
   readonly state: 'ready' | 'attention';
   readonly observedAt: string;
   readonly bodyDigest: string;
+  readonly queuedSmsCount?: number;
 }
 
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> | undefined {
@@ -55,7 +57,8 @@ function utc(value: unknown): value is string {
 }
 
 export function digestReceiverSmsStatusBody(candidate: unknown): string | undefined {
-  const body = record(candidate, BODY_KEYS);
+  const extended = record(candidate, BODY_KEYS_WITH_QUEUE);
+  const body = extended ?? record(candidate, BODY_KEYS);
   if (
     !body ||
     body.contractVersion !== 1 ||
@@ -65,10 +68,15 @@ export function digestReceiverSmsStatusBody(candidate: unknown): string | undefi
     typeof body.keyId !== 'string' ||
     !OPAQUE.test(body.keyId) ||
     (body.state !== 'ready' && body.state !== 'attention') ||
-    !utc(body.observedAt)
+    !utc(body.observedAt) ||
+    (extended !== undefined &&
+      (!Number.isSafeInteger(body.queuedSmsCount) ||
+        (body.queuedSmsCount as number) < 0 ||
+        (body.queuedSmsCount as number) > 100_000))
   )
     return undefined;
-  const transcript = JSON.stringify([BODY_DOMAIN, ...BODY_KEYS.map((key) => body[key])]);
+  const keys = extended ? BODY_KEYS_WITH_QUEUE : BODY_KEYS;
+  const transcript = JSON.stringify([BODY_DOMAIN, ...keys.map((key) => body[key])]);
   return `sha256:${createHash('sha256').update(transcript, 'utf8').digest('hex')}`;
 }
 
@@ -81,7 +89,8 @@ export function verifyReceiverSmsStatus(
 ): ReceiverSmsVerifiedStatus | undefined {
   try {
     const envelope = record(signedStatus, ENVELOPE_KEYS);
-    const body = envelope && record(envelope.body, BODY_KEYS);
+    const body =
+      envelope && (record(envelope.body, BODY_KEYS_WITH_QUEUE) ?? record(envelope.body, BODY_KEYS));
     const enrollment = record(trustedEnrollment, ENROLLMENT_KEYS);
     const digest = body && digestReceiverSmsStatusBody(body);
     if (
@@ -140,6 +149,7 @@ export function verifyReceiverSmsStatus(
       state: body.state as 'ready' | 'attention',
       observedAt: body.observedAt as string,
       bodyDigest: digest,
+      ...(typeof body.queuedSmsCount === 'number' ? { queuedSmsCount: body.queuedSmsCount } : {}),
     });
   } catch {
     return undefined;

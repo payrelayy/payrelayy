@@ -34,6 +34,8 @@ const RELEASE_PLAYER_VALIDATION_FUNCTION =
   'app.release_telegram_player_validation_assignment(text)';
 const ACCEPT_PLAYER_VALIDATION_FUNCTION =
   'app.accept_and_finalize_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
+const CONFIRM_SUPERSEDED_PLAYER_VALIDATION_FUNCTION =
+  'app.confirm_superseded_telegram_player_validation_result(text,text,text,text,text,text,text,jsonb,jsonb)';
 const KEMERBET_SIGNIN_FUNCTION =
   'app.get_companion_kemerbet_signin_credentials(uuid,text,text,text,text,timestamptz,timestamptz,timestamptz,uuid)';
 const KEMERBET_SESSION_STATUS_FUNCTION =
@@ -64,6 +66,7 @@ const BASELINE_ALLOWED_FUNCTIONS = [
   COMPLETE_PLAYER_VALIDATION_FUNCTION,
   RELEASE_PLAYER_VALIDATION_FUNCTION,
   ACCEPT_PLAYER_VALIDATION_FUNCTION,
+  CONFIRM_SUPERSEDED_PLAYER_VALIDATION_FUNCTION,
   KEMERBET_SIGNIN_FUNCTION,
   KEMERBET_SESSION_STATUS_FUNCTION,
 ] as const;
@@ -135,6 +138,8 @@ const BASELINE_CONTRACT_ROWS_SQL = `
         (pg_catalog.to_regprocedure('${ACCEPT_PLAYER_VALIDATION_FUNCTION}'), 16, true,
           'pg_catalog.record',
           'table(accepted boolean, replayed boolean, finalization_state text)'),
+        (pg_catalog.to_regprocedure('${CONFIRM_SUPERSEDED_PLAYER_VALIDATION_FUNCTION}'), 9, false,
+          'pg_catalog.bool', 'boolean'),
         (pg_catalog.to_regprocedure('${KEMERBET_SIGNIN_FUNCTION}'), 9, true,
           'pg_catalog.record', 'table(username text, password text, revision integer)'),
         (pg_catalog.to_regprocedure('${KEMERBET_SESSION_STATUS_FUNCTION}'), 11, false,
@@ -164,7 +169,7 @@ function catalogPreflightSql(
   capabilityGroup: string,
   allowedFunctionsSql: string,
   contractRowsSql: string,
-  expectedFunctionCount: 7 | 13,
+  expectedFunctionCount: 7 | 14,
 ): string {
   const runtimeExpiryPredicate =
     runtimeRole === COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE
@@ -425,7 +430,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql
   COMPANION_DEVICE_BRIDGE_GROUP_ROLE,
   ALLOWED_FUNCTIONS_SQL,
   BASELINE_CONTRACT_ROWS_SQL,
-  13,
+  14,
 );
 
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL = catalogPreflightSql(

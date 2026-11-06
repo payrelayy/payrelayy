@@ -61,10 +61,8 @@ export type CompanionPlayerValidationClaim =
       readonly assignment: SignedKemerBetPlayerValidationAssignment;
     };
 
-export interface CompanionPlayerValidationAcceptance {
-  readonly accepted: true;
-  readonly replayed: boolean;
-}
+export type CompanionPlayerValidationAcceptance =
+  { readonly accepted: true; readonly replayed: boolean } | { readonly superseded: true };
 
 /** The state callbacks must enforce one-use leases and current-request checks transactionally. */
 export interface CompanionPlayerValidationHandlerDependencies {
@@ -394,6 +392,13 @@ export function createCompanionPlayerValidationHandler(
         resultReplayIdentity,
         assessedAt,
       );
+      if (accepted && 'superseded' in accepted) {
+        return jsonResponse(409, {
+          code: 'assignment_superseded',
+          assignmentId: assignment.body.assignmentId,
+          assignmentBodyDigest: assignment.bodyDigest,
+        });
+      }
       return accepted
         ? jsonResponse(accepted.replayed ? 200 : 201, accepted)
         : errorResponse(401, 'invalid_request');

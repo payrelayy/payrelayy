@@ -93,6 +93,7 @@ function signature(privateKey: KeyObject, transcript: Uint8Array): string {
 function assignmentFixture(
   serverPrivateKey: KeyObject,
   assignmentId = 'player-validation-assignment-0001',
+  selectedPlayerId = playerId,
 ): SignedKemerBetPlayerValidationAssignment {
   const body: KemerBetPlayerValidationAssignmentBody = Object.freeze({
     contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
@@ -105,7 +106,7 @@ function assignmentFixture(
     platformCode: 'kemerbet',
     assignmentKind: 'single_telegram_player_validation',
     lookupMode: 'find_only',
-    playerId,
+    playerId: selectedPlayerId,
     currencyCode: 'ETB',
     leaseNonceDigest: sha('1'),
     oneUse: true,
@@ -395,6 +396,93 @@ describe('dormant Windows companion single-Player validation worker', () => {
     ]);
     expect(JSON.stringify(timings)).not.toContain(playerId);
     expect(await readdir(join(root, 'device'))).toEqual([]);
+  });
+
+  it('discards a superseded result and checks the replacement on the next cycle', async () => {
+    const root = await temporaryRoot();
+    const value = runtimeFixture();
+    const replacement = assignmentFixture(
+      value.server.privateKey,
+      'player-validation-assignment-0002',
+      'NEW-PLAYER-2',
+    );
+    const controller = new AbortController();
+    const events: CompanionPlayerValidationWorkerEvent[] = [];
+    const executeSingleLookup = vi.fn(async (_id: string) => 'review_required' as const);
+    let polls = 0;
+    let submissions = 0;
+    const fetchImplementation = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH)) {
+        polls += 1;
+        return jsonResponse({ assignment: polls === 1 ? value.assignment : replacement });
+      }
+      submissions += 1;
+      return submissions === 1
+        ? jsonResponse(
+            {
+              code: 'assignment_superseded',
+              assignmentId: value.assignment.body.assignmentId,
+              assignmentBodyDigest: value.assignment.bodyDigest,
+            },
+            409,
+          )
+        : jsonResponse({ accepted: true, replayed: false }, 201);
+    });
+    const worker = await createCompanionPlayerValidationWorker({
+      dataRoot: root,
+      device: value.runtime,
+      session: { executeSingleLookup },
+      signal: controller.signal,
+      report: (event) => events.push(event),
+      fetch: fetchImplementation as unknown as typeof fetch,
+      now: () => new Date(now),
+      protector: protector(),
+    });
+    await expect(worker.runOnce()).resolves.toBe('superseded');
+    expect(await readdir(join(root, 'device'))).toEqual([]);
+    await expect(worker.runOnce()).resolves.toBe('accepted');
+    expect(executeSingleLookup.mock.calls.map(([id]) => id)).toEqual([playerId, 'NEW-PLAYER-2']);
+    expect(events.map((event) => event.state)).toContain('assignment_superseded');
+    expect(polls).toBe(2);
+    expect(submissions).toBe(2);
+    expect(await readdir(join(root, 'device'))).toEqual([]);
+  });
+
+  it('retains an old result when a cancellation response is not bound to it', async () => {
+    const root = await temporaryRoot();
+    const value = runtimeFixture();
+    const controller = new AbortController();
+    const executeSingleLookup = vi.fn(async () => 'review_required' as const);
+    const fetchImplementation = vi.fn(async (input: string | URL | Request) =>
+      String(input).endsWith(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH)
+        ? jsonResponse({ assignment: value.assignment })
+        : jsonResponse(
+            {
+              code: 'assignment_superseded',
+              assignmentId: 'other-assignment',
+              assignmentBodyDigest: value.assignment.bodyDigest,
+            },
+            409,
+          ),
+    );
+    const worker = await createCompanionPlayerValidationWorker({
+      dataRoot: root,
+      device: value.runtime,
+      session: { executeSingleLookup },
+      signal: controller.signal,
+      report: vi.fn(),
+      fetch: fetchImplementation as unknown as typeof fetch,
+      now: () => new Date(now),
+      protector: protector(),
+    });
+    await expect(worker.runOnce()).resolves.toBe('temporarily_unavailable');
+    expect(await readdir(join(root, 'device'))).toEqual([
+      'player-validation.assignment.secure.json',
+      'player-validation.result.secure.json',
+      'player-validation.started.json',
+    ]);
+    await expect(worker.runOnce()).resolves.toBe('temporarily_unavailable');
+    expect(executeSingleLookup).toHaveBeenCalledOnce();
   });
 
   it('treats an empty poll as no work and never opens the local Find UI', async () => {

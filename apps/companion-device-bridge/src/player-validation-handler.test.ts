@@ -353,6 +353,20 @@ describe('Telegram Player validation bridge handler (dormant)', () => {
     },
   );
 
+  it('returns a bound cancellation only for a verified superseded result', async () => {
+    const value = fixture();
+    const assignment = await issuedAssignment(value);
+    const response = await createCompanionPlayerValidationHandler(
+      dependencies(value, { acceptResult: vi.fn(async () => ({ superseded: true as const })) }),
+    )(value.resultRequest(assignment, value.signedResult(assignment, 'review_required')));
+    expect(response.statusCode).toBe(409);
+    expect(parsed(response)).toEqual({
+      code: 'assignment_superseded',
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+    });
+  });
+
   it('rejects a result for a different Player ID before the state boundary', async () => {
     const value = fixture();
     const assignment = await issuedAssignment(value);

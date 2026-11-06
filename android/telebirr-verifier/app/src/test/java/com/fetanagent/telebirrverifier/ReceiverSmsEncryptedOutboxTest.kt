@@ -59,6 +59,28 @@ class ReceiverSmsEncryptedOutboxTest {
     } finally { root.deleteRecursively() }
   }
 
+  @Test fun `successful upload markers cannot block pending SMS after restart`() {
+    val root = directory()
+    try {
+      val first = ReceiverSmsEncryptedOutbox(root, cipher)
+      val pendingKey = first.stage(message("STILLPENDING"))
+      val reviewedKey = first.stage(message("NEEDSREVIEW"))
+      first.archiveForReview(reviewedKey)
+      val now = System.currentTimeMillis()
+      for (index in 0 until 2_050) {
+        val marker = File(root, "%064x.ack".format(index))
+        marker.writeBytes(byteArrayOf(1))
+        assertTrue(marker.setLastModified(now - (2_050 - index) * 1_000L))
+      }
+
+      val recovered = ReceiverSmsEncryptedOutbox(root, cipher)
+      assertEquals(512, root.listFiles()!!.count { it.name.endsWith(".ack") })
+      assertTrue(File(root, "$reviewedKey.review.sealed").isFile)
+      assertEquals(pendingKey, recovered.nextPending()!!.key)
+      assertEquals(1, recovered.pendingCount())
+    } finally { root.deleteRecursively() }
+  }
+
   @Test fun `private queue accepts a canonicalized parent path`() {
     val parent = directory()
     try {

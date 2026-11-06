@@ -168,17 +168,31 @@ internal class ReceiverSmsEncryptedOutbox(
 
   private fun pruneOldAcknowledgements() {
     val cutoff = System.currentTimeMillis() - ACK_RETENTION_MILLIS
-    directory.listFiles()?.filter { it.name.endsWith(".ack") }?.forEach { ack ->
+    val files = directory.listFiles()?.toList()
+      ?: error("Receiver SMS queue is unavailable")
+    val acknowledgements = files.filter { it.name.endsWith(".ack") }
+    acknowledgements.forEach { ack ->
       require(ack.isFile && !Files.isSymbolicLink(ack.toPath()) &&
         RECORD.matches(ack.name) && ack.length() == 1L &&
         ack.canonicalFile.parentFile == directory.canonicalFile)
-      if (ack.lastModified() < cutoff) check(ack.delete())
-    } ?: error("Receiver SMS queue is unavailable")
+    }
+    val retained = acknowledgements.filter { ack ->
+      if (ack.lastModified() >= cutoff) true else {
+        check(ack.delete())
+        false
+      }
+    }.sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
+    // Capture listens only for new broadcasts. Keep recent deduplication markers,
+    // but never let successful uploads exhaust the bounded private queue.
+    val maximumRetained = minOf(MAX_ACKNOWLEDGEMENTS,
+      (MAX_QUEUE_FILES - (files.size - acknowledgements.size)).coerceAtLeast(0))
+    retained.take((retained.size - maximumRetained).coerceAtLeast(0))
+      .forEach { ack -> check(ack.delete()) }
   }
 
   private fun inspectFiles(): List<File> {
     val files = directory.listFiles()?.toList() ?: error("Receiver SMS queue is unavailable")
-    require(files.size <= 2_048)
+    require(files.size <= MAX_QUEUE_FILES)
     files.forEach { file ->
       require(file.isFile && !Files.isSymbolicLink(file.toPath()))
       require(file.canonicalFile.parentFile == directory.canonicalFile)
@@ -226,6 +240,8 @@ internal class ReceiverSmsEncryptedOutbox(
     private val RECORD_PENDING = Regex("^[0-9a-f]{64}[.]sealed$")
     private val TEMP = Regex("^[0-9a-f]{64}-[0-9a-f-]{36}[.]tmp$")
     private const val MAX_SEALED_BYTES = 4_096
+    private const val MAX_QUEUE_FILES = 2_048
+    private const val MAX_ACKNOWLEDGEMENTS = 512
     private const val ACK_RETENTION_MILLIS = 30L * 24 * 60 * 60_000
 
     fun forApplication(context: Context): ReceiverSmsEncryptedOutbox =

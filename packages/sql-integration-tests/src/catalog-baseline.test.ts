@@ -227,6 +227,8 @@ const fastPlayerValidationMigrationName = '20261106005305_fast_player_validation
 const receiverSmsOwnerQueueCountMigrationName =
   '20261106192200_receiver_sms_owner_queued_count.sql';
 const receiverSmsQueueGrantHoldMigrationName = '20261106195223_receiver_sms_queue_grant_hold.sql';
+const receiverSmsQueueGrantActivateMigrationName =
+  '20261106201907_receiver_sms_queue_grant_activate.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -729,7 +731,8 @@ describe('disposable SQL migration baseline', () => {
         name !== restore25EtbTransportMigrationName &&
         name !== fastPlayerValidationMigrationName &&
         name !== receiverSmsOwnerQueueCountMigrationName &&
-        name !== receiverSmsQueueGrantHoldMigrationName,
+        name !== receiverSmsQueueGrantHoldMigrationName &&
+        name !== receiverSmsQueueGrantActivateMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -11087,11 +11090,15 @@ describe('production deposit policy cutovers', () => {
           digest(),
         ],
       );
-      await postCutoverClient.query(
-        `grant execute on function app.record_receiver_sms_device_status_with_queue(
-           text,text,text,timestamptz,text,text,integer)
-         to fetanagent_receiver_sms_ingest`,
+      const activationMigration = await readFile(
+        join(environment.migrationsDirectory, receiverSmsQueueGrantActivateMigrationName),
+        'utf8',
       );
+      const grantSql = activationMigration.match(
+        /grant execute on function app\.record_receiver_sms_device_status_with_queue\([\s\S]*?\)\s+to fetanagent_receiver_sms_ingest;/u,
+      )?.[0];
+      expect(grantSql).toBeDefined();
+      await postCutoverClient.query(grantSql!);
       await postCutoverClient.query(
         'set session authorization fetanagent_receiver_sms_ingest_runtime',
       );

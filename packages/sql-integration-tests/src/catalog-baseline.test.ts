@@ -11246,10 +11246,7 @@ describe('production deposit policy cutovers', () => {
           $1::uuid,'all','all',null,null,null,2,0)`,
         [ownerAuthUserId],
       );
-      expect(newestFirst.rows.map((row) => row.payment_event_id)).toEqual([
-        newEventId,
-        oldEventId,
-      ]);
+      expect(newestFirst.rows.map((row) => row.payment_event_id)).toEqual([newEventId, oldEventId]);
       const filtered = await postCutoverClient.query<{
         payment_event_id: string;
         reference_masked: string;

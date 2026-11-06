@@ -30,6 +30,7 @@ export interface ReceiverSmsIngestDatabase {
     readonly observedAt: string;
     readonly bodyDigest: string;
     readonly devicePublicKeySpkiSha256: string;
+    readonly queuedSmsCount?: number;
   }): Promise<boolean>;
 }
 

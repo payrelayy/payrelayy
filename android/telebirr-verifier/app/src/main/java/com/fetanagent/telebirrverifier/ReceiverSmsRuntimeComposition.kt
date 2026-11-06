@@ -46,8 +46,11 @@ internal object ReceiverSmsRuntimeComposition {
     return VerifierRuntimeSession(
       cycle = VerifierRuntimeCycle {
         val deviceId = runCatching { enrolledDeviceId() }.getOrNull()
-          ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
-          LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
+          ?: return@VerifierRuntimeCycle if (runCatching { outbox.expirePending() }.isSuccess)
+            LivePilotRuntimeStatus(LivePilotRuntimeState.ENROLLMENT_REQUIRED,
+              "routine_enrollment_unavailable")
+          else LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
+            "sms_queue_unavailable")
         val result = upload.run(deviceId, identity)
         val captureFailure = captureCode.getAndSet(null)
         when {
@@ -67,8 +70,10 @@ internal object ReceiverSmsRuntimeComposition {
       heartbeat = VerifierRuntimeHeartbeat { status ->
         val deviceId = runCatching { enrolledDeviceId() }.getOrNull()
           ?: return@VerifierRuntimeHeartbeat DeviceBridgeHeartbeatResult.EnrollmentRejected
+        val queuedSmsCount = runCatching { outbox.pendingCount() }.getOrNull()
+          ?: return@VerifierRuntimeHeartbeat DeviceBridgeHeartbeatResult.Retryable
         ReceiverSmsStatusHeartbeat(deviceId, identity,
-          FixedReceiverSmsHttpsExchange()).send(status)
+          FixedReceiverSmsHttpsExchange()).send(status, queuedSmsCount)
       },
       close = capture::close,
     )

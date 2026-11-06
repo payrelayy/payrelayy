@@ -343,6 +343,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <p class="request-meta">Companion KemerBet sign-in: <strong id="system-overview-kemerbet-session">Sign in to check.</strong></p>
           <p class="request-meta">TeleBirr SMS verifier: <strong id="system-overview-telebirr-phone">Sign in to check.</strong></p>
           <p class="request-meta">CBE Birr SMS verifier: <strong id="system-overview-cbe-phone">Sign in to check.</strong></p>
+          <p class="request-meta">Queued payment SMS waiting to upload: <strong id="system-overview-queued-sms">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
         </section>
@@ -1374,6 +1375,7 @@ const systemOverviewCompanion = document.querySelector('#system-overview-compani
 const systemOverviewKemerbetSession = document.querySelector('#system-overview-kemerbet-session');
 const systemOverviewTelebirrPhone = document.querySelector('#system-overview-telebirr-phone');
 const systemOverviewCbePhone = document.querySelector('#system-overview-cbe-phone');
+const systemOverviewQueuedSms = document.querySelector('#system-overview-queued-sms');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
 let systemOverviewLoadGeneration = 0;
 let systemOverviewPollTimer;
@@ -3926,6 +3928,7 @@ function signOut(message = 'Signed out.') {
   systemOverviewKemerbetSession.textContent = 'Sign in to check.';
   systemOverviewTelebirrPhone.textContent = 'Sign in to check.';
   systemOverviewCbePhone.textContent = 'Sign in to check.';
+  systemOverviewQueuedSms.textContent = 'Sign in to check.';
   latestDeviceHealth = null;
   latestHomeDepositAvailability = null;
   systemOverviewFacts.replaceChildren();
@@ -7340,6 +7343,11 @@ async function loadSystemOverview() {
     systemOverviewKemerbetSession.textContent = healthLabel(health?.companion, true);
     systemOverviewTelebirrPhone.textContent = healthLabel(health?.receiverPhone, false);
     systemOverviewCbePhone.textContent = healthLabel(health?.receiverPhone, false);
+    systemOverviewQueuedSms.textContent = Number.isSafeInteger(health?.receiverPhone?.queuedSmsCount) &&
+      typeof health.receiverPhone.reportedAt === 'string'
+      ? String(health.receiverPhone.queuedSmsCount) + ' · reported ' +
+        transactionDate(health.receiverPhone.reportedAt)
+      : 'Unknown';
     const masterEnabled = validDepositAvailability(availabilityPayload?.availability)
       ? availabilityPayload.availability.enabled : null;
     latestHomeDepositAvailability = masterEnabled === null ? null : { enabled: masterEnabled };
@@ -7381,6 +7389,7 @@ async function loadSystemOverview() {
       systemOverviewKemerbetSession.textContent = 'Unknown';
       systemOverviewTelebirrPhone.textContent = 'Unknown';
       systemOverviewCbePhone.textContent = 'Unknown';
+      systemOverviewQueuedSms.textContent = 'Unknown';
       renderOwnerAlerts();
       systemOverviewStatus.textContent = 'System status is unavailable. Refresh to try again.';
     }

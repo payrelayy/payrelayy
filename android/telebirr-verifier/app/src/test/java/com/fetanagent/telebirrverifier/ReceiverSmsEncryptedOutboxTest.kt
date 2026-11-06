@@ -59,6 +59,42 @@ class ReceiverSmsEncryptedOutboxTest {
     } finally { root.deleteRecursively() }
   }
 
+  @Test fun `unsent SMS expires only after five hours in the queue`() {
+    val root = directory()
+    try {
+      var now = 1_800_000_000_000L
+      val first = ReceiverSmsEncryptedOutbox(root, cipher, nowMillis = { now })
+      val expiredKey = first.stage(message("EXPIREDAFTERFIVEHOURS"))
+      val expired = File(root, "$expiredKey.sealed")
+      assertTrue(expired.setLastModified(now))
+      now += 5L * 60 * 60_000 - 1
+      assertEquals(expiredKey, first.nextPending()!!.key)
+      assertEquals(1, first.pendingCount())
+      now += 1
+      assertNull(first.nextPending())
+      assertFalse(expired.exists())
+      assertEquals(0, first.pendingCount())
+    } finally { root.deleteRecursively() }
+  }
+
+  @Test fun `restart removes expired SMS and keeps recent SMS`() {
+    val root = directory()
+    try {
+      var now = 1_800_000_000_000L
+      val first = ReceiverSmsEncryptedOutbox(root, cipher, nowMillis = { now })
+      val oldKey = first.stage(message("OLDSMS"))
+      assertTrue(File(root, "$oldKey.sealed").setLastModified(now))
+      now += 4L * 60 * 60_000
+      val recentKey = first.stage(message("RECENTSMS"))
+      assertTrue(File(root, "$recentKey.sealed").setLastModified(now))
+      now += 60 * 60_000
+      val restarted = ReceiverSmsEncryptedOutbox(root, cipher, nowMillis = { now })
+      assertFalse(File(root, "$oldKey.sealed").exists())
+      assertEquals(recentKey, restarted.nextPending()!!.key)
+      assertEquals(1, restarted.pendingCount())
+    } finally { root.deleteRecursively() }
+  }
+
   @Test fun `successful upload markers cannot block pending SMS after restart`() {
     val root = directory()
     try {

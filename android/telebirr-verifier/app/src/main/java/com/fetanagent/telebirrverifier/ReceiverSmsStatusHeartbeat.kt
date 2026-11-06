@@ -15,13 +15,15 @@ internal class ReceiverSmsStatusHeartbeat(
   private val exchange: DeviceBridgeExchange,
   private val now: () -> Instant = Instant::now,
 ) {
-  fun send(status: LivePilotRuntimeStatus): DeviceBridgeHeartbeatResult {
+  fun send(status: LivePilotRuntimeStatus, queuedSmsCount: Int): DeviceBridgeHeartbeatResult {
+    require(queuedSmsCount in 0..100_000)
     val state = if (status.state == LivePilotRuntimeState.READY &&
       status.code in setOf("sms_inbox_idle", "sms_event_recorded")) "ready" else "attention"
     val observedAt = DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(now())
     val keyId = identity.publicMaterial().keyId
     val digest = digest(transcript("fetanagent:receiver-sms-status-body:v1",
-      listOf(1, "receiver_sms_status_v1", deviceId, keyId, state, observedAt)))
+      listOf(1, "receiver_sms_status_v1", deviceId, keyId, state, observedAt,
+        queuedSmsCount)))
     val signature = Base64.getUrlEncoder().withoutPadding().encodeToString(
       identity.signP1363(transcript("fetanagent:receiver-sms-status-signature:v1",
         listOf(digest))))
@@ -38,6 +40,7 @@ internal class ReceiverSmsStatusHeartbeat(
           "keyId" to text(keyId),
           "state" to text(state),
           "observedAt" to text(observedAt),
+          "queuedSmsCount" to number(queuedSmsCount.toLong()),
         ),
         "signature" to text(signature),
       ),

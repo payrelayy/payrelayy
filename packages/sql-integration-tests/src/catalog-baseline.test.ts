@@ -11241,6 +11241,15 @@ describe('production deposit policy cutovers', () => {
         [newEventId, ciphertext],
       );
       await postCutoverClient.query('set session authorization fetanagent_owner_control_runtime');
+      const newestFirst = await postCutoverClient.query<{ payment_event_id: string }>(
+        `select payment_event_id from app.list_owner_receiver_sms_inbox_sensitive(
+          $1::uuid,'all','all',null,null,null,2,0)`,
+        [ownerAuthUserId],
+      );
+      expect(newestFirst.rows.map((row) => row.payment_event_id)).toEqual([
+        newEventId,
+        oldEventId,
+      ]);
       const filtered = await postCutoverClient.query<{
         payment_event_id: string;
         reference_masked: string;

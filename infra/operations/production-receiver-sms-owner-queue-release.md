@@ -10,6 +10,7 @@ This release shows the signed phone outbox count in Owner and removes unsent pho
 | Successor helper SHA-256           | `494ee66460c232969359fc7ba652b67fd589a0851ecb2feb8ea85b6fdf01594b`                         |
 | Helper rotation                    | `infra/operations/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1.sh` |
 | Database hold migration            | `20261106195223_receiver_sms_queue_grant_hold.sql`                                         |
+| Database activation migration      | `20261106201907_receiver_sms_queue_grant_activate.sql`                                     |
 
 1. Require passing PR and exact-main CI. Confirm current release, routine marker, helper and sudoers digest, healthy broker and phone bridge, and no unfinished credit before deployment.
 2. Stage the exact merged-main helper Git blob as root-owned mode `0600` at `/root/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next`. Stage the rotation script separately as root-owned mode `0700`. Verify digests and Bash syntax. Run `inspect`, then `rotate 'ROTATE EXACT PRODUCTION V2 RECEIVER SMS OWNER QUEUE HELPER V1'`, then `inspect` again. Confirm no production runtime changed.

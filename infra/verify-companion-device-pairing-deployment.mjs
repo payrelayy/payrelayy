@@ -393,7 +393,7 @@ assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace
 assert.match(postgresRuntime, /select count\(\*\) = \$\{expectedFunctionCount\}/u);
 assert.match(
   postgresRuntime,
-  /COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  13,\n\);/u,
+  /COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  14,\n\);/u,
 );
 assert.match(
   postgresRuntime,

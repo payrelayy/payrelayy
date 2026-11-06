@@ -172,6 +172,25 @@ describe('strict KemerBet success table', () => {
   });
 
   it.each([
+    [10050, '100.5'],
+    [87260, '872.6'],
+    [2540, '25.4'],
+  ])('accepts the exact one-digit success rendering of %s minor units', (amountMinor, rendered) => {
+    const text = successTableText
+      .replaceAll('\t100\t', `\t${rendered}\t`)
+      .replace('\t-100\t', `\t-${rendered}\t`);
+    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], amountMinor)).toBe(true);
+    expect(exactKemerBetAmountInputMatches(rendered, amountMinor)).toBe(true);
+    expect(
+      exactKemerBetSuccessTableMatches(
+        text.replace(`\t${rendered}\tSuccess`, '\t100.6\tSuccess'),
+        ['fixture-identity'],
+        amountMinor,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
     ['wrong recipient', successTableText.replace('fixture-identity', 'someone-else')],
     ['wrong credit amount', successTableText.replace('\t100\tSuccess', '\t101\tSuccess')],
     ['wrong agent debit', successTableText.replace('\t-100\tSuccess', '\t-99\tSuccess')],
@@ -375,6 +394,29 @@ describe.skipIf(process.platform !== 'win32')(
       expect(submitted).toEqual([{ playerId: 42, amount: 100, notes: null }]);
       expect(stages.at(-1)).toBe('success_modal_confirmed');
     }, 15000);
+
+    it.each([10050, 87260])(
+      'confirms and dismisses the numeric success table for %s minor units',
+      async (amountMinor) => {
+        const { page, lookup, deposit, submitted } = await startFixture(successTableHtml);
+        const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
+          page,
+          PLAYER_ID,
+          amountMinor,
+          lookup,
+          deposit,
+          async () => ({ playerId: PLAYER_ID, amountMinor, isFresh: () => true }),
+        );
+        expect(outcome).toMatchObject({
+          outcome: 'submission_attempted',
+          exactPlayerCreditMatch: true,
+        });
+        expect(submitted).toEqual([{ playerId: 42, amount: amountMinor / 100, notes: null }]);
+        await dismissRoutineSuccessModal(page);
+        expect(await page.getByText('Transfer Successful!', { exact: true }).count()).toBe(0);
+      },
+      15000,
+    );
 
     it('dismisses a settled success result before the next queued credit', async () => {
       const { page, lookup, deposit, submitted, blocked } = await startFixture(successTableHtml);

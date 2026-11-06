@@ -52,6 +52,7 @@ export type CompanionLookupWorkerState =
   | 'assignment_verified'
   | 'lookup_completed'
   | 'result_accepted'
+  | 'assignment_superseded'
   | 'assignment_expired'
   | 'temporarily_unavailable'
   | 'failed_closed';
@@ -627,7 +628,7 @@ async function submitPlayerValidationResult(
   fetchImplementation: typeof fetch,
   signal: AbortSignal,
   now: Date,
-): Promise<void> {
+): Promise<'accepted' | 'superseded'> {
   const contentDigest = digestCompanionPlayerValidationResultContent(assignment, result);
   if (!contentDigest || !device.verifyPlayerValidationExchange(assignment, result, now)) {
     unavailable();
@@ -648,6 +649,18 @@ async function submitPlayerValidationResult(
     fetchImplementation,
     signal,
   );
+  if (response.status === 409) {
+    const parsed = await parsedResponse(response);
+    if (
+      !exactKeys(parsed, ['code', 'assignmentId', 'assignmentBodyDigest']) ||
+      parsed.code !== 'assignment_superseded' ||
+      parsed.assignmentId !== assignment.body.assignmentId ||
+      parsed.assignmentBodyDigest !== assignment.bodyDigest
+    ) {
+      unavailable();
+    }
+    return 'superseded';
+  }
   if (response.status !== 200 && response.status !== 201) unavailable();
   const parsed = await parsedResponse(response);
   if (
@@ -657,10 +670,11 @@ async function submitPlayerValidationResult(
   ) {
     unavailable();
   }
+  return 'accepted';
 }
 
 export type CompanionPlayerValidationRunOutcome =
-  'idle' | 'accepted' | 'temporarily_unavailable' | 'stopped';
+  'idle' | 'accepted' | 'superseded' | 'temporarily_unavailable' | 'stopped';
 
 /** One signed, read-only Find cycle; the routine queue can await it without browser overlap. */
 export async function createCompanionPlayerValidationWorker(
@@ -812,8 +826,9 @@ export async function createCompanionPlayerValidationWorker(
       }
 
       const submitStarted = performance.now();
+      let submitOutcome: 'accepted' | 'superseded';
       try {
-        await submitPlayerValidationResult(
+        submitOutcome = await submitPlayerValidationResult(
           options.device,
           assignment,
           result,
@@ -824,9 +839,12 @@ export async function createCompanionPlayerValidationWorker(
       } finally {
         reportTiming('result_submit', Math.round(performance.now() - submitStarted));
       }
-      report('result_accepted', result.body.outcome);
+      report(
+        submitOutcome === 'accepted' ? 'result_accepted' : 'assignment_superseded',
+        submitOutcome === 'accepted' ? result.body.outcome : undefined,
+      );
       await clearPlayerValidationLedger(deviceRoot);
-      return 'accepted';
+      return submitOutcome;
     } catch {
       if (options.signal.aborted) return 'stopped';
       report('temporarily_unavailable');
@@ -847,7 +865,7 @@ export async function runCompanionPlayerValidationWorker(
   while (!options.signal.aborted) {
     const outcome = await worker.runOnce();
     if (outcome === 'stopped') return;
-    if (outcome !== 'accepted') {
+    if (outcome !== 'accepted' && outcome !== 'superseded') {
       await waitFor(
         outcome === 'temporarily_unavailable' ? Math.max(pollIntervalMs, 5_000) : pollIntervalMs,
         options.signal,

@@ -200,6 +200,13 @@ export const ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL = `
     )
 `;
 
+export const CONFIRM_SUPERSEDED_COMPANION_PLAYER_VALIDATION_RESULT_SQL = `
+  select app.confirm_superseded_telegram_player_validation_result(
+    $1::text, $2::text, $3::text, $4::text,
+    $5::text, $6::text, $7::text, $8::jsonb, $9::jsonb
+  ) as superseded
+`;
+
 export const CLAIM_COMPANION_EXECUTION_ASSIGNMENT_SQL = `
   select claim_state,
          claim_material,
@@ -727,6 +734,31 @@ export class PostgresCompanionDeviceState {
         JSON.stringify(assignment),
         JSON.stringify(resultEnvelope),
       ]);
+      if (result.rows.length === 0) {
+        const confirmation = await this.database.query(
+          CONFIRM_SUPERSEDED_COMPANION_PLAYER_VALIDATION_RESULT_SQL,
+          [
+            assignment.body.assignmentId,
+            assignment.bodyDigest,
+            resultEnvelope.body.resultId,
+            resultEnvelope.bodyDigest,
+            certificate.body.certificateId,
+            certificate.body.deviceId,
+            certificate.body.deviceKeyId,
+            JSON.stringify(assignment),
+            JSON.stringify(resultEnvelope),
+          ],
+        );
+        if (confirmation.rows.length !== 1) throw new CompanionDeviceStateUnavailableError();
+        const cancellation = rowObject(confirmation.rows[0]);
+        if (
+          !exactKeys(cancellation, ['superseded']) ||
+          typeof cancellation.superseded !== 'boolean'
+        ) {
+          throw new CompanionDeviceStateUnavailableError();
+        }
+        return cancellation.superseded ? Object.freeze({ superseded: true }) : undefined;
+      }
       if (result.rows.length !== 1) return undefined;
       const row = rowObject(result.rows[0]);
       return exactKeys(row, ['accepted', 'replayed', 'finalization_state']) &&

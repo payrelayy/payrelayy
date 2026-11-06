@@ -13,6 +13,7 @@ import {
   ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL,
   CLAIM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL,
   COMPLETE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL,
+  CONFIRM_SUPERSEDED_COMPANION_PLAYER_VALIDATION_RESULT_SQL,
   CompanionDeviceStateUnavailableError,
   PostgresCompanionDeviceState,
   RELEASE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL,
@@ -89,6 +90,42 @@ const result = {
 } as SignedKemerBetPlayerValidationResult;
 
 describe('private companion Player validation PostgreSQL adapter (dormant)', () => {
+  it('confirms only the exact superseded signed result after acceptance rejects it', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql === ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL) return { rows: [] };
+      if (sql === CONFIRM_SUPERSEDED_COMPANION_PLAYER_VALIDATION_RESULT_SQL) {
+        return { rows: [{ superseded: true }] };
+      }
+      throw new Error('unexpected SQL');
+    });
+    const state = new PostgresCompanionDeviceState({ query }, signerKeyId);
+    await expect(
+      state.acceptPlayerValidationResult(
+        certificate,
+        httpRequest,
+        sha('6'),
+        assignment,
+        result,
+        sha('7'),
+        assessedAt,
+      ),
+    ).resolves.toEqual({ superseded: true });
+    expect(query.mock.calls[1]).toEqual([
+      CONFIRM_SUPERSEDED_COMPANION_PLAYER_VALIDATION_RESULT_SQL,
+      [
+        assignment.body.assignmentId,
+        assignment.bodyDigest,
+        result.body.resultId,
+        result.bodyDigest,
+        certificate.body.certificateId,
+        certificate.body.deviceId,
+        certificate.body.deviceKeyId,
+        JSON.stringify(assignment),
+        JSON.stringify(result),
+      ],
+    ]);
+  });
+
   it('uses only the reviewed one-use functions with the exact ordered arguments', async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql === CLAIM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL) {

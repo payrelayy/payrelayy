@@ -1343,3 +1343,105 @@ export function registerTelegramPlayerValidationStateSqlTests(
     });
   });
 }
+
+export function registerFastPlayerValidationSupersessionSqlTests(
+  getClient: () => Client,
+  getOwnerAdminId: () => string,
+): void {
+  describe('current fast Telegram Player validation supersession', () => {
+    it('shares a pending Find and immediately releases a changed ID for the next Find', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const userId = '89650000991';
+        const firstEvent = await inbound(client, '89660000991', userId);
+        const firstRequest = await requestValidation(client, firstEvent, 'FIRST-INVALID-SQL');
+        const repeatEvent = await inbound(client, '89660000992', userId);
+        expect(await requestValidation(client, repeatEvent, 'FIRST-INVALID-SQL')).toBe(
+          firstRequest,
+        );
+        expect(await requestValidation(client, repeatEvent, 'FIRST-INVALID-SQL')).toBe(
+          firstRequest,
+        );
+        expect(
+          (
+            await client.query<{ count: string }>(
+              `select count(*)::text as count
+                 from app.telegram_player_validation_shared_inbounds
+                where validation_request_id=$1::uuid`,
+              [firstRequest],
+            )
+          ).rows,
+        ).toEqual([{ count: '1' }]);
+
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        expect(claimed[0]?.claim_state).toBe('claimed');
+        expect(claimed[0]?.assignment_body?.validationRequestId).toBe(firstRequest);
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        expect(
+          (
+            await client.query<{ completed: boolean }>(
+              'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb) as completed',
+              [assignment.bodyDigest, assignment],
+            )
+          ).rows,
+        ).toEqual([{ completed: true }]);
+
+        const nextEvent = await inbound(client, '89660000993', userId);
+        const nextRequest = await requestValidation(client, nextEvent, 'NEXT-PLAYER-SQL');
+        expect(nextRequest).not.toBe(firstRequest);
+        expect(
+          (
+            await client.query<{ status: string; state: string }>(
+              `select request.status, assignment.state
+                 from app.telegram_player_validation_requests request
+                 join app.telegram_player_validation_assignments assignment
+                   on assignment.validation_request_id=request.id
+                where request.id=$1::uuid`,
+              [firstRequest],
+            )
+          ).rows,
+        ).toEqual([{ status: 'superseded', state: 'superseded' }]);
+
+        const oldResult = resultEnvelope(assignment, 'review_required');
+        expect(await accept(client, assignment, oldResult)).toEqual([]);
+        const confirm = async (digest: string): Promise<boolean> => {
+          const result = await client.query<{ superseded: boolean }>(
+            `select app.confirm_superseded_telegram_player_validation_result(
+              $1::text,$2::text,$3::text,$4::text,$5::text,$6::text,$7::text,
+              $8::jsonb,$9::jsonb
+            ) as superseded`,
+            [
+              assignment.body.assignmentId,
+              digest,
+              oldResult.body.resultId,
+              oldResult.bodyDigest,
+              assignment.body.certificateId,
+              assignment.body.deviceId,
+              assignment.body.deviceKeyId,
+              assignment,
+              oldResult,
+            ],
+          );
+          return result.rows[0]!.superseded;
+        };
+        expect(await confirm(assignment.bodyDigest)).toBe(true);
+        expect(await confirm(sha('wrong-assignment'))).toBe(false);
+
+        const replacement = await claim(client, paired.certificateBody, paired.signerKeyId);
+        expect(replacement[0]?.claim_state).toBe('claimed');
+        expect(replacement[0]?.assignment_body?.validationRequestId).toBe(nextRequest);
+        expect(
+          (
+            await client.query<{ count: string }>(
+              `select count(*)::text as count from app.telegram_player_validation_results`,
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+  });
+}

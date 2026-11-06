@@ -49,7 +49,10 @@ import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { registerTelegramSavedPlayerSelectionSqlTests } from './telegram-saved-player-selection.suite.js';
 import { registerTelegramPlayerValidationRequestSqlTests } from './telegram-player-validation-requests.suite.js';
-import { registerTelegramPlayerValidationStateSqlTests } from './telegram-player-validation-state.suite.js';
+import {
+  registerFastPlayerValidationSupersessionSqlTests,
+  registerTelegramPlayerValidationStateSqlTests,
+} from './telegram-player-validation-state.suite.js';
 import { registerReviewedSourceBindingShadowWindowRetrySqlTests } from './reviewed-source-binding-shadow-window-retry.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerStoppedPilotPaidExecutionReviewSqlTests } from './stopped-pilot-paid-execution-review.suite.js';
@@ -220,6 +223,7 @@ const receiverSmsSimplePairingMigrationName =
 const autoDeposit25EtbMigrationName = '20261105232427_auto_deposit_minimum_25_etb.sql';
 const restore25EtbTransportMigrationName =
   '20261106000000_restore_routine_transport_after_25_etb_policy.sql';
+const fastPlayerValidationMigrationName = '20261106005305_fast_player_validation_supersession.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -719,7 +723,8 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSmsPhoneRenewalMigrationName &&
         name !== receiverSmsSimplePairingMigrationName &&
         name !== autoDeposit25EtbMigrationName &&
-        name !== restore25EtbTransportMigrationName,
+        name !== restore25EtbTransportMigrationName &&
+        name !== fastPlayerValidationMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10579,6 +10584,16 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [restore25EtbTransportMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, fastPlayerValidationMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [fastPlayerValidationMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10606,6 +10621,10 @@ describe('production deposit policy cutovers', () => {
   registerReceiverSmsSimplePairingSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
+  );
+  registerFastPlayerValidationSupersessionSqlTests(
+    () => postCutoverClient,
+    () => postCutoverOwnerAdminId,
   );
 
   it('keeps the manual withdrawal contact Owner-controlled and outside financial switches', async () => {

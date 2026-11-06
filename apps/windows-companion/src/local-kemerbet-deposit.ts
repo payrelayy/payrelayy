@@ -170,13 +170,22 @@ function exactAmountRenderings(amountMinor: number): readonly string[] {
   const amount = localDepositAmountText(amountMinor);
   const integer = amount.slice(0, -3);
   const fraction = amount.slice(-3);
+  // KemerBet submits a numeric amount and its success table can render a
+  // trailing-zero fraction with one digit (for example 100.50 as 100.5).
+  // Derive that spelling from minor units so the matched value stays exact.
+  const exactFractions =
+    amountMinor % ETB_SCALE !== 0 && amountMinor % 10 === 0
+      ? [fraction, fraction.slice(0, -1)]
+      : [fraction];
   // KemerBet's amount control uses different thousands separators across its
   // rendered variants. Keep every accepted string tied to the exact leased
   // integer amount; never parse a displayed float or discard arbitrary spaces.
   const groupedIntegers = [',', ' ', '\u00a0', '\u202f'].map((separator) =>
     integer.replace(/\B(?=(\d{3})+(?!\d))/gu, separator),
   );
-  const renderings = [amount, ...groupedIntegers.map((grouped) => `${grouped}${fraction}`)];
+  const renderings = [integer, ...groupedIntegers].flatMap((grouped) =>
+    exactFractions.map((exactFraction) => `${grouped}${exactFraction}`),
+  );
   if (amountMinor % ETB_SCALE === 0) renderings.push(integer, ...groupedIntegers);
   return [...new Set(renderings)];
 }

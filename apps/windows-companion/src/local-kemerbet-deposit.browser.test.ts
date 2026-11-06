@@ -190,6 +190,16 @@ describe('strict KemerBet success table', () => {
     ).toBe(false);
   });
 
+  it('keeps a two-decimal credit exact when the provider renders 100.25', () => {
+    const text = successTableText
+      .replaceAll('\t100\t', '\t100.25\t')
+      .replace('\t-100\t', '\t-100.25\t');
+    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 10025)).toBe(true);
+    expect(exactKemerBetAmountInputMatches('100.25', 10025)).toBe(true);
+    expect(exactKemerBetAmountInputMatches('100.2', 10025)).toBe(false);
+    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 10020)).toBe(false);
+  });
+
   it.each([
     ['wrong recipient', successTableText.replace('fixture-identity', 'someone-else')],
     ['wrong credit amount', successTableText.replace('\t100\tSuccess', '\t101\tSuccess')],
@@ -395,7 +405,7 @@ describe.skipIf(process.platform !== 'win32')(
       expect(stages.at(-1)).toBe('success_modal_confirmed');
     }, 15000);
 
-    it.each([10050, 87260])(
+    it.each([10025, 10050, 87260])(
       'confirms and dismisses the numeric success table for %s minor units',
       async (amountMinor) => {
         const { page, lookup, deposit, submitted } = await startFixture(successTableHtml);

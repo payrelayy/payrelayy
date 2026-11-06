@@ -226,6 +226,7 @@ const restore25EtbTransportMigrationName =
 const fastPlayerValidationMigrationName = '20261106005305_fast_player_validation_supersession.sql';
 const receiverSmsOwnerQueueCountMigrationName =
   '20261106192200_receiver_sms_owner_queued_count.sql';
+const receiverSmsQueueGrantHoldMigrationName = '20261106195223_receiver_sms_queue_grant_hold.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -727,7 +728,8 @@ describe('disposable SQL migration baseline', () => {
         name !== autoDeposit25EtbMigrationName &&
         name !== restore25EtbTransportMigrationName &&
         name !== fastPlayerValidationMigrationName &&
-        name !== receiverSmsOwnerQueueCountMigrationName,
+        name !== receiverSmsOwnerQueueCountMigrationName &&
+        name !== receiverSmsQueueGrantHoldMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10607,6 +10609,16 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [receiverSmsOwnerQueueCountMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, receiverSmsQueueGrantHoldMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [receiverSmsQueueGrantHoldMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -11017,6 +11029,13 @@ describe('production deposit policy cutovers', () => {
     expect(sql).not.toContain('${');
     await postCutoverClient.query('begin');
     try {
+      const grant = await postCutoverClient.query<{ enabled: boolean }>(
+        `select pg_catalog.has_function_privilege(
+           'fetanagent_receiver_sms_ingest_runtime',
+           'app.record_receiver_sms_device_status_with_queue(text,text,text,timestamptz,text,text,integer)',
+           'EXECUTE') as enabled`,
+      );
+      expect(grant.rows).toEqual([{ enabled: false }]);
       await postCutoverClient.query(
         'set session authorization fetanagent_receiver_sms_ingest_runtime',
       );
@@ -11067,6 +11086,11 @@ describe('production deposit policy cutovers', () => {
           digest(),
           digest(),
         ],
+      );
+      await postCutoverClient.query(
+        `grant execute on function app.record_receiver_sms_device_status_with_queue(
+           text,text,text,timestamptz,text,text,integer)
+         to fetanagent_receiver_sms_ingest`,
       );
       await postCutoverClient.query(
         'set session authorization fetanagent_receiver_sms_ingest_runtime',

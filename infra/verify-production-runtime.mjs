@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '8026a338741c6ff31651832a4aa3d36186d7fe3e'/gu)].length,
+  [...workflow.matchAll(/status '6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='8026a338741c6ff31651832a4aa3d36186d7fe3e'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2892,7 +2892,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='8026a338741c6ff31651832a4aa3d36186d7fe3e'",
   "readonly PREDECESSOR_SHA256='f071ce28f9ed7ed4777a094082f4d71b29dd0b165301344adf51e0503f61c652'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='f50db8285c9e60c8d14ec6158356ff3a3a52879f267b3da3da1d1dfce1ad4b60'",
   "readonly SOURCE_REVIEW='player-validation-fast-supersession-release-guard-v1'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
@@ -2905,7 +2905,7 @@ assert.doesNotMatch(playerValidationRotation, /\b(?:docker|psql|rm|sed|chmod|cho
 for (const value of [
   '8026a338741c6ff31651832a4aa3d36186d7fe3e',
   'f071ce28f9ed7ed4777a094082f4d71b29dd0b165301344adf51e0503f61c652',
-  helperDigest,
+  'f50db8285c9e60c8d14ec6158356ff3a3a52879f267b3da3da1d1dfce1ad4b60',
   'ROTATE EXACT PRODUCTION V2 PLAYER VALIDATION HELPER V1',
   '20261106005305_fast_player_validation_supersession.sql',
 ]) {
@@ -2915,6 +2915,27 @@ for (const source of [workflow, quality]) {
   assert.match(
     source,
     /bash -n infra\/operations\/fetanagent-production-v2-player-validation-helper-rotation-v1\.sh/u,
+  );
+}
+const receiverQueueRotation = await read(
+  'infra/operations/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'",
+  "readonly PREDECESSOR_SHA256='f50db8285c9e60c8d14ec6158356ff3a3a52879f267b3da3da1d1dfce1ad4b60'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 RECEIVER SMS OWNER QUEUE HELPER V1',
+]) {
+  assert.ok(receiverQueueRotation.includes(value));
+}
+assert.doesNotMatch(receiverQueueRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const source of [workflow, quality]) {
+  assert.match(
+    source,
+    /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1\.sh/u,
   );
 }
 assert.match(

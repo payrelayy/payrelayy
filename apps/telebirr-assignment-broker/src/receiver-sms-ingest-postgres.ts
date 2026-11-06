@@ -12,7 +12,9 @@ const RECORD_WITH_DISPLAY = `select app.record_receiver_sms_payment_event_with_d
   $1::text,$2::text,$3::text,$4::bigint,$5::timestamptz,$6::timestamptz,$7::timestamptz,
   $8::text,$9::text,$10::text,$11::text,$12::text,$13::integer,
   $14::text,$15::text) as status`;
-const RECORD_STATUS = `select app.record_receiver_sms_device_status_with_queue(
+const RECORD_STATUS = `select app.record_receiver_sms_device_status(
+  $1::text,$2::text,$3::text,$4::timestamptz,$5::text,$6::text) as recorded`;
+const RECORD_STATUS_WITH_QUEUE = `select app.record_receiver_sms_device_status_with_queue(
   $1::text,$2::text,$3::text,$4::timestamptz,$5::text,$6::text,$7::integer) as recorded`;
 
 function row(value: unknown): Record<string, unknown> | undefined {
@@ -98,15 +100,18 @@ export function createReceiverSmsIngestPostgresDatabase(
       return value.status;
     },
     async recordStatus(input: Parameters<ReceiverSmsIngestDatabase['recordStatus']>[0]) {
-      const result = await client.query(RECORD_STATUS, [
-        input.deviceId,
-        input.keyId,
-        input.state,
-        input.observedAt,
-        input.bodyDigest,
-        input.devicePublicKeySpkiSha256,
-        input.queuedSmsCount ?? null,
-      ]);
+      const result = await client.query(
+        input.queuedSmsCount === undefined ? RECORD_STATUS : RECORD_STATUS_WITH_QUEUE,
+        [
+          input.deviceId,
+          input.keyId,
+          input.state,
+          input.observedAt,
+          input.bodyDigest,
+          input.devicePublicKeySpkiSha256,
+          ...(input.queuedSmsCount === undefined ? [] : [input.queuedSmsCount]),
+        ],
+      );
       const value = result.rows.length === 1 ? row(result.rows[0]) : undefined;
       if (!value || Object.keys(value).length !== 1 || typeof value.recorded !== 'boolean')
         throw new Error();

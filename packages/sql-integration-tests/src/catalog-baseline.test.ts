@@ -10622,6 +10622,16 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [receiverSmsQueueGrantHoldMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, receiverSmsQueueGrantActivateMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [receiverSmsQueueGrantActivateMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -11032,6 +11042,11 @@ describe('production deposit policy cutovers', () => {
     expect(sql).not.toContain('${');
     await postCutoverClient.query('begin');
     try {
+      await postCutoverClient.query(
+        `revoke execute on function app.record_receiver_sms_device_status_with_queue(
+           text,text,text,timestamptz,text,text,integer)
+         from fetanagent_receiver_sms_ingest`,
+      );
       const grant = await postCutoverClient.query<{ enabled: boolean }>(
         `select pg_catalog.has_function_privilege(
            'fetanagent_receiver_sms_ingest_runtime',

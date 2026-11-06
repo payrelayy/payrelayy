@@ -229,6 +229,7 @@ const receiverSmsOwnerQueueCountMigrationName =
 const receiverSmsQueueGrantHoldMigrationName = '20261106195223_receiver_sms_queue_grant_hold.sql';
 const receiverSmsQueueGrantActivateMigrationName =
   '20261106201907_receiver_sms_queue_grant_activate.sql';
+const ownerSmsNewestFirstMigrationName = '20261106204500_owner_sms_inbox_newest_first.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -732,7 +733,8 @@ describe('disposable SQL migration baseline', () => {
         name !== fastPlayerValidationMigrationName &&
         name !== receiverSmsOwnerQueueCountMigrationName &&
         name !== receiverSmsQueueGrantHoldMigrationName &&
-        name !== receiverSmsQueueGrantActivateMigrationName,
+        name !== receiverSmsQueueGrantActivateMigrationName &&
+        name !== ownerSmsNewestFirstMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10631,6 +10633,16 @@ describe('production deposit policy cutovers', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [receiverSmsQueueGrantActivateMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerSmsNewestFirstMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerSmsNewestFirstMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(

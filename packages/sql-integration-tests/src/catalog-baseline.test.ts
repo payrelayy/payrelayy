@@ -73,6 +73,7 @@ import {
   registerOwnerStoppedPreActionCreditSqlTests,
   registerPostCutoverReceiverSmsRangeSqlTests,
   registerReceiverSmsPaymentLedgerSqlTests,
+  registerReceiverSmsSettlementRetrySqlTests,
 } from './receiver-sms-payment-ledger.suite.js';
 
 type RoleRow = {
@@ -11329,6 +11330,10 @@ describe('production deposit policy cutovers', () => {
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
+  registerReceiverSmsSettlementRetrySqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
   );

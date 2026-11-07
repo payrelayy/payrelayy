@@ -224,8 +224,7 @@ begin
       raise exception 'Owner SMS status projection changed: %',v_row.signature;
     end if;
     v_definition := pg_catalog.replace(v_definition,v_old,v_new);
-    v_old := $old$or (candidate.id is not null
-        and coalesce(intent.status in ('rejected','cancelled'),false)$old$;
+    v_old := $old$or (candidate.id is not null$old$;
     v_new := $new$or (candidate.id is not null and evidence.id is null
         and exists (select 1 from app.receiver_sms_settlement_holds held
           where held.candidate_id = candidate.id
@@ -234,8 +233,7 @@ begin
           where opening.candidate_id = candidate.id)
         and not exists (select 1 from app.receiver_sms_settlement_lineages lineage_check
           where lineage_check.candidate_id = candidate.id))
-      or (candidate.id is not null
-        and coalesce(intent.status in ('rejected','cancelled'),false)$new$;
+      or (candidate.id is not null$new$;
     if (pg_catalog.length(v_definition) - pg_catalog.length(
         pg_catalog.replace(v_definition,v_old,''))) / pg_catalog.length(v_old) <> 1 then
       raise exception 'Owner SMS manual-credit guard changed: %',v_row.signature;

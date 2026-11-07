@@ -1380,49 +1380,6 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
-    it('holds a matched SMS when financial gates are not live, with no claim or job', async () => {
-      const client = getClient();
-      await client.query('begin');
-      try {
-        await client.query(
-          `update app.receiver_sms_route_control set enabled = true,
-            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
-            where singleton`,
-        );
-        const fingerprint = hexDigest();
-        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
-        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
-        const first = await client.query<{ outcome: string }>(
-          `select app.settle_next_receiver_sms_match() as outcome`,
-        );
-        expect(first.rows).toEqual([{ outcome: 'held_review' }]);
-        const snapshot = await client.query<{
-          holds: string;
-          lineages: string;
-          claims: string;
-          jobs: string;
-        }>(
-          `select
-            (select count(*)::text from app.receiver_sms_settlement_holds
-              where candidate_id=$1::uuid) as holds,
-            (select count(*)::text from app.receiver_sms_settlement_lineages
-              where candidate_id=$1::uuid) as lineages,
-            (select count(*)::text from app.deposit_payment_claims claim
-              join app.receiver_sms_intent_openings opening
-                on opening.deposit_intent_id=claim.deposit_intent_id
-              where opening.candidate_id=$1::uuid) as claims,
-            (select count(*)::text from app.deposit_jobs job
-              join app.receiver_sms_intent_openings opening
-                on opening.deposit_intent_id=job.deposit_intent_id
-              where opening.candidate_id=$1::uuid) as jobs`,
-          [candidate],
-        );
-        expect(snapshot.rows).toEqual([{ holds: '1', lineages: '0', claims: '0', jobs: '0' }]);
-      } finally {
-        await client.query('rollback');
-      }
-    });
-
     it('resumes at a fresh cutoff without holding or crediting old submissions', async () => {
       const client = getClient();
       await client.query('begin');
@@ -2757,6 +2714,191 @@ export function registerExpiredReceiverSmsQueueOwnerHandoffSqlTests(
         ).toEqual([{ status: 'rejected', attempts: '0' }]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+  });
+}
+
+export function registerReceiverSmsSettlementRetrySqlTests(
+  getClient: () => Client,
+  getOwner: () => string,
+): void {
+  describe('receiver SMS settlement retries', () => {
+    it('retries a rolled-back preflight, then offers a safe Owner manual credit', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const first = await client.query<{ outcome: string }>(
+          `select app.settle_next_receiver_sms_match() as outcome`,
+        );
+        expect(first.rows).toEqual([{ outcome: 'empty' }]);
+        const firstFailure = await client.query<{
+          attempt_count: number;
+          last_sqlstate: string;
+          last_category: string;
+        }>(
+          `select attempt_count,last_sqlstate,last_category
+            from app.receiver_sms_settlement_retries where candidate_id=$1::uuid`,
+          [candidate],
+        );
+        expect(firstFailure.rows).toEqual([
+          {
+            attempt_count: 1,
+            last_sqlstate: 'P0001',
+            last_category: 'sms_eligibility',
+          },
+        ]);
+        for (const outcome of ['empty', 'held_review']) {
+          await client.query(
+            `update app.receiver_sms_settlement_retries
+              set next_attempt_at=pg_catalog.clock_timestamp()-interval '1 second'
+              where candidate_id=$1::uuid`,
+            [candidate],
+          );
+          const retried = await client.query<{ outcome: string }>(
+            `select app.settle_next_receiver_sms_match() as outcome`,
+          );
+          expect(retried.rows).toEqual([{ outcome }]);
+        }
+        const snapshot = await client.query<{
+          holds: string;
+          lineages: string;
+          claims: string;
+          jobs: string;
+        }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_holds
+              where candidate_id=$1::uuid) as holds,
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as lineages,
+            (select count(*)::text from app.deposit_payment_claims claim
+              join app.receiver_sms_intent_openings opening
+                on opening.deposit_intent_id=claim.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as claims,
+            (select count(*)::text from app.deposit_jobs job
+              join app.receiver_sms_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as jobs`,
+          [candidate],
+        );
+        expect(snapshot.rows).toEqual([{ holds: '1', lineages: '0', claims: '0', jobs: '0' }]);
+        const event = await client.query<{ id: string }>(
+          `select payment_event_id as id from app.receiver_sms_payment_matches
+            where candidate_id=$1::uuid`,
+          [candidate],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const inbox = await client.query<{
+          payment_status: string;
+          can_mark_manually_credited: boolean;
+        }>(
+          `select payment_status,can_mark_manually_credited
+            from app.list_owner_receiver_sms_inbox_filtered(
+              $1::uuid,'telebirr','all',null,null,null,50,0)
+            where candidate_id=$2::uuid`,
+          [getOwner(), candidate],
+        );
+        expect(inbox.rows).toEqual([
+          {
+            payment_status: 'pending_review',
+            can_mark_manually_credited: true,
+          },
+        ]);
+        const completed = await client.query<{ result: { status: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,null,$2::uuid,null,null,false,true) as result`,
+          [getOwner(), event.rows[0]!.id],
+        );
+        expect(completed.rows[0]?.result.status).toBe('manually_credited');
+        await client.query('reset session authorization');
+        const noAutomatic = await client.query<{ lineages: string; claims: string; jobs: string }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as lineages,
+            (select count(*)::text from app.deposit_payment_claims claim
+              join app.receiver_sms_intent_openings opening
+                on opening.deposit_intent_id=claim.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as claims,
+            (select count(*)::text from app.deposit_jobs job
+              join app.receiver_sms_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as jobs`,
+          [candidate],
+        );
+        expect(noAutomatic.rows).toEqual([{ lineages: '0', claims: '0', jobs: '0' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('recovers a matched SMS after a transient preflight failure without duplicating its job', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [candidate],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'empty' }]);
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_settlement_retries
+            set next_attempt_at=pg_catalog.clock_timestamp()-interval '1 second'
+            where candidate_id=$1::uuid`,
+          [candidate],
+        );
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'queued' }]);
+        const state = await client.query<{ holds: string; lineages: string; jobs: string }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_holds
+              where candidate_id=$1::uuid) as holds,
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as lineages,
+            (select count(*)::text from app.deposit_jobs job
+              join app.receiver_sms_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as jobs`,
+          [candidate],
+        );
+        expect(state.rows).toEqual([{ holds: '0', lineages: '1', jobs: '1' }]);
+      } finally {
         await client.query('rollback');
       }
     });

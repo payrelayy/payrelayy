@@ -73,6 +73,7 @@ import {
   registerOwnerStoppedPreActionCreditSqlTests,
   registerPostCutoverReceiverSmsRangeSqlTests,
   registerReceiverSmsPaymentLedgerSqlTests,
+  registerReceiverSmsSettlementRetrySqlTests,
 } from './receiver-sms-payment-ledger.suite.js';
 
 type RoleRow = {
@@ -232,6 +233,8 @@ const receiverSmsQueueGrantActivateMigrationName =
 const ownerSmsNewestFirstMigrationName = '20261106204500_owner_sms_inbox_newest_first.sql';
 const ownerApprovedHistoryReviewMigrationName =
   '20261106224959_owner_approved_history_review_reporting.sql';
+const receiverSmsSettlementRetryMigrationName =
+  '20261107183140_receiver_sms_settlement_retry_and_owner_review.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -737,7 +740,8 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSmsQueueGrantHoldMigrationName &&
         name !== receiverSmsQueueGrantActivateMigrationName &&
         name !== ownerSmsNewestFirstMigrationName &&
-        name !== ownerApprovedHistoryReviewMigrationName,
+        name !== ownerApprovedHistoryReviewMigrationName &&
+        name !== receiverSmsSettlementRetryMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10657,6 +10661,16 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerApprovedHistoryReviewMigrationName],
     );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, receiverSmsSettlementRetryMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [receiverSmsSettlementRetryMigrationName],
+    );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -11316,6 +11330,10 @@ describe('production deposit policy cutovers', () => {
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(
+    () => postCutoverClient,
+    () => ownerAuthUserId,
+  );
+  registerReceiverSmsSettlementRetrySqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,
   );

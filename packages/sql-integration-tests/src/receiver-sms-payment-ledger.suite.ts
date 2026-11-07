@@ -2852,6 +2852,13 @@ export function registerReceiverSmsSettlementRetrySqlTests(
         );
         const fingerprint = hexDigest();
         const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [candidate],
+        );
         await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
         expect(
           (

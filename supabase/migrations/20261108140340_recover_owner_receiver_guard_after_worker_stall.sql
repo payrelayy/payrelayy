@@ -24,12 +24,12 @@ begin
         and p.proowner = 'postgres'::pg_catalog.regrole and p.prosecdef
         and p.proconfig = array['search_path=pg_catalog']::text[]
       from pg_catalog.pg_proc p
-      where p.oid = 'app.owner_provider_deposit_transition_readiness(text)'::pg_catalog.regprocedure)
+      where p.oid = pg_catalog.to_regprocedure('app.owner_provider_deposit_transition_readiness(text)'))
       and (select pg_catalog.md5(p.prosrc) = 'f26104961107b07a5451e5b5c475db4c'
         and p.proowner = 'postgres'::pg_catalog.regrole and p.prosecdef
         and p.proconfig = array['search_path=pg_catalog']::text[]
       from pg_catalog.pg_proc p
-      where p.oid = 'app.require_owner_provider_deposit_transition_enabled(uuid)'::pg_catalog.regprocedure)
+      where p.oid = pg_catalog.to_regprocedure('app.require_owner_provider_deposit_transition_enabled(uuid)'))
   then
     return;
   end if;

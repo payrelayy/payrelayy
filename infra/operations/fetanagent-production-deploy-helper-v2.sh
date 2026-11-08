@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_GUARDED_PREDECESSOR_SHA='6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'
+readonly CBE_GUARDED_PREDECESSOR_SHA='f1002058b451cba0dfd4f43cb016bb1b1ca0587e'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -766,6 +766,34 @@ negative_companion_public_smoke() {
     die 'the production routine-deposit route did not match its guarded deployment state'
 }
 
+# The exact running predecessor has a three-second Docker API probe even though
+# its authenticated catalog readiness can take longer. Accept only that known
+# timeout, with a fresh bounded HTTP 200; all successor services still need
+# Docker's normal healthy state.
+predecessor_api_timeout_only() {
+  local sha="$1" id="$2" inspection probe
+  [[ "$sha" == "$CBE_GUARDED_PREDECESSOR_SHA" ]] || return 1
+  inspection="$(docker inspect "$id")" || return 1
+  probe="fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  jq -e --arg sha "$sha" --arg probe "$probe" '
+    length == 1 and
+    .[0].Config.Labels["com.docker.compose.project"] == "fetanagent-production" and
+    .[0].Config.Labels["com.docker.compose.service"] == "api" and
+    .[0].Config.Labels["org.opencontainers.image.revision"] == $sha and
+    .[0].State.Status == "running" and
+    .[0].State.Health.Status == "unhealthy" and
+    .[0].State.Health.FailingStreak >= 4 and
+    .[0].Config.Healthcheck.Timeout == 3000000000 and
+    .[0].Config.Healthcheck.Test == ["CMD", "node", "-e", $probe] and
+    (.[0].State.Health.Log | length) >= 4 and
+    (.[0].State.Health.Log[-4:] | all(.[];
+      .ExitCode == -1 and .Output == "Health check exceeded timeout (3s)"))
+  ' <<<"$inspection" >/dev/null || return 1
+  timeout 12s docker exec "$id" node -e \
+    "fetch('http://127.0.0.1:3000/readyz',{signal:AbortSignal.timeout(9000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" \
+    >/dev/null 2>&1
+}
+
 rollback_transition() {
   local sha="$1" release="$2" previous=''
   validate_rollback_transition "$sha" "$release"
@@ -1183,8 +1211,10 @@ case "${1:-}" in
     for service in "${services[@]}"; do
       id="$(container_for "$PROJECT_NAME" "$service")"
       container_running "$id" || die "$service is not running"
-      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$id")" == 'healthy' ]] ||
-        die "$service is not healthy"
+      if [[ "$(docker inspect --format '{{.State.Health.Status}}' "$id")" != 'healthy' ]]; then
+        [[ "$service" == 'api' ]] && predecessor_api_timeout_only "$sha" "$id" ||
+          die "$service is not healthy"
+      fi
       [[ "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" == "$sha" ]] ||
         die "$service revision is wrong"
     done

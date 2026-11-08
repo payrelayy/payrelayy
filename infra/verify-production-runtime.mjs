@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'/gu)].length,
+  [...workflow.matchAll(/status 'f1002058b451cba0dfd4f43cb016bb1b1ca0587e'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='f1002058b451cba0dfd4f43cb016bb1b1ca0587e'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2924,7 +2924,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='6c7bf1b1445d17e7279dc5c51086a5fd0df62f1a'",
   "readonly PREDECESSOR_SHA256='f50db8285c9e60c8d14ec6158356ff3a3a52879f267b3da3da1d1dfce1ad4b60'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='494ee66460c232969359fc7ba652b67fd589a0851ecb2feb8ea85b6fdf01594b'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 RECEIVER SMS OWNER QUEUE HELPER V1',
@@ -2938,6 +2938,28 @@ for (const source of [workflow, quality]) {
     /bash -n infra\/operations\/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1\.sh/u,
   );
 }
+const apiHealthRotation = await read(
+  'infra/operations/fetanagent-production-v2-api-healthcheck-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='f1002058b451cba0dfd4f43cb016bb1b1ca0587e'",
+  "readonly PREDECESSOR_SHA256='494ee66460c232969359fc7ba652b67fd589a0851ecb2feb8ea85b6fdf01594b'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_predecessor_status',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 API HEALTHCHECK HELPER V1',
+]) {
+  assert.ok(apiHealthRotation.includes(value));
+}
+assert.match(helper, /predecessor_api_timeout_only\(\)/u);
+assert.match(helper, /\.Config\.Healthcheck\.Timeout == 3000000000/u);
+assert.match(helper, /timeout 12s docker exec "\$id" node -e/u);
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-api-healthcheck-helper-rotation-v1\.sh/u,
+);
+assert.match(quality, /bash infra\/operations\/test-production-api-healthcheck-handoff\.sh/u);
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,

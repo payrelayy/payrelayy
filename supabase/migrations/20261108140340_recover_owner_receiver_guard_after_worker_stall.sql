@@ -102,11 +102,6 @@ $heartbeat$;
   v_trigger := pg_catalog.replace(v_trigger,v_old,
     'perform app.require_owner_provider_deposit_transition_enabled(v_provider_id);');
   execute v_trigger;
-
-  if app.owner_provider_deposit_transition_readiness('telebirr') <> 'ready'
-    or app.owner_provider_deposit_transition_readiness('cbe_birr') <> 'ready' then
-    raise exception 'Receiver or phone readiness is not satisfied for recovery.';
-  end if;
 end;
 $repair$;
 

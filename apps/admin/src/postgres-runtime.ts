@@ -130,8 +130,8 @@ export function ownerControlPoolConfig(
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,
-    // The role has one database slot. Supavisor session mode may retain that
-    // slot briefly after a client disconnects, so reuse the same client.
+    // Keep one active client even when the role has a second slot for a
+    // replacement Supavisor session during a connection handoff.
     idleTimeoutMillis: 0,
     idle_in_transaction_session_timeout: 5_000,
     lock_timeout: 1_000,
@@ -166,7 +166,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         and not role.rolcreaterole
         and not role.rolreplication
         and not role.rolbypassrls
-        and role.rolconnlimit = 1
+        and role.rolconnlimit between 1 and 2
     ) as runtime_role_is_narrow,
     (
       select count(*) = 1

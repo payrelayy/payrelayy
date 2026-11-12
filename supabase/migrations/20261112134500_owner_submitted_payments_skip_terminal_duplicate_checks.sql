@@ -19,6 +19,9 @@ declare
           else app.receiver_sms_duplicate_state(candidate.id)
         end as duplicate_state,$replacement$;
 begin
+  if pg_catalog.strpos(v_definition,v_new) > 0 then
+    return;
+  end if;
   if v_definition is null
     or (pg_catalog.length(v_definition) -
       pg_catalog.length(pg_catalog.replace(v_definition,v_old,'')))

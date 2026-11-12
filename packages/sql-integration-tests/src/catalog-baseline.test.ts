@@ -237,6 +237,8 @@ const receiverSmsSettlementRetryMigrationName =
   '20261107183140_receiver_sms_settlement_retry_and_owner_review.sql';
 const ownerReceiverGuardRecoveryMigrationName =
   '20261108140340_recover_owner_receiver_guard_after_worker_stall.sql';
+const ownerSubmittedPaymentsFastMigrationName =
+  '20261112134500_owner_submitted_payments_skip_terminal_duplicate_checks.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -744,7 +746,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerSmsNewestFirstMigrationName &&
         name !== ownerApprovedHistoryReviewMigrationName &&
         name !== receiverSmsSettlementRetryMigrationName &&
-        name !== ownerReceiverGuardRecoveryMigrationName,
+        name !== ownerReceiverGuardRecoveryMigrationName &&
+        name !== ownerSubmittedPaymentsFastMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10683,6 +10686,16 @@ describe('production deposit policy cutovers', () => {
     await postCutoverClient.query(
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerReceiverGuardRecoveryMigrationName],
+    );
+    await postCutoverClient.query(
+      await readFile(
+        join(environment.migrationsDirectory, ownerSubmittedPaymentsFastMigrationName),
+        'utf8',
+      ),
+    );
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [ownerSubmittedPaymentsFastMigrationName],
     );
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(

@@ -146,7 +146,7 @@ begin
   for expected in
     select * from (values
       ('fetanagent_customer_web', 'fetanagent_customer_web_runtime', 2),
-      ('fetanagent_owner_control', 'fetanagent_owner_control_runtime', 1),
+      ('fetanagent_owner_control', 'fetanagent_owner_control_runtime', 2),
       ('fetanagent_player_actions', 'fetanagent_player_actions_runtime', 2),
       ('fetanagent_telebirr_assignment_broker',
         'fetanagent_telebirr_assignment_broker_runtime', 1),

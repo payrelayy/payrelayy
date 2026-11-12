@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'f1002058b451cba0dfd4f43cb016bb1b1ca0587e'/gu)].length,
+  [...workflow.matchAll(/status '12947ddd49dd14b4e54720395ed9f1686f14ed77'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='f1002058b451cba0dfd4f43cb016bb1b1ca0587e'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='12947ddd49dd14b4e54720395ed9f1686f14ed77'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2945,7 +2945,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='f1002058b451cba0dfd4f43cb016bb1b1ca0587e'",
   "readonly PREDECESSOR_SHA256='494ee66460c232969359fc7ba652b67fd589a0851ecb2feb8ea85b6fdf01594b'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='c3262c332899a128840039e12c5e1b8f2c64df0df9ecec143ae137c85ff8a108'",
   'require_predecessor_status',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 API HEALTHCHECK HELPER V1',
@@ -2960,6 +2960,23 @@ assert.match(
   /bash -n infra\/operations\/fetanagent-production-v2-api-healthcheck-helper-rotation-v1\.sh/u,
 );
 assert.match(quality, /bash infra\/operations\/test-production-api-healthcheck-handoff\.sh/u);
+const ownerPaymentListRotation = await read(
+  'infra/operations/fetanagent-production-v2-owner-payment-list-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='12947ddd49dd14b4e54720395ed9f1686f14ed77'",
+  "readonly PREDECESSOR_SHA256='c3262c332899a128840039e12c5e1b8f2c64df0df9ecec143ae137c85ff8a108'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER PAYMENT LIST HELPER V1',
+]) {
+  assert.ok(ownerPaymentListRotation.includes(value));
+}
+assert.match(
+  quality,
+  /bash -n infra\/operations\/fetanagent-production-v2-owner-payment-list-helper-rotation-v1\.sh/u,
+);
 assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-companion-session-diagnostics-helper-rotation-v1\.sh/u,

@@ -125,6 +125,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-player-validation-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-receiver-sms-owner-queue-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-api-healthcheck-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-owner-payment-list-helper-rotation-v1.sh
           bash infra/operations/test-production-api-healthcheck-handoff.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh

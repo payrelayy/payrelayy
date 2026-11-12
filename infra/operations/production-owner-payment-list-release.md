@@ -7,15 +7,15 @@ running application was built before that role change, so the guarded release
 installs the already merged Owner startup preflight that accepts one or two
 sessions. This procedure does not change payment decisions or financial switches.
 
-| Guard | Exact value |
-| --- | --- |
-| Production project | `xzztugbgtulptnbpoelr` |
-| Production Droplet | `593344964` |
-| Running release and routine marker | `12947ddd49dd14b4e54720395ed9f1686f14ed77` |
-| Installed helper SHA-256 | `c3262c332899a128840039e12c5e1b8f2c64df0df9ecec143ae137c85ff8a108` |
-| Successor helper SHA-256 | `b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379` |
-| Rotation script | `infra/operations/fetanagent-production-v2-owner-payment-list-helper-rotation-v1.sh` |
-| Rotation phrase | `ROTATE EXACT PRODUCTION V2 OWNER PAYMENT LIST HELPER V1` |
+| Guard                              | Exact value                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------ |
+| Production project                 | `xzztugbgtulptnbpoelr`                                                               |
+| Production Droplet                 | `593344964`                                                                          |
+| Running release and routine marker | `12947ddd49dd14b4e54720395ed9f1686f14ed77`                                           |
+| Installed helper SHA-256           | `c3262c332899a128840039e12c5e1b8f2c64df0df9ecec143ae137c85ff8a108`                   |
+| Successor helper SHA-256           | `b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379`                   |
+| Rotation script                    | `infra/operations/fetanagent-production-v2-owner-payment-list-helper-rotation-v1.sh` |
+| Rotation phrase                    | `ROTATE EXACT PRODUCTION V2 OWNER PAYMENT LIST HELPER V1`                            |
 
 1. Require passing PR and exact main CI. Verify the current release, routine
    marker, helper digest, Owner runtime role limit of two, CBE live financial

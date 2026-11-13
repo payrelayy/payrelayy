@@ -6,13 +6,13 @@ the successful 2026-11-12 release. This root-only, one-use rotation changes only
 the checksum-pinned deploy helper and its sudoers grant. It does not restart a
 container, update a payment switch, or move money.
 
-| Reviewed item | Exact value |
-| --- | --- |
-| Droplet ID | `593344964` |
-| Running release and routine marker | `babb5169935e420d1b191420b604210423cb729d` |
-| Installed helper SHA-256 | `b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379` |
-| Successor helper SHA-256 | `a21c3838aef57cfa296a4fe3fb255bd288b90cb559ba100690644518bcac8b1a` |
-| Rotation script | `infra/operations/fetanagent-production-v2-screenshot-sms-guard-rotation-v1.sh` |
+| Reviewed item                      | Exact value                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------- |
+| Droplet ID                         | `593344964`                                                                     |
+| Running release and routine marker | `babb5169935e420d1b191420b604210423cb729d`                                      |
+| Installed helper SHA-256           | `b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379`              |
+| Successor helper SHA-256           | `a21c3838aef57cfa296a4fe3fb255bd288b90cb559ba100690644518bcac8b1a`              |
+| Rotation script                    | `infra/operations/fetanagent-production-v2-screenshot-sms-guard-rotation-v1.sh` |
 
 After the exact main commit passes CI, verify the Droplet ID, current release,
 routine marker, and helper digest independently. Stage the exact merged-main

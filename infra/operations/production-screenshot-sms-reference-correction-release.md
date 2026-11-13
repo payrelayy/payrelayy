@@ -37,6 +37,20 @@ or writes a payment candidate.
    prove the one-SMS and independent-OCR conditions. Do not create a live
    deposit as a smoke test.
 
+## 2026-11-13 production handoff
+
+The screenshot probe creation and activation migrations reached production
+before the application cutover. The activation grant made the old API's exact
+function-surface preflight fail, so its `/readyz` returned HTTP 503. The
+`20261113233217` operational migration revoked only that optional probe grant;
+the old API returned HTTP 200. The checksum-pinned helper rotation and guarded
+application deployment then completed at main commit
+`d2d3064395b205e8cf3792f3167e0924f839d68c` with the payment switches
+unchanged. After the new API was healthy, `20261113233924` restored the grant.
+Both migrations are recorded here to keep fresh database replay and the hosted
+ledger aligned. The correction path is enabled; no live payment was created to
+test it.
+
 The probe adds one private lookup for ambiguous image references. It skips
 local OCR when there is no eligible SMS, uses no retry, and has a 1.5-second
 network limit. Typed references, PDFs, captions, and images without these

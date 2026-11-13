@@ -1,0 +1,5 @@
+-- Hosted production operational migration ledger marker.
+-- The reviewed Owner submitted-payments optimization was applied on the hosted
+-- project under this version. The replay-safe canonical migration at
+-- 20261112134500 applies the same function change on a fresh database and is
+-- an intentional no-op on the already-correct hosted project.

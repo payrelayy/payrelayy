@@ -112,6 +112,14 @@ Replay-safe canonical finalizers follow the runtime-retry foundation at versions
 database and safely validate an already-correct hosted database. This preserves both truthful hosted
 history and dependency-correct clean replay without migration-ledger repair.
 
+Production Owner recovery on 2026-11-12 recorded a one-time runtime credential
+handoff at hosted version `20261112132147`; its repository file is a comment-only
+ledger marker so a fresh database never receives that hosted credential. The
+Owner submitted-payments optimization was installed at hosted version
+`20261112133617`, also represented by a comment-only marker. The replay-safe
+canonical optimization at `20261112134500` applies the function change on a
+fresh database and returns without changes on the already-correct hosted one.
+
 ## First staging Owner
 
 The manual

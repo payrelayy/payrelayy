@@ -237,6 +237,10 @@ const receiverSmsSettlementRetryMigrationName =
   '20261107183140_receiver_sms_settlement_retry_and_owner_review.sql';
 const ownerReceiverGuardRecoveryMigrationName =
   '20261108140340_recover_owner_receiver_guard_after_worker_stall.sql';
+const productionOwnerRuntimeHandoffMarkerMigrationName =
+  '20261112132147_production_owner_runtime_connection_handoff_20261112.sql';
+const ownerSubmittedPaymentsHostedMarkerMigrationName =
+  '20261112133617_owner_submitted_payments_skip_terminal_duplicate_checks_20261112.sql';
 const ownerSubmittedPaymentsFastMigrationName =
   '20261112134500_owner_submitted_payments_skip_terminal_duplicate_checks.sql';
 const ownerHistoryManualCreditStatusMigrationName =
@@ -753,6 +757,8 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerApprovedHistoryReviewMigrationName &&
         name !== receiverSmsSettlementRetryMigrationName &&
         name !== ownerReceiverGuardRecoveryMigrationName &&
+        name !== productionOwnerRuntimeHandoffMarkerMigrationName &&
+        name !== ownerSubmittedPaymentsHostedMarkerMigrationName &&
         name !== ownerSubmittedPaymentsFastMigrationName &&
         name !== ownerHistoryManualCreditStatusMigrationName &&
         name !== screenshotReferenceProbeMigrationName &&
@@ -10696,6 +10702,18 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerReceiverGuardRecoveryMigrationName],
     );
+    for (const migrationName of [
+      productionOwnerRuntimeHandoffMarkerMigrationName,
+      ownerSubmittedPaymentsHostedMarkerMigrationName,
+    ]) {
+      await postCutoverClient.query(
+        await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
+      );
+      await postCutoverClient.query(
+        'insert into sql_integration.applied_migrations (filename) values ($1)',
+        [migrationName],
+      );
+    }
     await postCutoverClient.query(
       await readFile(
         join(environment.migrationsDirectory, ownerSubmittedPaymentsFastMigrationName),

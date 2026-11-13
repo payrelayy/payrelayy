@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '12947ddd49dd14b4e54720395ed9f1686f14ed77'/gu)].length,
+  [...workflow.matchAll(/status 'babb5169935e420d1b191420b604210423cb729d'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='12947ddd49dd14b4e54720395ed9f1686f14ed77'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='babb5169935e420d1b191420b604210423cb729d'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2967,11 +2967,32 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='12947ddd49dd14b4e54720395ed9f1686f14ed77'",
   "readonly PREDECESSOR_SHA256='c3262c332899a128840039e12c5e1b8f2c64df0df9ecec143ae137c85ff8a108'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379'",
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 OWNER PAYMENT LIST HELPER V1',
 ]) {
   assert.ok(ownerPaymentListRotation.includes(value));
+}
+const screenshotSmsGuardRotation = await read(
+  'infra/operations/fetanagent-production-v2-screenshot-sms-guard-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='babb5169935e420d1b191420b604210423cb729d'",
+  "readonly PREDECESSOR_SHA256='b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 SCREENSHOT SMS GUARD HELPER V1',
+]) {
+  assert.ok(screenshotSmsGuardRotation.includes(value));
+}
+for (const marker of [
+  '20261112132147_production_owner_runtime_connection_handoff_20261112.sql',
+  '20261112133617_owner_submitted_payments_skip_terminal_duplicate_checks_20261112.sql',
+]) {
+  const body = await read(`supabase/migrations/${marker}`);
+  assert.match(body, /^-- Hosted production operational migration ledger marker\./u);
+  assert.doesNotMatch(body, /^(?!\s*(?:--|$)).+$/gmu);
 }
 assert.match(
   quality,

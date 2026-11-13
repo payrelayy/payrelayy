@@ -1,0 +1,5 @@
+-- Hosted production operational migration ledger marker.
+-- The 2026-11-12 Owner runtime credential handoff was applied directly on the
+-- hosted project under this version. It must not replay a production credential
+-- or its lifetime on a fresh database. The canonical runtime role setup is
+-- maintained by its own migrations and guarded production release workflow.

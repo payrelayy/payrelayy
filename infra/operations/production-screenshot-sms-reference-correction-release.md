@@ -12,13 +12,20 @@ or writes a payment candidate.
 
 1. Review the exact main commit and pass its application and SQL integration
    checks. Keep the existing payment switches and Companion settings unchanged.
+   The guarded release must first refresh its exact predecessor to the currently
+   running `babb5169935e420d1b191420b604210423cb729d` release using the
+   [checksum-pinned screenshot SMS guard helper rotation](production-v2-screenshot-sms-guard-rotation-v1.md). Its inspect and rotate
+   steps must confirm that no running container or payment setting changed.
 2. Deploy that application commit first. The two receiver SMS production
    overlays enable the bot correction. Before the database migration, the new
    API returns no correction for an absent function or grant, so image
    submissions continue through the original path.
-3. After every old API instance has stopped, review the production migration
-   dry run for any other pending changes, then apply the reviewed set. These
-   two migrations must run in order:
+3. After every old API instance has stopped, compare the hosted migration
+   ledger with the repository and review the production migration dry run. The
+   hosted 2026-11-12 operational entries have comment-only markers; the
+   replay-safe `20261112134500` Owner list optimization is also pending locally
+   and must return without changes on the already-correct production function.
+   Then these two screenshot migrations must run in order:
    `20261113223425_receiver_sms_screenshot_reference_probe.sql` creates the
    ungranted function, then
    `20261113223625_receiver_sms_screenshot_reference_probe_activate.sql`

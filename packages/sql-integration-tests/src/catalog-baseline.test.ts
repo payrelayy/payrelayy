@@ -249,6 +249,10 @@ const screenshotReferenceProbeMigrationName =
   '20261113223425_receiver_sms_screenshot_reference_probe.sql';
 const screenshotReferenceProbeGrantMigrationName =
   '20261113223625_receiver_sms_screenshot_reference_probe_activate.sql';
+const screenshotProbeGrantPauseMigrationName =
+  '20261113233217_pause_screenshot_probe_grant_for_api_handoff_20261114.sql';
+const screenshotProbeGrantRestoreMigrationName =
+  '20261113233924_restore_screenshot_probe_grant_after_api_handoff_20261114.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -762,7 +766,9 @@ describe('disposable SQL migration baseline', () => {
         name !== ownerSubmittedPaymentsFastMigrationName &&
         name !== ownerHistoryManualCreditStatusMigrationName &&
         name !== screenshotReferenceProbeMigrationName &&
-        name !== screenshotReferenceProbeGrantMigrationName,
+        name !== screenshotReferenceProbeGrantMigrationName &&
+        name !== screenshotProbeGrantPauseMigrationName &&
+        name !== screenshotProbeGrantRestoreMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10737,6 +10743,8 @@ describe('production deposit policy cutovers', () => {
     for (const migrationName of [
       screenshotReferenceProbeMigrationName,
       screenshotReferenceProbeGrantMigrationName,
+      screenshotProbeGrantPauseMigrationName,
+      screenshotProbeGrantRestoreMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -10745,7 +10753,23 @@ describe('production deposit policy cutovers', () => {
         'insert into sql_integration.applied_migrations (filename) values ($1)',
         [migrationName],
       );
+      if (migrationName === screenshotProbeGrantPauseMigrationName) {
+        const paused = await postCutoverClient.query<{ runtime_allowed: boolean }>(
+          `select pg_catalog.has_function_privilege(
+            'fetanagent_player_actions_runtime',
+            'app.probe_receiver_sms_screenshot_reference(text,text[])', 'EXECUTE')
+            as runtime_allowed`,
+        );
+        expect(paused.rows).toEqual([{ runtime_allowed: false }]);
+      }
     }
+    const screenshotProbeGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
+      `select pg_catalog.has_function_privilege(
+        'fetanagent_player_actions_runtime',
+        'app.probe_receiver_sms_screenshot_reference(text,text[])', 'EXECUTE')
+        as runtime_allowed`,
+    );
+    expect(screenshotProbeGrant.rows).toEqual([{ runtime_allowed: true }]);
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',

@@ -93,6 +93,24 @@ describe('Screenshot reference reader configuration', () => {
       }),
     ).toThrow('Screenshot reference reading requires the live receiver SMS candidate route.');
   });
+
+  it('keeps SMS correction off until the image reader and route are enabled', () => {
+    expect(loadBotConfig(enabledBot).screenshotReferenceSmsCorrectionEnabled).toBe(false);
+    expect(() =>
+      loadBotConfig({
+        ...enabledBot,
+        BOT_SCREENSHOT_REFERENCE_SMS_CORRECTION_ENABLED: 'true',
+      }),
+    ).toThrow('Screenshot SMS correction requires the live image reader and SMS route.');
+    const config = loadBotConfig({
+      ...enabledBot,
+      BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true',
+      BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY: 'synthetic-model-key',
+      BOT_SCREENSHOT_REFERENCE_SMS_CORRECTION_ENABLED: 'true',
+    });
+    expect(config.screenshotReferenceSmsCorrectionEnabled).toBe(true);
+    expect(redactedBotConfigForLog(config).screenshotReferenceSmsCorrectionEnabled).toBe(true);
+  });
 });
 
 afterEach(() => {

@@ -82,6 +82,7 @@ export function presentTelegramPlayerIdFlowResult(
     case 'deposit_outcome_none':
     case 'deposit_outcome_delivery':
     case 'deposit_outcome_completed':
+    case 'receiver_sms_screenshot_reference_probe':
     case 'player_validation_outcome_none':
     case 'player_validation_outcome_delivery':
     case 'player_validation_outcome_completed':
@@ -94,9 +95,7 @@ export function presentTelegramPlayerIdFlowResult(
     case 'payment_instruction_expiry_none':
     case 'payment_instruction_expiry_delivery':
     case 'payment_instruction_expiry_completed':
-      throw new Error(
-        'A bot-only notification operation cannot be presented as a customer action.',
-      );
+      throw new Error('A bot-only operation cannot be presented as a customer action.');
     case 'player_validation_queued':
       return {
         kind: 'message',

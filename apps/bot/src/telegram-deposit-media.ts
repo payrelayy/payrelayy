@@ -94,6 +94,11 @@ export interface TelegramProofMediaDependencies {
   readonly token: string;
   readonly fetch?: typeof fetch;
   readonly recognize?: (bytes: Buffer, kind: TelegramProofMedia['kind']) => Promise<string>;
+  readonly review?: (
+    bytes: Buffer,
+    kind: TelegramProofMedia['kind'],
+    recognizedText: string,
+  ) => Promise<string>;
 }
 
 export type TelegramProofMediaResult =
@@ -325,8 +330,15 @@ export async function extractTelegramProofMediaText(
     const bytes = await downloadTelegramFile(media, dependencies);
     if (bytes === 'too_large') return { kind: 'too_large' };
     if (!hasMediaSignature(bytes, media.kind)) return { kind: 'unreadable' };
-    const text = await (dependencies.recognize ?? recognizeTelegramProofMedia)(bytes, media.kind);
-    return { kind: 'text', text: boundedExtractedText(text) };
+    const text = boundedExtractedText(
+      await (dependencies.recognize ?? recognizeTelegramProofMedia)(bytes, media.kind),
+    );
+    return {
+      kind: 'text',
+      text: boundedExtractedText(
+        dependencies.review ? await dependencies.review(bytes, media.kind, text) : text,
+      ),
+    };
   } catch (error) {
     return { kind: error instanceof UnreadableTelegramProof ? 'unreadable' : 'unavailable' };
   } finally {

@@ -101,6 +101,13 @@ export type TelegramPrivateActionEnvelope =
     }
   | {
       readonly version: 1;
+      /** Read-only, bot-only check before an image reference becomes an immutable submission. */
+      readonly kind: 'receiver_sms_screenshot_reference_probe';
+      readonly providerCode: DepositProofProviderCode;
+      readonly transactionReference: string;
+    }
+  | {
+      readonly version: 1;
       readonly kind: 'deposit_outcome_complete';
       readonly notificationId: string;
       readonly leaseToken: string;
@@ -270,6 +277,12 @@ export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
       readonly outcome: 'deposit_outcome_none';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'receiver_sms_screenshot_reference_probe';
+      /** Zero-based index in screenshotReferenceVariants; null means keep the OCR reading. */
+      readonly correctionIndex: number | null;
     }
   | {
       readonly version: 1;

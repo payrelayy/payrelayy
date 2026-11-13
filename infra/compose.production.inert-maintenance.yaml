@@ -9,6 +9,7 @@ services:
   bot:
     environment:
       BOT_RECEIVER_SMS_CANDIDATE_ENABLED: 'true'
+      BOT_SCREENSHOT_REFERENCE_SMS_CORRECTION_ENABLED: 'true'
   telebirr-assignment-broker:
     environment: !override
       NODE_ENV: production

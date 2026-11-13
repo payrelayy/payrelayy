@@ -28,6 +28,7 @@ import { captureTelegramCbeBirrBoundProof } from './telegram-cbe-birr-bound-proo
 import { issueTelegramCbeBirrDryRunInstruction } from './telegram-cbe-birr-dry-run-instruction.js';
 import { captureTelegramRoutineTelebirrCandidate } from './telegram-routine-telebirr-candidate-intake.js';
 import { captureTelegramReceiverSmsCandidate } from './telegram-receiver-sms-candidate-intake.js';
+import { probeReceiverSmsScreenshotReference } from './telegram-receiver-sms-screenshot-reference-probe.js';
 import { captureTelegramLiveTelebirrProof } from './telegram-telebirr-live-proof-intake.js';
 import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
@@ -594,6 +595,7 @@ async function recordInbound(
     {
       readonly kind:
         | 'deposit_outcome_claim'
+        | 'receiver_sms_screenshot_reference_probe'
         | 'deposit_outcome_complete'
         | 'player_validation_outcome_claim'
         | 'player_validation_outcome_complete'
@@ -1636,6 +1638,9 @@ export function createPostgresTelegramPlayerActionRuntime(
     nonceStore,
     async handle(action, rawBody) {
       try {
+        if (action.kind === 'receiver_sms_screenshot_reference_probe') {
+          return await probeReceiverSmsScreenshotReference(pool, action, config);
+        }
         if (action.kind === 'deposit_outcome_claim') {
           return await handleDepositOutcomeClaim(pool);
         }

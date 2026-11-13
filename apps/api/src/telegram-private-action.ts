@@ -109,6 +109,12 @@ const SAVED_RECEIVER_SMS_PROOF_KEYS = new Set([
   'providerCode',
   'transactionReference',
 ]);
+const SCREENSHOT_REFERENCE_PROBE_KEYS = new Set([
+  'version',
+  'kind',
+  'providerCode',
+  'transactionReference',
+]);
 const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const TELEBIRR_DESTINATION_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
@@ -377,6 +383,25 @@ export function parseTelegramPrivateActionEnvelope(
         hasOnlyKeys(parsed, OUTCOME_CLAIM_KEYS)
         ? { version: 1, kind: 'deposit_outcome_claim' }
         : undefined;
+    case 'receiver_sms_screenshot_reference_probe': {
+      if (
+        parsed.version !== 1 ||
+        Object.keys(parsed).length !== SCREENSHOT_REFERENCE_PROBE_KEYS.size ||
+        !hasOnlyKeys(parsed, SCREENSHOT_REFERENCE_PROBE_KEYS) ||
+        (parsed.providerCode !== 'telebirr' && parsed.providerCode !== 'cbe_birr') ||
+        typeof parsed.transactionReference !== 'string' ||
+        !/^[A-Z0-9]{10,11}$/u.test(parsed.transactionReference) ||
+        !/[0-9]/u.test(parsed.transactionReference) ||
+        parsed.transactionReference.length !== (parsed.providerCode === 'telebirr' ? 10 : 11)
+      )
+        return undefined;
+      return {
+        version: 1,
+        kind: 'receiver_sms_screenshot_reference_probe',
+        providerCode: parsed.providerCode,
+        transactionReference: parsed.transactionReference,
+      };
+    }
     case 'deposit_outcome_complete':
       if (
         parsed.version !== 1 ||

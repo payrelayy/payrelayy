@@ -86,6 +86,14 @@ describe('Player-ID action catalog preflight', () => {
     expect(sql).toContain("where rolname = 'fetanagent_player_actions_runtime'");
   });
 
+  it('permits only the hardened optional screenshot probe during the staged API handoff', () => {
+    const sql = PLAYER_ACTION_RECEIVER_SMS_CATALOG_PREFLIGHT_SQL;
+    expect(sql).toContain('app.probe_receiver_sms_screenshot_reference(text,text[])');
+    expect(sql).toContain('routine.oid is distinct from pg_catalog.to_regprocedure(');
+    expect(sql).toContain("routine.proconfig <> array['search_path=pg_catalog, pg_temp']::text[]");
+    expect(sql).toContain("rolname = 'fetanagent_player_actions'");
+  });
+
   it('requires onboarding, proof, notification, and instruction functions in the exact 31-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',

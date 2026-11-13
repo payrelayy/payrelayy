@@ -479,6 +479,7 @@ describe('runtime configuration isolation', () => {
       playerValidationIntakeEnabled: false,
       receiverSmsCandidateEnabled: false,
       screenshotReferenceReader: { enabled: false, keyConfigured: false },
+      screenshotReferenceSmsCorrectionEnabled: false,
     });
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(token);
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(transportHmacSecret);

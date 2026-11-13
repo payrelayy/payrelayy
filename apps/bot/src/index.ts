@@ -16,6 +16,8 @@ import {
   readDigitalOceanScreenshotReference,
 } from './digitalocean-screenshot-reference.js';
 import { recognizeScreenshotReferenceWithFallback } from './telegram-screenshot-reference.js';
+import { correctScreenshotReferenceFromSms } from './telegram-screenshot-sms-correction.js';
+import { reduceTelegramAutoReceiverSmsProofInput } from './telegram-deposit-proof-input.js';
 import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
 import { recordTelegramPaymentInstruction } from './telegram-payment-instruction-expiry.js';
 import {
@@ -79,7 +81,10 @@ import {
   parseTelegramTelebirrPaymentPromptReply,
   telegramDepositInstructionEntities,
 } from './telegram-guided-deposit.js';
-import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
+import {
+  deliverTelegramPrivateAction,
+  deliverTelegramPrivateActionWithRetry,
+} from './telegram-private-action-client.js';
 import { renderTelegramOutcomeActions, type PrivateTelegramMenuButton } from './private-menu.js';
 import {
   TELEGRAM_PRIVATE_HOME_COMMANDS,
@@ -540,6 +545,33 @@ bot.on('message', async (context) => {
           token: telegramToken,
           getFile: (fileId) => bot.api.getFile(fileId),
           ...(screenshotRecognition ? { recognize: screenshotRecognition } : {}),
+          ...(config.screenshotReferenceSmsCorrectionEnabled &&
+          screenshotRecognition &&
+          !('caption' in context.message && context.message.caption?.trim())
+            ? {
+                review: async (
+                  bytes: Buffer,
+                  kind: 'photo' | 'image' | 'pdf',
+                  recognizedText: string,
+                ) => {
+                  if (kind === 'pdf') return recognizedText;
+                  const proof = reduceTelegramAutoReceiverSmsProofInput(recognizedText, 'ocr_text');
+                  if (proof.kind !== 'candidate') return recognizedText;
+                  const corrected = await correctScreenshotReferenceFromSms(
+                    proof,
+                    // This optional read-only check must not delay the ordinary submission
+                    // through the action client's retry path during an API outage.
+                    (probe) => deliverTelegramPrivateAction(probe, playerActions),
+                    async () => {
+                      const localText = await recognizeTelegramProofMedia(bytes, kind);
+                      const local = reduceTelegramAutoReceiverSmsProofInput(localText, 'ocr_text');
+                      return local.kind === 'candidate' ? local : null;
+                    },
+                  );
+                  return corrected === proof.transactionReference ? recognizedText : corrected;
+                },
+              }
+            : {}),
         });
       } catch {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);

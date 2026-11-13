@@ -42,6 +42,10 @@ const RECEIVER_SMS_CANDIDATE_FUNCTION =
 // The runtime grant is added after the replacement API is healthy. During the
 // handoff this one function may exist with or without that direct grant.
 const DUPLICATE_DISPOSITION_FUNCTION = 'app.telegram_receiver_sms_duplicate_state(uuid,uuid)';
+// This read-only function is staged without a grant, then granted after the new API
+// release is active. Both catalog states must pass during that handoff.
+const SCREENSHOT_REFERENCE_PROBE_FUNCTION =
+  'app.probe_receiver_sms_screenshot_reference(text,text[])';
 const CBE_BIRR_CANDIDATE_FUNCTIONS = [
   'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
   'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
@@ -139,6 +143,9 @@ function buildPlayerActionCatalogPreflightSql(
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
         and routine.oid not in (${allowedFunctionSql})
         and routine.oid <> pg_catalog.to_regprocedure('${DUPLICATE_DISPOSITION_FUNCTION}')
+        and routine.oid is distinct from pg_catalog.to_regprocedure(
+          '${SCREENSHOT_REFERENCE_PROBE_FUNCTION}'
+        )
     ) as exact_function_surface_allowed,
     (
       select count(*) = ${allowedFunctions.length} and pg_catalog.bool_and(
@@ -255,6 +262,27 @@ function buildPlayerActionCatalogPreflightSql(
               (select oid from pg_catalog.pg_roles where rolname = '${RUNTIME_ROLE}')
             )
         )
+    ) and not exists (
+      select 1
+      from pg_catalog.pg_proc as routine
+      join pg_catalog.pg_roles as owner on owner.oid = routine.proowner
+      where routine.oid = pg_catalog.to_regprocedure(
+        '${SCREENSHOT_REFERENCE_PROBE_FUNCTION}'
+      ) and (
+        not routine.prosecdef or routine.prokind <> 'f'
+        or routine.proconfig <> array['search_path=pg_catalog, pg_temp']::text[]
+        or owner.rolname <> 'postgres'
+        or exists (
+          select 1 from pg_catalog.aclexplode(
+            coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+          ) as privilege
+          where privilege.privilege_type = 'EXECUTE'
+            and privilege.grantee not in (
+              routine.proowner,
+              (select oid from pg_catalog.pg_roles where rolname = '${GROUP_ROLE}')
+            )
+        )
+      )
     ) as allowed_functions_execution_private,
     exists (
       select 1

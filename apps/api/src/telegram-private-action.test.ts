@@ -65,6 +65,33 @@ describe('bot-only deposit outcome actions', () => {
     }
   });
 });
+describe('bot-only screenshot reference probe', () => {
+  it('accepts one canonical provider reference and rejects extra or malformed input', () => {
+    const probe = {
+      version: 1,
+      kind: 'receiver_sms_screenshot_reference_probe',
+      providerCode: 'telebirr',
+      transactionReference: 'DK0S123456',
+    };
+    expect(parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(probe)))).toEqual(probe);
+    for (const invalid of [
+      { ...probe, telegramUserId: '42' },
+      { ...probe, transactionReference: 'dk0s123456' },
+      { ...probe, transactionReference: 'DK0S1234567' },
+      { ...probe, providerCode: 'unknown' },
+    ]) {
+      expect(
+        parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(invalid))),
+      ).toBeUndefined();
+    }
+    expect(redactTelegramPrivateActionForLog(probe as TelegramPrivateActionEnvelope)).toEqual({
+      version: 1,
+      kind: 'receiver_sms_screenshot_reference_probe',
+      preferredLocale: 'en',
+      customerInputPresent: true,
+    });
+  });
+});
 describe('bot-only Player validation outcome actions', () => {
   it('accepts only exact claim and lease-completion envelopes', () => {
     const claim = { version: 1, kind: 'player_validation_outcome_claim' };

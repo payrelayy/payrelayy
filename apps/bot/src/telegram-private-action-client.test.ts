@@ -27,6 +27,40 @@ const config = {
 };
 
 describe('Telegram private-action bot client', () => {
+  it('accepts only bounded screenshot correction indexes', async () => {
+    const probe: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'receiver_sms_screenshot_reference_probe',
+      providerCode: 'telebirr',
+      transactionReference: 'DK0S123456',
+    };
+    for (const correctionIndex of [null, 1, 15]) {
+      await expect(
+        deliverTelegramPrivateAction(probe, config, {
+          fetch: async () => ({
+            status: 200,
+            json: async () => ({
+              version: 1,
+              outcome: 'receiver_sms_screenshot_reference_probe',
+              correctionIndex,
+            }),
+          }),
+        }),
+      ).resolves.toMatchObject({ correctionIndex });
+    }
+    await expect(
+      deliverTelegramPrivateAction(probe, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({
+            version: 1,
+            outcome: 'receiver_sms_screenshot_reference_probe',
+            correctionIndex: 16,
+          }),
+        }),
+      }),
+    ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+  });
   it('accepts only ordered, internally consistent combined receiver details', async () => {
     const receiver = (providerCode: 'telebirr' | 'cbe_birr', receiverAccountReference: string) => ({
       providerCode,

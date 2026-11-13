@@ -70,6 +70,7 @@ export interface BotConfig extends RuntimeConfig {
   readonly playerValidationIntakeEnabled: boolean;
   readonly receiverSmsCandidateEnabled: boolean;
   readonly screenshotReferenceReader: BotScreenshotReferenceReaderConfig;
+  readonly screenshotReferenceSmsCorrectionEnabled: boolean;
   readonly supportContactUrl: string | undefined;
 }
 
@@ -370,6 +371,17 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     false,
     'BOT_SCREENSHOT_REFERENCE_READER_ENABLED',
   );
+  const screenshotReferenceSmsCorrectionEnabled = booleanFromEnv(
+    environment.BOT_SCREENSHOT_REFERENCE_SMS_CORRECTION_ENABLED,
+    false,
+    'BOT_SCREENSHOT_REFERENCE_SMS_CORRECTION_ENABLED',
+  );
+  if (
+    screenshotReferenceSmsCorrectionEnabled &&
+    (!enabled || !receiverSmsCandidateEnabled || !screenshotReferenceReaderEnabled)
+  ) {
+    throw new Error('Screenshot SMS correction requires the live image reader and SMS route.');
+  }
   if (screenshotReferenceReaderEnabled && (!enabled || !receiverSmsCandidateEnabled)) {
     throw new Error('Screenshot reference reading requires the live receiver SMS candidate route.');
   }
@@ -417,6 +429,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       playerValidationIntakeEnabled,
       receiverSmsCandidateEnabled,
       screenshotReferenceReader,
+      screenshotReferenceSmsCorrectionEnabled,
       supportContactUrl,
     };
   }
@@ -463,6 +476,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     playerValidationIntakeEnabled,
     receiverSmsCandidateEnabled,
     screenshotReferenceReader,
+    screenshotReferenceSmsCorrectionEnabled,
     supportContactUrl,
   };
 }
@@ -516,6 +530,7 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
     },
     playerValidationIntakeEnabled: config.playerValidationIntakeEnabled,
     receiverSmsCandidateEnabled: config.receiverSmsCandidateEnabled,
+    screenshotReferenceSmsCorrectionEnabled: config.screenshotReferenceSmsCorrectionEnabled,
     screenshotReferenceReader: {
       enabled: config.screenshotReferenceReader.enabled,
       keyConfigured: config.screenshotReferenceReader.enabled,

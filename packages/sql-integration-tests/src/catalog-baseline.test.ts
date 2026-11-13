@@ -241,6 +241,10 @@ const ownerSubmittedPaymentsFastMigrationName =
   '20261112134500_owner_submitted_payments_skip_terminal_duplicate_checks.sql';
 const ownerHistoryManualCreditStatusMigrationName =
   '20261113164718_owner_history_manual_credit_status.sql';
+const screenshotReferenceProbeMigrationName =
+  '20261113223425_receiver_sms_screenshot_reference_probe.sql';
+const screenshotReferenceProbeGrantMigrationName =
+  '20261113223625_receiver_sms_screenshot_reference_probe_activate.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -750,7 +754,9 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSmsSettlementRetryMigrationName &&
         name !== ownerReceiverGuardRecoveryMigrationName &&
         name !== ownerSubmittedPaymentsFastMigrationName &&
-        name !== ownerHistoryManualCreditStatusMigrationName,
+        name !== ownerHistoryManualCreditStatusMigrationName &&
+        name !== screenshotReferenceProbeMigrationName &&
+        name !== screenshotReferenceProbeGrantMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10710,6 +10716,18 @@ describe('production deposit policy cutovers', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [ownerHistoryManualCreditStatusMigrationName],
     );
+    for (const migrationName of [
+      screenshotReferenceProbeMigrationName,
+      screenshotReferenceProbeGrantMigrationName,
+    ]) {
+      await postCutoverClient.query(
+        await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
+      );
+      await postCutoverClient.query(
+        'insert into sql_integration.applied_migrations (filename) values ($1)',
+        [migrationName],
+      );
+    }
     const restoredGrant = await postCutoverClient.query<{ runtime_allowed: boolean }>(
       `select pg_catalog.has_function_privilege(
         'fetanagent_player_actions_runtime',
@@ -10732,6 +10750,57 @@ describe('production deposit policy cutovers', () => {
 
   afterAll(async () => {
     await postCutoverClient?.end();
+  });
+
+  it('corrects only one recent unused signed SMS reference without creating a payment claim', async () => {
+    const fingerprints = Array.from({ length: 3 }, () =>
+      randomUUID().replaceAll('-', '').repeat(2),
+    );
+    const lookup = async (): Promise<number | null> => {
+      await postCutoverClient.query('set local role fetanagent_player_actions_runtime');
+      try {
+        const result = await postCutoverClient.query<{ correction_index: number | null }>(
+          `select app.probe_receiver_sms_screenshot_reference(
+            'telebirr',$1::text[]) as correction_index`,
+          [fingerprints],
+        );
+        return result.rows[0]!.correction_index;
+      } finally {
+        await postCutoverClient.query('reset role');
+      }
+    };
+    await postCutoverClient.query('begin');
+    try {
+      const candidatesBefore = await postCutoverClient.query<{ count: string }>(
+        'select pg_catalog.count(*)::text as count from app.receiver_sms_deposit_candidates',
+      );
+      await postCutoverClient.query(`update app.receiver_sms_route_control
+        set enabled=true,cutover_at=pg_catalog.clock_timestamp()-interval '1 day'
+        where singleton`);
+      const now = new Date().toISOString();
+      await fixturePaymentEvent(postCutoverClient, fingerprints[1]!, now);
+      expect(await lookup()).toBe(1);
+      await fixturePaymentEvent(postCutoverClient, fingerprints[2]!, now);
+      expect(await lookup()).toBeNull();
+      await fixturePaymentEvent(postCutoverClient, fingerprints[0]!, now);
+      expect(await lookup()).toBeNull();
+      const candidates = await postCutoverClient.query<{ count: string }>(
+        'select pg_catalog.count(*)::text as count from app.receiver_sms_deposit_candidates',
+      );
+      expect(candidates.rows).toEqual(candidatesBefore.rows);
+      const access = await postCutoverClient.query<{
+        anonymous_denied: boolean;
+        no_base_read: boolean;
+      }>(
+        `select not pg_catalog.has_function_privilege('anon',
+          'app.probe_receiver_sms_screenshot_reference(text,text[])','EXECUTE') as anonymous_denied,
+          not pg_catalog.has_table_privilege('fetanagent_player_actions_runtime',
+          'app.receiver_sms_payment_events','SELECT') as no_base_read`,
+      );
+      expect(access.rows).toEqual([{ anonymous_denied: true, no_base_read: true }]);
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
   });
 
   registerReceiverSmsSimplePairingSqlTests(

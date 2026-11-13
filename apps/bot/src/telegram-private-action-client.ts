@@ -92,6 +92,17 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return undefined;
   const keys = Object.keys(value);
   if (
+    value.outcome === 'receiver_sms_screenshot_reference_probe' &&
+    keys.length === 3 &&
+    (value.correctionIndex === null ||
+      (typeof value.correctionIndex === 'number' &&
+        Number.isInteger(value.correctionIndex) &&
+        value.correctionIndex >= 1 &&
+        value.correctionIndex < 16))
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     (value.outcome === 'payment_instruction_recorded' ||
       value.outcome === 'payment_instruction_expiry_completed') &&
     keys.length === 3 &&
@@ -520,7 +531,9 @@ export async function deliverTelegramPrivateAction(
           ),
         },
         body: rawBody,
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(
+          action.kind === 'receiver_sms_screenshot_reference_probe' ? 1_500 : 5_000,
+        ),
       },
     );
   } catch {

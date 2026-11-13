@@ -610,6 +610,42 @@ describe('bot-only one-hour instruction expiry runtime', () => {
 });
 
 describe('Postgres Telegram Player-ID action runtime', () => {
+  it('probes screenshot SMS before creating any Telegram inbound event', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        return { rows: [{ correction_index: 1 }] };
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'receiver_sms_screenshot_reference_probe',
+      providerCode: 'telebirr',
+      transactionReference: 'DK0S123456',
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(
+        {
+          ...actionConfig,
+          financialActionsMode: 'live',
+          telegramPlayerActionRuntime: {
+            ...enabledActionRuntime,
+            deploymentTarget: 'production',
+            receiverSmsCandidateProductionEnabled: true,
+          },
+        },
+        database,
+      ).handle(action, Buffer.from(JSON.stringify(action))),
+    ).resolves.toMatchObject({
+      outcome: 'receiver_sms_screenshot_reference_probe',
+      correctionIndex: 1,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('probe_receiver_sms_screenshot_reference');
+  });
+
   it('publicly onboards the action update before issuing a deterministic non-financial menu', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];
     const database: TelegramPlayerActionDatabase = {

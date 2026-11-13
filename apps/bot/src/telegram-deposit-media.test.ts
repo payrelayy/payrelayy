@@ -147,6 +147,28 @@ describe('Telegram receipt media intake', () => {
     expect(result).toEqual({ kind: 'text', text: 'Transaction ID: SYNTB00000001\n' });
   });
 
+  it('reviews the same downloaded image before the reference becomes a submission', async () => {
+    const review = vi.fn(async (bytes: Buffer, kind: string, text: string) => {
+      expect(bytes).toEqual(image);
+      expect(kind).toBe('photo');
+      expect(text).toBe('Transaction ID: DK0S123456');
+      return 'DKOS123456';
+    });
+    await expect(
+      extractTelegramProofMediaText(
+        { kind: 'photo', fileId: 'file-id', fileSize: image.length },
+        {
+          token: 'synthetic-token',
+          getFile: async () => ({ file_path: 'photos/file.jpg' }),
+          fetch: async () => new Response(image),
+          recognize: async () => 'Transaction ID: DK0S123456',
+          review,
+        },
+      ),
+    ).resolves.toEqual({ kind: 'text', text: 'DKOS123456' });
+    expect(review).toHaveBeenCalledOnce();
+  });
+
   it('accepts signed-looking PDF bytes as extraction input but never as payment proof', async () => {
     const recognize = vi.fn(async () => 'Transaction ID: SYNTB00000001');
     const result = await extractTelegramProofMediaText(

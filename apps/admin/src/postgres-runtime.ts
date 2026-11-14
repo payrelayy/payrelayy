@@ -93,7 +93,9 @@ export interface OwnerControlPostgresRuntime {
       >
     >;
   readonly paymentMethods?: Pick<PostgresOwnerPaymentMethods, 'list' | 'set' | 'publicStatus'> &
-    Partial<Pick<PostgresOwnerPaymentMethods, 'availability' | 'setAvailability'>>;
+    Partial<
+      Pick<PostgresOwnerPaymentMethods, 'publicCatalog' | 'availability' | 'setAvailability'>
+    >;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
@@ -380,6 +382,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_provider_deposit_controls(uuid)', 'execute') as provider_controls_list_allowed,
     has_function_privilege(current_user, 'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)', 'execute') as provider_controls_set_allowed,
     has_function_privilege(current_user, 'app.public_provider_deposit_controls()', 'execute') as provider_controls_public_allowed,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.public_deposit_registry()')::oid, 'execute'), true)
+      as public_deposit_registry_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_deposit_availability(uuid)')::oid, 'execute'), true) as deposit_availability_get_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)')::oid, 'execute'), true) as deposit_availability_set_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false) as cbe_birr_receiver_v2_rotate_allowed,
@@ -503,6 +508,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)') is not null)::integer
         + (to_regprocedure('app.get_owner_companion_kemerbet_session_status(uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_receiver_sms_device_status(uuid)') is not null)::integer
+        + (to_regprocedure('app.public_deposit_registry()') is not null)::integer
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -604,6 +610,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.list_owner_provider_deposit_controls(uuid)'::regprocedure
           ,'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)'::regprocedure
           ,'app.public_provider_deposit_controls()'::regprocedure
+          ,coalesce(to_regprocedure('app.public_deposit_registry()')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_deposit_availability(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_deposit_availability(uuid,uuid,boolean)')::oid, 0::oid)
         )

@@ -33,6 +33,21 @@ export interface OwnerDepositAvailability {
   readonly changedAt: string;
 }
 
+export interface PublicDepositCatalog {
+  readonly version: 1;
+  readonly platforms: readonly {
+    readonly code: string;
+    readonly displayName: string;
+    readonly available: boolean;
+  }[];
+  readonly methods: readonly {
+    readonly code: string;
+    readonly displayName: string;
+    readonly accepting: boolean;
+    readonly implemented: boolean;
+  }[];
+}
+
 export interface PaymentMethodsDatabase {
   query(sql: string, values: readonly (boolean | string)[]): Promise<{ rows: readonly unknown[] }>;
 }
@@ -56,6 +71,38 @@ const READINESS = new Set([
   'phone_not_paired',
   'new_receiver_sms_not_seen',
 ]);
+const REGISTRY_CODE = /^[a-z0-9_]{1,48}$/u;
+const REGISTRY_STATUSES = new Set(['active', 'inactive', 'blocked', 'archived']);
+
+function registryRow(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new OwnerPaymentMethodsUnavailableError();
+  const row = value as Record<string, unknown>;
+  if (
+    (row.entry_kind !== 'platform' && row.entry_kind !== 'method') ||
+    typeof row.code !== 'string' ||
+    !REGISTRY_CODE.test(row.code) ||
+    typeof row.display_name !== 'string' ||
+    row.display_name.trim() !== row.display_name ||
+    row.display_name.length < 1 ||
+    row.display_name.length > 80 ||
+    /[\p{Cc}\p{Cf}]/u.test(row.display_name) ||
+    typeof row.record_status !== 'string' ||
+    !REGISTRY_STATUSES.has(row.record_status)
+  )
+    throw new OwnerPaymentMethodsUnavailableError();
+  if (row.entry_kind === 'platform') {
+    if (row.adapter_key !== null || row.accepting !== null)
+      throw new OwnerPaymentMethodsUnavailableError();
+  } else if (
+    typeof row.adapter_key !== 'string' ||
+    !REGISTRY_CODE.test(row.adapter_key) ||
+    typeof row.accepting !== 'boolean'
+  ) {
+    throw new OwnerPaymentMethodsUnavailableError();
+  }
+  return row;
+}
 
 function decodeMethod(
   value: unknown,
@@ -235,6 +282,64 @@ export class PostgresOwnerPaymentMethods {
       if (values.telebirr === undefined || values.cbe_birr === undefined)
         throw new OwnerPaymentMethodsUnavailableError();
       return Object.freeze({ telebirr: values.telebirr, cbe_birr: values.cbe_birr });
+    } catch {
+      throw new OwnerPaymentMethodsUnavailableError();
+    }
+  }
+
+  async publicCatalog(): Promise<PublicDepositCatalog> {
+    try {
+      const result = await this.database.query(
+        `select entry_kind, code, display_name, adapter_key, record_status, accepting
+           from app.public_deposit_registry()`,
+        [],
+      );
+      if (result.rows.length < 3 || result.rows.length > 64)
+        throw new OwnerPaymentMethodsUnavailableError();
+      const rows = result.rows.map(registryRow);
+      const platforms = rows.filter((row) => row.entry_kind === 'platform');
+      const methods = rows.filter((row) => row.entry_kind === 'method');
+      if (
+        platforms.length > 32 ||
+        methods.length > 32 ||
+        !platforms.some((row) => row.code === 'kemerbet') ||
+        !methods.some((row) => row.code === 'telebirr') ||
+        !methods.some((row) => row.code === 'cbe_birr') ||
+        new Set(platforms.map((row) => row.code)).size !== platforms.length ||
+        new Set(methods.map((row) => row.code)).size !== methods.length
+      )
+        throw new OwnerPaymentMethodsUnavailableError();
+      const kemerbetReady = platforms.some(
+        (row) => row.code === 'kemerbet' && row.record_status === 'active',
+      );
+      return Object.freeze({
+        version: 1,
+        platforms: Object.freeze(
+          platforms.map((row) =>
+            Object.freeze({
+              code: row.code as string,
+              displayName: row.display_name as string,
+              available: row.code === 'kemerbet' && row.record_status === 'active',
+            }),
+          ),
+        ),
+        methods: Object.freeze(
+          methods.map((row) => {
+            const implemented =
+              (row.code === 'telebirr' || row.code === 'cbe_birr') && row.adapter_key === row.code;
+            return Object.freeze({
+              code: row.code as string,
+              displayName: row.display_name as string,
+              accepting:
+                implemented &&
+                kemerbetReady &&
+                row.record_status === 'active' &&
+                row.accepting === true,
+              implemented,
+            });
+          }),
+        ),
+      });
     } catch {
       throw new OwnerPaymentMethodsUnavailableError();
     }

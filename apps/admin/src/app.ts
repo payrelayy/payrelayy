@@ -1459,6 +1459,21 @@ export function buildOwnerControlApp(
   );
 
   app.get<{ Querystring: Record<string, string> }>(
+    '/v1/public/deposit-catalog',
+    async (request, reply) => {
+      if (Object.keys(request.query).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      try {
+        const catalog = await dependencies.runtime.paymentMethods?.publicCatalog?.();
+        if (!catalog) throw new OwnerPaymentMethodsUnavailableError();
+        return reply.header('cache-control', 'no-store').send(catalog);
+      } catch {
+        return reply.code(503).send({ error: 'deposit_catalog_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
     '/v1/owner/payment-methods',
     async (request, reply) => {
       if (Object.keys(request.query).length !== 0)

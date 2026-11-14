@@ -253,6 +253,7 @@ const screenshotProbeGrantPauseMigrationName =
   '20261113233217_pause_screenshot_probe_grant_for_api_handoff_20261114.sql';
 const screenshotProbeGrantRestoreMigrationName =
   '20261113233924_restore_screenshot_probe_grant_after_api_handoff_20261114.sql';
+const publicDepositRegistryMigrationName = '20261114120000_public_deposit_registry_read_model.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -768,7 +769,8 @@ describe('disposable SQL migration baseline', () => {
         name !== screenshotReferenceProbeMigrationName &&
         name !== screenshotReferenceProbeGrantMigrationName &&
         name !== screenshotProbeGrantPauseMigrationName &&
-        name !== screenshotProbeGrantRestoreMigrationName,
+        name !== screenshotProbeGrantRestoreMigrationName &&
+        name !== publicDepositRegistryMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10745,6 +10747,7 @@ describe('production deposit policy cutovers', () => {
       screenshotReferenceProbeGrantMigrationName,
       screenshotProbeGrantPauseMigrationName,
       screenshotProbeGrantRestoreMigrationName,
+      publicDepositRegistryMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -10792,6 +10795,47 @@ describe('production deposit policy cutovers', () => {
 
   afterAll(async () => {
     await postCutoverClient?.end();
+  });
+
+  it('exposes only registry facts through the Owner read model', async () => {
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query(`insert into app.payment_providers
+        (code, display_name, adapter_key)
+        values ('future_bank', 'Future Bank', 'future_bank')`);
+      const result = await postCutoverClient.query<{
+        entry_kind: string;
+        code: string;
+        display_name: string;
+        adapter_key: string | null;
+        accepting: boolean | null;
+      }>('select * from app.public_deposit_registry()');
+      expect(result.rows).toMatchObject([
+        { entry_kind: 'method', code: 'cbe_birr', display_name: 'CBE Birr' },
+        {
+          entry_kind: 'method',
+          code: 'future_bank',
+          display_name: 'Future Bank',
+          adapter_key: 'future_bank',
+          accepting: false,
+        },
+        { entry_kind: 'method', code: 'telebirr', display_name: 'TeleBirr' },
+        { entry_kind: 'platform', code: 'kemerbet', display_name: 'KemerBet' },
+      ]);
+      const grants = await postCutoverClient.query<{
+        owner_allowed: boolean;
+        anon_denied: boolean;
+      }>(
+        `select pg_catalog.has_function_privilege('fetanagent_owner_control',
+          'app.public_deposit_registry()', 'execute') as owner_allowed,
+          not pg_catalog.has_function_privilege('anon',
+          'app.public_deposit_registry()', 'execute') as anon_denied`,
+      );
+      expect(grants.rows).toEqual([{ owner_allowed: true, anon_denied: true }]);
+      expect(JSON.stringify(result.rows)).not.toContain('receiver_account');
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
   });
 
   it('corrects only one recent unused signed SMS reference without creating a payment claim', async () => {

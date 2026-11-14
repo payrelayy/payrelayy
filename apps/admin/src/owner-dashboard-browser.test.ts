@@ -505,7 +505,29 @@ describe('Owner full payment identifiers', () => {
   });
 
   it('renders full payment methods and retired receiver accounts', async () => {
-    const browser = ownerBrowserHarness(503);
+    const catalog = {
+      version: 1,
+      platforms: [{ code: 'kemerbet', displayName: 'KemerBet', available: true }],
+      methods: [
+        { code: 'cbe_birr', displayName: 'CBE Birr registry', accepting: true, implemented: true },
+        { code: 'telebirr', displayName: 'TeleBirr', accepting: true, implemented: true },
+      ],
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/public/deposit-catalog' ? response(200, catalog) : undefined,
+    });
+    expect(await browser.call('loadPublicDepositCatalog')).toEqual(catalog);
+    expect(await browser.call('validPublicDepositCatalog', catalog)).toEqual(catalog);
+    expect(
+      await browser.call('validPublicDepositCatalog', {
+        ...catalog,
+        methods: [
+          ...catalog.methods,
+          { code: 'future_bank', displayName: 'Future Bank', accepting: true, implemented: true },
+        ],
+      }),
+    ).toBeUndefined();
     const method = {
       providerCode: 'cbe_birr',
       ownerEnabled: true,
@@ -518,8 +540,9 @@ describe('Owner full payment identifiers', () => {
       changedAt: '2026-10-23T09:00:00Z',
     };
     expect(await browser.call('validPaymentMethod', method)).toEqual(method);
-    await browser.call('renderPaymentMethods', [method]);
+    await browser.call('renderPaymentMethods', [method], catalog);
     expect(JSON.stringify(browser.element('#payment-methods-list'))).toContain('251000003456');
+    expect(JSON.stringify(browser.element('#payment-methods-list'))).toContain('CBE Birr registry');
 
     const retired = {
       accountHolderName: 'Former Receiver',

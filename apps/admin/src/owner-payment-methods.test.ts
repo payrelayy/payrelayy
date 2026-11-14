@@ -125,6 +125,108 @@ describe('Owner payment-method adapter', () => {
     await expect(control.publicStatus()).resolves.toEqual({ cbe_birr: false, telebirr: true });
   });
 
+  it('projects registry rows without activating an unimplemented adapter', async () => {
+    const control = new PostgresOwnerPaymentMethods({
+      query: async (sql, values) => {
+        expect(sql).toContain('app.public_deposit_registry()');
+        expect(values).toEqual([]);
+        return {
+          rows: [
+            {
+              entry_kind: 'platform',
+              code: 'kemerbet',
+              display_name: 'KemerBet',
+              adapter_key: null,
+              record_status: 'active',
+              accepting: null,
+            },
+            {
+              entry_kind: 'platform',
+              code: 'future_platform',
+              display_name: 'Future Platform',
+              adapter_key: null,
+              record_status: 'active',
+              accepting: null,
+            },
+            {
+              entry_kind: 'method',
+              code: 'cbe_birr',
+              display_name: 'CBE Birr',
+              adapter_key: 'cbe_birr',
+              record_status: 'active',
+              accepting: false,
+            },
+            {
+              entry_kind: 'method',
+              code: 'telebirr',
+              display_name: 'TeleBirr',
+              adapter_key: 'telebirr',
+              record_status: 'active',
+              accepting: true,
+            },
+            {
+              entry_kind: 'method',
+              code: 'future_bank',
+              display_name: 'Future Bank',
+              adapter_key: 'future_bank',
+              record_status: 'active',
+              accepting: true,
+            },
+          ],
+        };
+      },
+    });
+    await expect(control.publicCatalog()).resolves.toEqual({
+      version: 1,
+      platforms: [
+        { code: 'kemerbet', displayName: 'KemerBet', available: true },
+        { code: 'future_platform', displayName: 'Future Platform', available: false },
+      ],
+      methods: [
+        { code: 'cbe_birr', displayName: 'CBE Birr', accepting: false, implemented: true },
+        { code: 'telebirr', displayName: 'TeleBirr', accepting: true, implemented: true },
+        { code: 'future_bank', displayName: 'Future Bank', accepting: false, implemented: false },
+      ],
+    });
+  });
+
+  it('fails the catalog closed when a required or malformed registry row is missing', async () => {
+    const platform = {
+      entry_kind: 'platform',
+      code: 'kemerbet',
+      display_name: 'KemerBet',
+      adapter_key: null,
+      record_status: 'active',
+      accepting: null,
+    };
+    const cbe = {
+      entry_kind: 'method',
+      code: 'cbe_birr',
+      display_name: 'CBE Birr',
+      adapter_key: 'cbe_birr',
+      record_status: 'active',
+      accepting: true,
+    };
+    const telebirr = {
+      entry_kind: 'method',
+      code: 'telebirr',
+      display_name: 'TeleBirr',
+      adapter_key: 'telebirr',
+      record_status: 'active',
+      accepting: true,
+    };
+    for (const result of [
+      [platform, cbe],
+      [platform, cbe, cbe],
+      [platform, cbe, { ...telebirr, display_name: 'Bad\nName' }],
+    ]) {
+      const control = new PostgresOwnerPaymentMethods({ query: async () => ({ rows: result }) });
+      await expect(control.publicCatalog()).rejects.toBeInstanceOf(
+        OwnerPaymentMethodsUnavailableError,
+      );
+    }
+  });
+
   it('resumes all deposits with one audited request and returns the saved state', async () => {
     const query = vi.fn<PaymentMethodsDatabase['query']>(async (sql, values) => {
       if (sql.includes('set_owner_deposit_availability')) {

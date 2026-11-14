@@ -2931,6 +2931,14 @@ describe('Owner-control HTTP boundary', () => {
         paymentMethods: {
           list: async () => methods,
           publicStatus: async () => ({ cbe_birr: true, telebirr: false }),
+          publicCatalog: async () => ({
+            version: 1,
+            platforms: [{ code: 'kemerbet', displayName: 'KemerBet', available: true }],
+            methods: [
+              { code: 'cbe_birr', displayName: 'CBE Birr', accepting: true, implemented: true },
+              { code: 'telebirr', displayName: 'TeleBirr', accepting: false, implemented: true },
+            ],
+          }),
           set,
         },
       }),
@@ -2939,6 +2947,18 @@ describe('Owner-control HTTP boundary', () => {
     expect(publicResponse.statusCode).toBe(200);
     expect(publicResponse.json()).toEqual({ methods: { cbe_birr: true, telebirr: false } });
     expect(publicResponse.body).not.toContain('Receiver');
+    const catalogResponse = await app.inject({ method: 'GET', url: '/v1/public/deposit-catalog' });
+    expect(catalogResponse.statusCode).toBe(200);
+    expect(catalogResponse.json()).toMatchObject({
+      version: 1,
+      platforms: [{ code: 'kemerbet', available: true }],
+      methods: [
+        { code: 'cbe_birr', accepting: true },
+        { code: 'telebirr', accepting: false },
+      ],
+    });
+    expect(catalogResponse.headers['cache-control']).toContain('no-store');
+    expect(catalogResponse.body).not.toContain('Receiver');
     const privateResponse = await app.inject({
       method: 'GET',
       url: '/v1/owner/payment-methods',

@@ -4438,40 +4438,109 @@ function validPaymentMethod(value) {
   return value;
 }
 
+function validPublicDepositCatalog(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join() !== 'methods,platforms,version' ||
+      value.version !== 1 || !Array.isArray(value.platforms) ||
+      !Array.isArray(value.methods) ||
+      value.platforms.length < 1 || value.platforms.length > 32 ||
+      value.methods.length < 2 || value.methods.length > 32)
+    return undefined;
+  const seenPlatforms = new Set();
+  for (const platform of value.platforms) {
+    if (!platform || typeof platform !== 'object' || Array.isArray(platform) ||
+        Object.keys(platform).sort().join() !== 'available,code,displayName' ||
+        typeof platform.code !== 'string' || !/^[a-z0-9_]{1,48}$/.test(platform.code) ||
+        typeof platform.displayName !== 'string' || !platform.displayName.trim() ||
+        platform.displayName.length > 80 || typeof platform.available !== 'boolean' ||
+        seenPlatforms.has(platform.code) ||
+        (platform.code !== 'kemerbet' && platform.available))
+      return undefined;
+    seenPlatforms.add(platform.code);
+  }
+  if (!seenPlatforms.has('kemerbet')) return undefined;
+  const seenMethods = new Set();
+  const kemerbetAvailable = value.platforms.some((platform) =>
+    platform.code === 'kemerbet' && platform.available);
+  for (const method of value.methods) {
+    if (!method || typeof method !== 'object' || Array.isArray(method) ||
+        Object.keys(method).sort().join() !== 'accepting,code,displayName,implemented' ||
+        typeof method.code !== 'string' || !/^[a-z0-9_]{1,48}$/.test(method.code) ||
+        typeof method.displayName !== 'string' || !method.displayName.trim() ||
+        method.displayName.length > 80 || typeof method.accepting !== 'boolean' ||
+        typeof method.implemented !== 'boolean' || seenMethods.has(method.code) ||
+        (!['telebirr', 'cbe_birr'].includes(method.code) &&
+          (method.implemented || method.accepting)) ||
+        (method.accepting && (!method.implemented || !kemerbetAvailable)))
+      return undefined;
+    seenMethods.add(method.code);
+  }
+  if (!seenMethods.has('telebirr') || !seenMethods.has('cbe_birr')) return undefined;
+  return value;
+}
+
+async function loadPublicDepositCatalog() {
+  try {
+    const response = await deadlineFetch('/v1/public/deposit-catalog', {
+      method: 'GET', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    }, 1500);
+    const payload = await response.json();
+    return response.ok ? validPublicDepositCatalog(payload) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function validDepositAvailability(value) {
   return value && typeof value === 'object' &&
     typeof value.enabled === 'boolean' &&
     typeof value.changedAt === 'string' && Number.isFinite(Date.parse(value.changedAt));
 }
 
-function renderDepositAvailability(value, methods) {
+function catalogMethodReady(catalog, providerCode) {
+  if (!catalog) return true;
+  return catalog.platforms.some((platform) =>
+    platform.code === 'kemerbet' && platform.available) &&
+    catalog.methods.some((method) => method.code === providerCode && method.implemented);
+}
+
+function renderDepositAvailability(value, methods, catalog) {
   depositAvailability = value;
   const unavailable = methods.filter((method) =>
-    !method.ownerEnabled || method.readiness !== 'ready');
+    !method.ownerEnabled || method.readiness !== 'ready' ||
+    !catalogMethodReady(catalog, method.providerCode));
   depositAvailabilityStatus.className = value.enabled && unavailable.length === 0
     ? 'status-ok' : 'request-meta';
   depositAvailabilityStatus.textContent = !value.enabled
     ? 'Off — new deposits are paused. Submitted payments continue processing.'
     : unavailable.length === 0
-      ? 'On — TeleBirr and CBE Birr accept new deposits.'
+      ? 'On — ' + methods.map((method) =>
+          catalog?.methods.find((entry) => entry.code === method.providerCode)?.displayName ||
+          (method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr')).join(' and ') +
+          ' accept new deposits.'
       : 'On — ' + unavailable.length + ' method(s) unavailable. Check the details below.';
   depositAvailabilityToggle.textContent = value.enabled ? 'Pause all deposits' : 'Turn on deposits';
   depositAvailabilityToggle.disabled = false;
 }
 
-function renderPaymentMethods(methods) {
+function renderPaymentMethods(methods, catalog) {
   paymentMethodsList.replaceChildren();
   for (const method of methods) {
     const card = document.createElement('article');
     card.className = 'request-card payment-method-card';
     const title = document.createElement('h3');
-    const label = method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
+    const label = catalog?.methods.find((entry) => entry.code === method.providerCode)
+      ?.displayName || (method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr');
     title.textContent = label;
     const status = document.createElement('p');
-    status.className = depositAvailability?.enabled && method.ownerEnabled && method.readiness === 'ready'
+    const registryReady = catalogMethodReady(catalog, method.providerCode);
+    status.className = depositAvailability?.enabled && method.ownerEnabled &&
+      method.readiness === 'ready' && registryReady
       ? 'status-ok' : 'request-meta';
     status.textContent = !depositAvailability?.enabled
       ? 'New deposits paused for all methods'
+      : !registryReady
+      ? 'Unavailable — credit platform or payment adapter is not active'
       : method.ownerEnabled && method.readiness === 'ready'
       ? 'On — accepting deposits'
       : method.ownerEnabled
@@ -4492,7 +4561,8 @@ function renderPaymentMethods(methods) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.textContent = method.ownerEnabled ? 'Turn off' : 'Turn on';
-    toggle.disabled = !method.ownerEnabled && method.readiness !== 'ready';
+    toggle.disabled = !method.ownerEnabled &&
+      (method.readiness !== 'ready' || !registryReady);
     toggle.addEventListener('click', () => void setPaymentMethod(method, !method.ownerEnabled));
     const change = document.createElement('button');
     change.type = 'button';
@@ -4514,9 +4584,10 @@ async function loadPaymentMethods() {
   paymentMethodsRefresh.disabled = true;
   depositAvailabilityToggle.disabled = true;
   try {
-    const [response, availabilityResponse] = await Promise.all([
+    const [response, availabilityResponse, catalog] = await Promise.all([
       ownerRequest('/v1/owner/payment-methods', { method: 'GET', headers: {} }),
       ownerRequest('/v1/owner/deposit-availability', { method: 'GET', headers: {} }),
+      loadPublicDepositCatalog(),
     ]);
     if (!response.ok || !availabilityResponse.ok) throw new Error('payment_methods');
     const [payload, availabilityPayload] = await Promise.all([
@@ -4530,8 +4601,8 @@ async function loadPaymentMethods() {
     if (methods.some((method) => !method) ||
       new Set(methods.map((method) => method.providerCode)).size !== 2)
       throw new Error('payment_methods');
-    renderDepositAvailability(availabilityPayload.availability, methods);
-    renderPaymentMethods(methods);
+    renderDepositAvailability(availabilityPayload.availability, methods, catalog);
+    renderPaymentMethods(methods, catalog);
     paymentMethodsFeedback.textContent = 'Updated just now.';
   } catch (error) {
     depositAvailability = null;

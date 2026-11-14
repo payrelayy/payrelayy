@@ -1,7 +1,10 @@
 import type {
   PlatformCreditAdapter,
+  PlatformCreditAttempt,
+  PlatformCreditAttemptBinding,
   PlatformCreditFinalActionAuthority,
   PlatformCreditPreparedAttempt,
+  PlatformCreditReconciliation,
 } from '@fetanagent/contracts';
 
 import {
@@ -9,7 +12,17 @@ import {
   type LocalKemerBetRoutineDepositDispatchOutcome,
 } from './local-kemerbet-deposit.js';
 import type { LocalKemerBetSession } from './local-kemerbet-session.js';
-import { projectKemerBetDispatchObservation } from './kemerbet-credit-boundary.js';
+import {
+  projectKemerBetDispatchObservation,
+  projectKemerBetFencedAttempt,
+  projectKemerBetPreparedAttempt,
+  projectKemerBetReconciliation,
+} from './kemerbet-credit-boundary.js';
+import type {
+  RoutineDepositExecutionStore,
+  RoutineDepositLease,
+} from './routine-deposit-worker.js';
+import { isValidRoutineDepositLease } from './routine-deposit-validation.js';
 
 type SuccessfulDispatch = Extract<
   LocalKemerBetRoutineDepositDispatchOutcome,
@@ -38,24 +51,32 @@ export interface KemerBetCompanionSubmissionAdapter extends Pick<
   ): Promise<KemerBetCompanionSubmission>;
 }
 
+function sameCreditBinding(
+  expected: PlatformCreditAttemptBinding,
+  actual: PlatformCreditAttemptBinding | undefined,
+): boolean {
+  const expectedOrder = expected.order;
+  const actualOrder = actual?.order;
+  return (
+    actual?.attemptId === expected.attemptId &&
+    actualOrder?.depositIntentId === expectedOrder.depositIntentId &&
+    actualOrder.paymentClaimId === expectedOrder.paymentClaimId &&
+    actualOrder.platformCode === expectedOrder.platformCode &&
+    actualOrder.platformAgentAccountId === expectedOrder.platformAgentAccountId &&
+    actualOrder.customerAccountId === expectedOrder.customerAccountId &&
+    actualOrder.amount?.minor === expectedOrder.amount.minor &&
+    actualOrder.currencyCode === expectedOrder.currencyCode &&
+    actualOrder.orderReference === expectedOrder.orderReference
+  );
+}
+
 function samePreparedAttempt(
   prepared: PlatformCreditPreparedAttempt,
   authority: PlatformCreditFinalActionAuthority,
 ): boolean {
-  const attempt = authority.attempt;
-  const expected = prepared.order;
-  const actual = attempt?.order;
   return (
-    attempt?.finalActionFenced === true &&
-    attempt.attemptId === prepared.attemptId &&
-    actual?.depositIntentId === expected.depositIntentId &&
-    actual.paymentClaimId === expected.paymentClaimId &&
-    actual.platformCode === expected.platformCode &&
-    actual.platformAgentAccountId === expected.platformAgentAccountId &&
-    actual.customerAccountId === expected.customerAccountId &&
-    actual.amount?.minor === expected.amount.minor &&
-    actual.currencyCode === expected.currencyCode &&
-    actual.orderReference === expected.orderReference &&
+    authority?.attempt?.finalActionFenced === true &&
+    sameCreditBinding(prepared, authority.attempt) &&
     typeof authority.isFresh === 'function'
   );
 }
@@ -109,4 +130,54 @@ export function createKemerBetCompanionSubmissionAdapter(
       }
     },
   });
+}
+
+/**
+ * Binds both adapter methods to one validated, signed database lease. The live worker still
+ * finalizes a success modal; the legacy signed history route is exposed without activating it.
+ */
+export function createKemerBetCompanionCreditAdapter(
+  session: Pick<LocalKemerBetSession, 'executeRoutineOneUseDeposit'>,
+  store: Pick<RoutineDepositExecutionStore, 'reconcile'>,
+  lease: RoutineDepositLease,
+): KemerBetCompanionCreditAdapter {
+  if (!isValidRoutineDepositLease(lease)) throw new Error('KemerBet credit lease is invalid.');
+  const boundLease = Object.freeze({ ...lease, policy: Object.freeze({ ...lease.policy }) });
+  const boundAttempt =
+    boundLease.phase === 'execute'
+      ? projectKemerBetPreparedAttempt(boundLease)
+      : projectKemerBetFencedAttempt(boundLease);
+  const submission = createKemerBetCompanionSubmissionAdapter(session);
+  return Object.freeze({
+    platformCode: 'kemerbet' as const,
+    async submitOnce(
+      prepared: PlatformCreditPreparedAttempt,
+      acquireFinalAction: () => Promise<PlatformCreditFinalActionAuthority>,
+    ): Promise<KemerBetCompanionSubmission> {
+      if (
+        boundLease.phase !== 'execute' ||
+        prepared?.finalActionFenced !== false ||
+        !sameCreditBinding(boundAttempt, prepared)
+      )
+        throw new Error('KemerBet credit attempt does not match the leased payment.');
+      return submission.submitOnce(prepared, acquireFinalAction);
+    },
+    async reconcile(attempt: PlatformCreditAttempt): Promise<PlatformCreditReconciliation> {
+      if (
+        boundLease.phase !== 'reconcile' ||
+        attempt?.finalActionFenced !== true ||
+        !sameCreditBinding(boundAttempt, attempt)
+      )
+        throw new Error('KemerBet reconciliation does not match the fenced payment.');
+      return projectKemerBetReconciliation(boundLease, await store.reconcile(boundLease));
+    },
+  });
+}
+
+export interface KemerBetCompanionCreditAdapter extends PlatformCreditAdapter {
+  readonly platformCode: 'kemerbet';
+  submitOnce(
+    prepared: PlatformCreditPreparedAttempt,
+    acquireFinalAction: () => Promise<PlatformCreditFinalActionAuthority>,
+  ): Promise<KemerBetCompanionSubmission>;
 }

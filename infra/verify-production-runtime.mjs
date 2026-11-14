@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'babb5169935e420d1b191420b604210423cb729d'/gu)].length,
+  [...workflow.matchAll(/status 'd2d3064395b205e8cf3792f3167e0924f839d68c'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='babb5169935e420d1b191420b604210423cb729d'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='d2d3064395b205e8cf3792f3167e0924f839d68c'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2980,12 +2980,44 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='babb5169935e420d1b191420b604210423cb729d'",
   "readonly PREDECESSOR_SHA256='b1f235b9daf571884f466fa11c7eb9334ebe02df45deb7c9cbe65a8ae72c2379'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='a21c3838aef57cfa296a4fe3fb255bd288b90cb559ba100690644518bcac8b1a'",
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 SCREENSHOT SMS GUARD HELPER V1',
 ]) {
   assert.ok(screenshotSmsGuardRotation.includes(value));
 }
+const registryPredecessorRotation = await read(
+  'infra/operations/fetanagent-production-v2-registry-predecessor-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='d2d3064395b205e8cf3792f3167e0924f839d68c'",
+  "readonly PREDECESSOR_SHA256='a21c3838aef57cfa296a4fe3fb255bd288b90cb559ba100690644518bcac8b1a'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_staged_successor',
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 REGISTRY PREDECESSOR HELPER V1',
+]) {
+  assert.ok(registryPredecessorRotation.includes(value));
+}
+const registryRotate = registryPredecessorRotation.slice(
+  registryPredecessorRotation.indexOf('rotate() {'),
+);
+const registryStep = (value) => {
+  const index = registryRotate.indexOf(value);
+  assert.ok(index >= 0, `registry rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  registryStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    registryStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  registryStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    registryStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(registryPredecessorRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 for (const marker of [
   '20261112132147_production_owner_runtime_connection_handoff_20261112.sql',
   '20261112133617_owner_submitted_payments_skip_terminal_duplicate_checks_20261112.sql',

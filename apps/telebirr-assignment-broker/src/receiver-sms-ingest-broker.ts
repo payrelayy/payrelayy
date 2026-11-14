@@ -10,11 +10,16 @@ import {
   type ReceiverSmsVerifiedPayment,
 } from '@fetanagent/telebirr-verification-foundation';
 
+import {
+  projectVerifiedReceiverSmsPayment,
+  type ReceiverSmsPaymentObservation,
+} from './receiver-sms-payment-source.js';
+
 export interface ReceiverSmsIngestDatabase {
   loadEnrollment(deviceId: string): Promise<unknown | undefined>;
   recordPayment(input: {
     readonly event: ReceiverSmsVerifiedEvent;
-    readonly payment: ReceiverSmsVerifiedPayment;
+    readonly payment: ReceiverSmsPaymentObservation;
     readonly devicePublicKeySpkiSha256: string;
     readonly referenceDigest: string;
     readonly referenceFingerprint: string;
@@ -95,22 +100,23 @@ export function createReceiverSmsIngestBroker(
       );
       if (assessment.disposition !== 'verified_phone_sms' || !assessment.event || !payment)
         return 'review';
+      const observation = projectVerifiedReceiverSmsPayment(assessment.event, payment);
       const devicePublicKeySpkiSha256 = `sha256:${createHash('sha256').update(key).digest('hex')}`;
       return database.recordPayment({
         event: assessment.event,
-        payment,
+        payment: observation,
         devicePublicKeySpkiSha256,
-        referenceDigest: digest(payment.transactionReference),
+        referenceDigest: digest(observation.canonicalReference),
         referenceFingerprint: fingerprintDepositProofReference({
-          provider: payment.providerCode,
-          reference: payment.transactionReference,
+          provider: observation.paymentMethodCode,
+          reference: observation.canonicalReference,
           fingerprintSecret,
         }),
         ...(displayEncryptionSecret
           ? {
               displayReference: protectReceiverSmsDisplayReference({
-                provider: payment.providerCode,
-                reference: payment.transactionReference,
+                provider: observation.paymentMethodCode,
+                reference: observation.canonicalReference,
                 encryptionSecret: displayEncryptionSecret,
               }),
             }

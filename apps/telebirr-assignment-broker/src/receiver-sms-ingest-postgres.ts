@@ -69,8 +69,15 @@ export function createReceiverSmsIngestPostgresDatabase(
     },
     async recordPayment(input: Parameters<ReceiverSmsIngestDatabase['recordPayment']>[0]) {
       const { event, payment } = input;
+      if (
+        payment.evidenceSource !== 'receiver_sms' ||
+        payment.sourceDigest !== event.eventBodyDigest ||
+        payment.bankAuthenticationPerformed !== false ||
+        payment.receiverAccountBinding.kind !== 'not_attested'
+      )
+        throw new Error();
       const result = await client.query(input.displayReference ? RECORD_WITH_DISPLAY : RECORD, [
-        payment.providerCode,
+        payment.paymentMethodCode,
         input.referenceDigest,
         input.referenceFingerprint,
         payment.amountMinor,

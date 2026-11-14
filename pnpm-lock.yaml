@@ -190,6 +190,9 @@ importers:
 
   apps/telebirr-assignment-broker:
     dependencies:
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@fetanagent/deposit-reference-protection':
         specifier: workspace:*
         version: link:../../packages/deposit-reference-protection

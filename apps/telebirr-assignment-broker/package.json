@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/contracts": "workspace:*",
     "@fetanagent/deposit-reference-protection": "workspace:*",
     "@fetanagent/telebirr-reference-opening": "workspace:*",
     "@fetanagent/telebirr-verification-foundation": "workspace:*",

@@ -43,6 +43,25 @@ export interface AuthoritativePaymentEvidence {
   readonly evidenceDigest: string;
 }
 
+/**
+ * Source facts before receiver matching, payment policy, or a one-use claim. A paired phone
+ * signature authenticates the reporting device, not the bank or the receiver account. The raw
+ * reference is transient and must be protected before it is stored.
+ */
+export interface PaymentSourceObservation {
+  readonly paymentMethodCode: PaymentMethodCode;
+  readonly canonicalReference: string;
+  readonly amountMinor: number;
+  readonly currencyCode: 'ETB';
+  readonly occurredAt: string;
+  readonly evidenceSource: ProviderEvidenceSource;
+  readonly sourceDigest: string;
+  readonly bankAuthenticationPerformed: boolean;
+  readonly receiverAccountBinding:
+    | { readonly kind: 'not_attested' }
+    | { readonly kind: 'exact'; readonly accountId: string; readonly version: number };
+}
+
 export type PaymentVerificationResult =
   | { readonly outcome: 'verified'; readonly evidence: AuthoritativePaymentEvidence }
   | {

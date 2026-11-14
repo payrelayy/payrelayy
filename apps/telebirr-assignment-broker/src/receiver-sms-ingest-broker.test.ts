@@ -11,6 +11,7 @@ import { openReceiverSmsDisplayReference } from '@fetanagent/deposit-reference-p
 
 import { createReceiverSmsIngestBroker } from './receiver-sms-ingest-broker.js';
 import type { ReceiverSmsIngestDatabase } from './receiver-sms-ingest-broker.js';
+import { createReceiverSmsIngestPostgresDatabase } from './receiver-sms-ingest-postgres.js';
 
 const sha256 = (value: string | Buffer) =>
   `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -109,7 +110,12 @@ describe('private receiver SMS ingestion', () => {
       expect(recordPayment).toHaveBeenCalledOnce();
       const recorded = recordPayment.mock.calls[0]?.[0];
       expect(recorded?.payment.amountMinor).toBe(12_345);
-      expect(recorded?.payment.providerCode).toBe(providerCode);
+      expect(recorded?.payment.paymentMethodCode).toBe(providerCode);
+      expect(recorded?.payment.evidenceSource).toBe('receiver_sms');
+      expect(recorded?.payment.currencyCode).toBe('ETB');
+      expect(recorded?.payment.sourceDigest).toBe(f.signedEvent.bodyDigest);
+      expect(recorded?.payment.bankAuthenticationPerformed).toBe(false);
+      expect(recorded?.payment.receiverAccountBinding).toEqual({ kind: 'not_attested' });
       expect(recorded?.referenceDigest).toBe(sha256('SYNTHETIC1234'));
       expect(recorded?.referenceFingerprint).toBe(
         fingerprintDepositProofReference({
@@ -118,6 +124,55 @@ describe('private receiver SMS ingestion', () => {
           fingerprintSecret,
         }),
       );
+    },
+  );
+
+  it.each(['telebirr', 'cbe_birr'] as const)(
+    'preserves the signed %s SQL intake fields through the shared observation',
+    async (providerCode) => {
+      const f = fixture(providerCode);
+      const query = vi.fn(async (sql: string, _values: readonly unknown[]) => ({
+        rows: sql.includes('load_receiver_sms_device_enrollment')
+          ? [
+              {
+                device_id: f.enrollment.deviceId,
+                key_id: f.enrollment.keyId,
+                public_key_spki_sha256: f.enrollment.publicKeySpkiSha256,
+                state: f.enrollment.state,
+                valid_from: new Date(f.enrollment.validFrom),
+                valid_until: new Date(f.enrollment.validUntil),
+              },
+            ]
+          : [{ status: 'recorded' }],
+      }));
+      const broker = createReceiverSmsIngestBroker(
+        createReceiverSmsIngestPostgresDatabase({ query }),
+        () => '2026-10-20T14:47:03.000Z',
+        fingerprintSecret,
+      );
+      expect(await broker.verifyAndRecord(f)).toBe('recorded');
+      const recorded = query.mock.calls[1];
+      expect(recorded?.[0]).toContain('app.record_receiver_sms_payment_event(');
+      expect(recorded?.[1]).toEqual([
+        providerCode,
+        sha256(f.body.transactionReference),
+        fingerprintDepositProofReference({
+          provider: providerCode,
+          reference: f.body.transactionReference,
+          fingerprintSecret,
+        }),
+        f.body.amountMinor,
+        f.body.occurredAt,
+        f.body.receivedAt,
+        f.body.observedAt,
+        f.body.sourceMessageDigest,
+        f.signedEvent.bodyDigest,
+        f.body.deviceId,
+        f.body.keyId,
+        f.enrollment.publicKeySpkiSha256,
+        f.body.sourceSubscriptionId,
+      ]);
+      expect(recorded?.[1]).not.toContain(f.body.transactionReference);
     },
   );
 

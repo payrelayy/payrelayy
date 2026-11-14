@@ -15,24 +15,34 @@ export interface PlatformCreditOrder {
   readonly orderReference: string;
 }
 
-/**
- * Describes a database-fenced, one-shot attempt. This TypeScript shape is not authority to move
- * money: the caller must validate the durable lease, claim, and fence before invoking an adapter.
- */
-export interface PlatformCreditAttempt {
+/** The database has leased this attempt, but its final action has not been fenced yet. */
+export interface PlatformCreditPreparedAttempt {
   readonly order: PlatformCreditOrder;
   readonly attemptId: string;
+}
+
+/** This TypeScript shape is not itself authority to move money; the durable fence remains. */
+export interface PlatformCreditAttempt extends PlatformCreditPreparedAttempt {
   readonly finalActionFenced: true;
+}
+
+/** Acquired at the final action, after any platform-specific preflight. */
+export interface PlatformCreditFinalActionAuthority {
+  readonly attempt: PlatformCreditAttempt;
+  isFresh(): boolean;
 }
 
 export interface ConfirmedPlatformCredit {
   readonly outcome: 'confirmed';
-  readonly externalTransactionId: string;
   readonly evidenceDigest: string;
+  /** Present only when the platform supplies one. Never substitute an internal reconciliation ID. */
+  readonly externalTransactionId?: string;
 }
 
 export type PlatformCreditSubmission =
   | ConfirmedPlatformCredit
+  /** A platform success surface was seen; the durable store still has to confirm the attempt. */
+  | { readonly outcome: 'provider_success_observed'; readonly evidenceDigest: string }
   | { readonly outcome: 'stopped_before_final_action'; readonly reason: string }
   | { readonly outcome: 'uncertain'; readonly reason: string };
 
@@ -44,6 +54,10 @@ export type PlatformCreditReconciliation =
 /** One platform-specific route, such as KemerBet Companion or a future platform API. */
 export interface PlatformCreditAdapter {
   readonly platformCode: PlatformCode;
-  submitOnce(attempt: PlatformCreditAttempt): Promise<PlatformCreditSubmission>;
+  /** The callback must acquire the durable fence exactly once at the actual final action. */
+  submitOnce(
+    prepared: PlatformCreditPreparedAttempt,
+    acquireFinalAction: () => Promise<PlatformCreditFinalActionAuthority>,
+  ): Promise<PlatformCreditSubmission>;
   reconcile(attempt: PlatformCreditAttempt): Promise<PlatformCreditReconciliation>;
 }

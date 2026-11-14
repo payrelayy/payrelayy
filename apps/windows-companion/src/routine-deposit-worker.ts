@@ -181,7 +181,10 @@ function validBinding(binding: RoutineDepositBinding): boolean {
 
 export type RoutineDepositWorker = ReturnType<typeof createRoutineDepositWorker>;
 
-function matchesBinding(expected: RoutineDepositBinding, actual: RoutineDepositBinding): boolean {
+export function matchesRoutineDepositBinding(
+  expected: RoutineDepositBinding,
+  actual: RoutineDepositBinding,
+): boolean {
   return (
     expected.jobId === actual.jobId &&
     expected.intentId === actual.intentId &&
@@ -194,7 +197,7 @@ function matchesBinding(expected: RoutineDepositBinding, actual: RoutineDepositB
   );
 }
 
-function validLease(lease: RoutineDepositLease): boolean {
+export function isValidRoutineDepositLease(lease: RoutineDepositLease): boolean {
   return (
     validBinding(lease) &&
     isRoutineDepositPolicy(lease.policy) &&
@@ -300,7 +303,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     }
     if (confirmed === null)
       return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
-    if (!matchesBinding(lease, confirmed))
+    if (!matchesRoutineDepositBinding(lease, confirmed))
       return pause(awaitingReconciliation, 'confirmation_mismatch');
     awaitingReconciliation = undefined;
     const dismissFailure = await dismissSettledResult();
@@ -332,7 +335,8 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
           return Object.freeze({ status: 'temporarily_unavailable', readOnlyFindSafe: true });
         }
         if (!lease) return Object.freeze({ status: 'idle' });
-        if (!validLease(lease)) return await pause(lease, 'invalid_policy_or_lease');
+        if (!isValidRoutineDepositLease(lease))
+          return await pause(lease, 'invalid_policy_or_lease');
         // Snapshot the binding so later mutations by a port cannot change a prepared target.
         lease = Object.freeze({ ...lease, policy: Object.freeze({ ...lease.policy }) });
         if (options.signal.aborted) return await pause(lease, 'operator_stopped');
@@ -371,7 +375,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
               const observedAtMonotonic = monotonicNow();
               const lifetimeMs = fence.validUntilMs - fence.issuedAtMs;
               if (
-                !matchesBinding(selected, fence) ||
+                !matchesRoutineDepositBinding(selected, fence) ||
                 fence.firstFenceAcquired !== true ||
                 !Number.isSafeInteger(fence.issuedAtMs) ||
                 !Number.isSafeInteger(fence.validUntilMs) ||

@@ -259,6 +259,9 @@ importers:
       '@fetanagent/agent-platform-kemerbet':
         specifier: workspace:*
         version: link:../../packages/agent-platform-kemerbet
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain

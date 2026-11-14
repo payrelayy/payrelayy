@@ -15,14 +15,18 @@ export interface PlatformCreditOrder {
   readonly orderReference: string;
 }
 
-/** The database has leased this attempt, but its final action has not been fenced yet. */
-export interface PlatformCreditPreparedAttempt {
+export interface PlatformCreditAttemptBinding {
   readonly order: PlatformCreditOrder;
   readonly attemptId: string;
 }
 
+/** The database has leased this attempt, but its final action has not been fenced yet. */
+export interface PlatformCreditPreparedAttempt extends PlatformCreditAttemptBinding {
+  readonly finalActionFenced: false;
+}
+
 /** This TypeScript shape is not itself authority to move money; the durable fence remains. */
-export interface PlatformCreditAttempt extends PlatformCreditPreparedAttempt {
+export interface PlatformCreditAttempt extends PlatformCreditAttemptBinding {
   readonly finalActionFenced: true;
 }
 

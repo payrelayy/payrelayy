@@ -1,18 +1,27 @@
 import { performance } from 'node:perf_hooks';
 import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-companion-execution-contracts';
+import type { PlatformCreditFinalActionAuthority } from '@fetanagent/contracts';
 
-import type { LocalKemerBetSession } from './local-kemerbet-session.js';
 import {
-  isRoutineDepositAmountMinor,
-  type LocalKemerBetRoutineFinalAction,
-} from './local-kemerbet-deposit.js';
+  createKemerBetCompanionSubmissionAdapter,
+  type KemerBetCompanionSubmission,
+} from './kemerbet-companion-credit-adapter.js';
+import { projectKemerBetPreparedAttempt } from './kemerbet-credit-boundary.js';
+import type { LocalKemerBetSession } from './local-kemerbet-session.js';
 import type { LocalKemerBetDepositDispatchOutcome } from './provider-route.js';
+import {
+  isValidRoutineDepositLease,
+  matchesRoutineDepositBinding,
+} from './routine-deposit-validation.js';
 import type { RoutineHistoryObservation } from './routine-kemerbet-history.js';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const ACTION_LIFETIME_MS = 10_000;
+
+export {
+  isRoutineDepositPolicy,
+  isValidRoutineDepositLease,
+  matchesRoutineDepositBinding,
+} from './routine-deposit-validation.js';
 
 /** Persistent business authorization; not a pilot, expiring pairing, or per-payment approval. */
 export interface RoutineDepositPolicy {
@@ -137,85 +146,13 @@ export interface RoutineDepositWorkerOptions {
   readonly monotonicNow?: () => number;
 }
 
-export function isRoutineDepositPolicy(candidate: unknown): candidate is RoutineDepositPolicy {
-  if (typeof candidate !== 'object' || candidate === null) return false;
-  const policy = candidate as Partial<RoutineDepositPolicy>;
-  return (
-    policy.mode === 'routine_production' &&
-    policy.status === 'active' &&
-    policy.version === 1 &&
-    (policy.provider === 'telebirr' || policy.provider === 'receiver_sms') &&
-    policy.platformCode === 'kemerbet' &&
-    policy.currencyCode === 'ETB' &&
-    (policy.minimumAmountMinor === 2500 || policy.minimumAmountMinor === 10000) &&
-    policy.maximumAmountMinor === 2500000 &&
-    policy.playerScope === 'all_active_deposit_eligible' &&
-    policy.playerOwnershipRequired === false &&
-    policy.dailyQuotaMinor === null &&
-    policy.successfulDepositQuota === null &&
-    policy.maxConcurrentDeposits === 1 &&
-    ((policy.provider === 'telebirr' &&
-      policy.amountSource === 'official_receipt_settled_amount') ||
-      (policy.provider === 'receiver_sms' && policy.amountSource === 'receiver_sms_amount'))
-  );
-}
-
-function validBinding(binding: RoutineDepositBinding): boolean {
-  return (
-    typeof binding.jobId === 'string' &&
-    typeof binding.intentId === 'string' &&
-    typeof binding.attemptId === 'string' &&
-    typeof binding.paymentClaimId === 'string' &&
-    typeof binding.platformAgentAccountId === 'string' &&
-    typeof binding.playerId === 'string' &&
-    UUID.test(binding.jobId) &&
-    UUID.test(binding.intentId) &&
-    UUID.test(binding.attemptId) &&
-    UUID.test(binding.paymentClaimId) &&
-    UUID.test(binding.platformAgentAccountId) &&
-    PLAYER_ID.test(binding.playerId) &&
-    isRoutineDepositAmountMinor(binding.amountMinor) &&
-    binding.currencyCode === 'ETB'
-  );
-}
-
 export type RoutineDepositWorker = ReturnType<typeof createRoutineDepositWorker>;
-
-export function matchesRoutineDepositBinding(
-  expected: RoutineDepositBinding,
-  actual: RoutineDepositBinding,
-): boolean {
-  return (
-    expected.jobId === actual.jobId &&
-    expected.intentId === actual.intentId &&
-    expected.attemptId === actual.attemptId &&
-    expected.paymentClaimId === actual.paymentClaimId &&
-    expected.platformAgentAccountId === actual.platformAgentAccountId &&
-    expected.playerId === actual.playerId &&
-    expected.amountMinor === actual.amountMinor &&
-    expected.currencyCode === actual.currencyCode
-  );
-}
-
-export function isValidRoutineDepositLease(lease: RoutineDepositLease): boolean {
-  return (
-    validBinding(lease) &&
-    isRoutineDepositPolicy(lease.policy) &&
-    lease.amountMinor >= lease.policy.minimumAmountMinor &&
-    lease.amountMinor <= lease.policy.maximumAmountMinor &&
-    lease.paymentVerified === true &&
-    lease.playerActive === true &&
-    lease.playerDepositEligible === true &&
-    lease.attemptNumber === 1 &&
-    ((lease.phase === 'execute' && lease.finalActionFenced === false) ||
-      (lease.phase === 'reconcile' && lease.finalActionFenced === true))
-  );
-}
 
 /** No provider retry, parallel submission, or v2 widening. */
 export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions) {
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const creditAdapter = createKemerBetCompanionSubmissionAdapter(options.session);
   let busy = false;
   let pauseReason: LocalRoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
@@ -343,97 +280,93 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
         if (lease.phase === 'reconcile') return await finalizeModal(lease);
 
         const selected = lease;
+        const prepared = projectKemerBetPreparedAttempt(selected);
         let fenceRequested = false;
         let fenceGranted = false;
         let integrityFailure = false;
-        let actionAuthority: LocalKemerBetRoutineFinalAction | undefined;
-        let dispatch: LocalKemerBetDepositDispatchOutcome;
+        let actionAuthority: PlatformCreditFinalActionAuthority | undefined;
+        let submission: KemerBetCompanionSubmission;
         try {
-          dispatch = await options.session.executeRoutineOneUseDeposit(
-            selected.playerId,
-            selected.amountMinor,
-            async () => {
-              if (fenceRequested || options.signal.aborted)
-                throw new Error('Routine action unavailable.');
-              // An ambiguous fence request must never be retried or treated as pre-action safe.
-              fenceRequested = true;
-              // Start both deadlines before the request. The database issues its fence during
-              // this round trip, so a deadline measured from here expires no later than the
-              // database fence. Comparing absolute database and PC times would instead reject
-              // a valid fast response whenever the PC clock is slightly behind.
-              const requestStartedAt = now();
-              const requestStartedMonotonic = monotonicNow();
-              if (
-                !Number.isSafeInteger(requestStartedAt) ||
-                !Number.isFinite(requestStartedMonotonic)
-              ) {
-                integrityFailure = true;
-                throw new Error('Routine action unavailable.');
-              }
-              const fence = await options.store.fenceFinalAction(selected);
-              const observedAt = now();
-              const observedAtMonotonic = monotonicNow();
-              const lifetimeMs = fence.validUntilMs - fence.issuedAtMs;
-              if (
-                !matchesRoutineDepositBinding(selected, fence) ||
-                fence.firstFenceAcquired !== true ||
-                !Number.isSafeInteger(fence.issuedAtMs) ||
-                !Number.isSafeInteger(fence.validUntilMs) ||
-                fence.issuedAtMs <= 0 ||
-                lifetimeMs <= 0 ||
-                lifetimeMs > ACTION_LIFETIME_MS
-              ) {
-                integrityFailure = true;
-                throw new Error('Routine action unavailable.');
-              }
-              if (
-                !Number.isSafeInteger(observedAt) ||
-                !Number.isFinite(observedAtMonotonic) ||
-                observedAt < requestStartedAt ||
-                observedAtMonotonic < requestStartedMonotonic ||
-                options.signal.aborted
-              ) {
-                integrityFailure = true;
-                throw new Error('Routine action unavailable.');
-              }
-              if (
-                observedAt - requestStartedAt >= lifetimeMs ||
-                observedAtMonotonic - requestStartedMonotonic >= lifetimeMs
-              )
-                throw new Error('Routine action unavailable.');
-              fenceGranted = true;
-              const wallDeadline = requestStartedAt + lifetimeMs;
-              const monotonicDeadline = requestStartedMonotonic + lifetimeMs;
-              let lastWallNow = observedAt;
-              let lastMonotonicNow = observedAtMonotonic;
-              let expired = false;
-              actionAuthority = Object.freeze({
-                playerId: selected.playerId,
-                amountMinor: selected.amountMinor,
-                isFresh: () => {
-                  const wallNow = now();
-                  const monoNow = monotonicNow();
-                  integrityFailure ||=
-                    !Number.isSafeInteger(wallNow) ||
-                    !Number.isFinite(monoNow) ||
-                    wallNow < lastWallNow ||
-                    monoNow < lastMonotonicNow;
-                  expired ||=
-                    options.signal.aborted ||
-                    !Number.isSafeInteger(wallNow) ||
-                    !Number.isFinite(monoNow) ||
-                    wallNow < lastWallNow ||
-                    monoNow < lastMonotonicNow ||
-                    monoNow >= monotonicDeadline ||
-                    wallNow >= wallDeadline;
-                  lastWallNow = wallNow;
-                  lastMonotonicNow = monoNow;
-                  return !expired;
-                },
-              });
-              return actionAuthority;
-            },
-          );
+          submission = await creditAdapter.submitOnce(prepared, async () => {
+            if (fenceRequested || options.signal.aborted)
+              throw new Error('Routine action unavailable.');
+            // An ambiguous fence request must never be retried or treated as pre-action safe.
+            fenceRequested = true;
+            // Start both deadlines before the request. The database issues its fence during
+            // this round trip, so a deadline measured from here expires no later than the
+            // database fence. Comparing absolute database and PC times would instead reject
+            // a valid fast response whenever the PC clock is slightly behind.
+            const requestStartedAt = now();
+            const requestStartedMonotonic = monotonicNow();
+            if (
+              !Number.isSafeInteger(requestStartedAt) ||
+              !Number.isFinite(requestStartedMonotonic)
+            ) {
+              integrityFailure = true;
+              throw new Error('Routine action unavailable.');
+            }
+            const fence = await options.store.fenceFinalAction(selected);
+            const observedAt = now();
+            const observedAtMonotonic = monotonicNow();
+            const lifetimeMs = fence.validUntilMs - fence.issuedAtMs;
+            if (
+              !matchesRoutineDepositBinding(selected, fence) ||
+              fence.firstFenceAcquired !== true ||
+              !Number.isSafeInteger(fence.issuedAtMs) ||
+              !Number.isSafeInteger(fence.validUntilMs) ||
+              fence.issuedAtMs <= 0 ||
+              lifetimeMs <= 0 ||
+              lifetimeMs > ACTION_LIFETIME_MS
+            ) {
+              integrityFailure = true;
+              throw new Error('Routine action unavailable.');
+            }
+            if (
+              !Number.isSafeInteger(observedAt) ||
+              !Number.isFinite(observedAtMonotonic) ||
+              observedAt < requestStartedAt ||
+              observedAtMonotonic < requestStartedMonotonic ||
+              options.signal.aborted
+            ) {
+              integrityFailure = true;
+              throw new Error('Routine action unavailable.');
+            }
+            if (
+              observedAt - requestStartedAt >= lifetimeMs ||
+              observedAtMonotonic - requestStartedMonotonic >= lifetimeMs
+            )
+              throw new Error('Routine action unavailable.');
+            fenceGranted = true;
+            const wallDeadline = requestStartedAt + lifetimeMs;
+            const monotonicDeadline = requestStartedMonotonic + lifetimeMs;
+            let lastWallNow = observedAt;
+            let lastMonotonicNow = observedAtMonotonic;
+            let expired = false;
+            actionAuthority = Object.freeze({
+              attempt: Object.freeze({ ...prepared, finalActionFenced: true as const }),
+              isFresh: () => {
+                const wallNow = now();
+                const monoNow = monotonicNow();
+                integrityFailure ||=
+                  !Number.isSafeInteger(wallNow) ||
+                  !Number.isFinite(monoNow) ||
+                  wallNow < lastWallNow ||
+                  monoNow < lastMonotonicNow;
+                expired ||=
+                  options.signal.aborted ||
+                  !Number.isSafeInteger(wallNow) ||
+                  !Number.isFinite(monoNow) ||
+                  wallNow < lastWallNow ||
+                  monoNow < lastMonotonicNow ||
+                  monoNow >= monotonicDeadline ||
+                  wallNow >= wallDeadline;
+                lastWallNow = wallNow;
+                lastMonotonicNow = monoNow;
+                return !expired;
+              },
+            });
+            return actionAuthority;
+          });
         } catch {
           if (options.signal.aborted) return await pause(selected, 'operator_stopped');
           return integrityFailure
@@ -442,18 +375,14 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
         }
         if (!fenceGranted || !actionAuthority)
           return await pause(selected, 'confirmation_mismatch');
-        if (dispatch.outcome === 'local_uncertain')
-          return await containUncertain(selected, 'execution_uncertain');
-        if (
-          dispatch.outcome !== 'submission_attempted' ||
-          dispatch.exactPlayerCreditMatch !== true ||
-          !DIGEST.test(dispatch.providerResponseDigest)
-        )
-          return await pause(selected, 'confirmation_mismatch');
+        if (submission.outcome === 'uncertain')
+          return submission.reason === 'confirmation_mismatch'
+            ? await pause(selected, 'confirmation_mismatch')
+            : await containUncertain(selected, 'execution_uncertain');
         // Only the exact, fresh Transfer Successful result permits this signed dispatch.
         // The server verifies its immutable one-use record before releasing the lane.
         try {
-          await options.store.recordDispatch(selected, dispatch);
+          await options.store.recordDispatch(selected, submission.dispatch);
         } catch {
           return await containUncertain(selected, 'execution_uncertain');
         }

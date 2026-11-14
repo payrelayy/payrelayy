@@ -3,7 +3,7 @@ import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-com
 import type { PlatformCreditFinalActionAuthority } from '@fetanagent/contracts';
 
 import {
-  createKemerBetCompanionSubmissionAdapter,
+  createKemerBetCompanionCreditAdapter,
   type KemerBetCompanionSubmission,
 } from './kemerbet-companion-credit-adapter.js';
 import { projectKemerBetPreparedAttempt } from './kemerbet-credit-boundary.js';
@@ -152,7 +152,6 @@ export type RoutineDepositWorker = ReturnType<typeof createRoutineDepositWorker>
 export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions) {
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
-  const creditAdapter = createKemerBetCompanionSubmissionAdapter(options.session);
   let busy = false;
   let pauseReason: LocalRoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
@@ -280,6 +279,11 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
         if (lease.phase === 'reconcile') return await finalizeModal(lease);
 
         const selected = lease;
+        const creditAdapter = createKemerBetCompanionCreditAdapter(
+          options.session,
+          options.store,
+          selected,
+        );
         const prepared = projectKemerBetPreparedAttempt(selected);
         let fenceRequested = false;
         let fenceGranted = false;

@@ -19,6 +19,8 @@ const [
   windowsStore,
   localDeposit,
   worker,
+  creditBoundary,
+  creditAdapter,
   bridgeConfig,
   bridgeApplication,
   bridgeHandler,
@@ -62,6 +64,8 @@ const [
   read('apps/windows-companion/src/routine-deposit-http-store.ts'),
   read('apps/windows-companion/src/local-kemerbet-deposit.ts'),
   read('apps/windows-companion/src/routine-deposit-worker.ts'),
+  read('apps/windows-companion/src/kemerbet-credit-boundary.ts'),
+  read('apps/windows-companion/src/kemerbet-companion-credit-adapter.ts'),
   read('apps/companion-device-bridge/src/config.ts'),
   read('apps/companion-device-bridge/src/application.ts'),
   read('apps/companion-device-bridge/src/routine-deposit-handler.ts'),
@@ -164,7 +168,11 @@ assert.match(
   /exactKemerBetAmountInputMatches\(await amount\.inputValue\(\), amountMinor\)/u,
 );
 assert.match(localDeposit, /exactPlayerCreditMatch: true/u);
-assert.match(worker, /dispatch\.exactPlayerCreditMatch !== true/u);
+assert.match(creditBoundary, /dispatch\.exactPlayerCreditMatch !== true/u);
+assert.match(creditAdapter, /projectKemerBetDispatchObservation\(dispatch\)/u);
+assert.match(worker, /await creditAdapter\.submitOnce\(prepared,/u);
+assert.match(worker, /await options\.store\.fenceFinalAction\(selected\)/u);
+assert.match(worker, /await options\.store\.recordDispatch\(selected, submission\.dispatch\)/u);
 assert.match(worker, /await options\.store\.confirmModal/u);
 assert.doesNotMatch(worker, /await options\.session\.scanRoutineDepositHistory/u);
 assert.doesNotMatch(worker, /await options\.store\.completeConfirmed/u);

@@ -156,6 +156,11 @@ describe('routine production serial deposit worker', () => {
     );
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch).toHaveBeenCalledTimes(1);
+    expect(store.recordDispatch).toHaveBeenCalledWith(lease, {
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'b'.repeat(64)}`,
+      exactPlayerCreditMatch: true,
+    });
     expect(store.confirmModal).toHaveBeenCalledTimes(1);
     expect(session.dismissSettledRoutineSuccess).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
@@ -409,6 +414,23 @@ describe('routine production serial deposit worker', () => {
     expect(store.recordDispatch).not.toHaveBeenCalled();
     expect(await worker.runOnce()).toEqual({ status: 'idle' });
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses on malformed success evidence without sending a signed dispatch', async () => {
+    const { worker, store, session } = fixture();
+    session.executeRoutineOneUseDeposit.mockImplementationOnce(
+      async (_player, _amount, acquire) => {
+        await acquire();
+        return {
+          outcome: 'submission_attempted',
+          providerResponseDigest: `sha256:${'b'.repeat(64)}`,
+        } as LocalKemerBetRoutineDepositDispatchOutcome;
+      },
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
+    expect(store.recordDispatch).not.toHaveBeenCalled();
+    expect(store.confirmModal).not.toHaveBeenCalled();
   });
 
   it('cannot regain expired authority when the wall clock moves backwards', async () => {

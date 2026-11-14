@@ -11,6 +11,8 @@ import type { LocalKemerBetDepositDispatchOutcome } from './provider-route.js';
 import {
   isValidRoutineDepositLease,
   matchesRoutineDepositBinding,
+} from './routine-deposit-validation.js';
+import {
   type RoutineDepositLease,
   type RoutineDepositReconciliation,
 } from './routine-deposit-worker.js';
@@ -26,7 +28,7 @@ export function projectKemerBetCreditOrder(lease: RoutineDepositLease): Platform
     platformCode: lease.policy.platformCode,
     platformAgentAccountId: lease.platformAgentAccountId,
     customerAccountId: lease.playerId,
-    amount: EtbAmount.fromMinor(lease.amountMinor),
+    amount: Object.freeze(EtbAmount.fromMinor(lease.amountMinor)),
     currencyCode: lease.currencyCode,
     // The job ID is correlation only. KemerBet does not accept it as an idempotency key.
     orderReference: lease.jobId,
@@ -37,15 +39,17 @@ export function projectKemerBetPreparedAttempt(
   lease: RoutineDepositLease,
 ): PlatformCreditPreparedAttempt {
   const order = projectKemerBetCreditOrder(lease);
-  return Object.freeze({ order, attemptId: lease.attemptId });
+  if (lease.phase !== 'execute' || lease.finalActionFenced !== false)
+    throw new Error('KemerBet credit lease is not prepared for execution.');
+  return Object.freeze({ order, attemptId: lease.attemptId, finalActionFenced: false });
 }
 
 /** Only a lease already fenced by the durable store can be represented as an attempt. */
 export function projectKemerBetFencedAttempt(lease: RoutineDepositLease): PlatformCreditAttempt {
-  const prepared = projectKemerBetPreparedAttempt(lease);
+  const order = projectKemerBetCreditOrder(lease);
   if (lease.phase !== 'reconcile' || lease.finalActionFenced !== true)
     throw new Error('KemerBet final action is not fenced.');
-  return Object.freeze({ ...prepared, finalActionFenced: true });
+  return Object.freeze({ order, attemptId: lease.attemptId, finalActionFenced: true });
 }
 
 /** Provider success is an observation; the signed dispatch and durable modal confirmation follow. */

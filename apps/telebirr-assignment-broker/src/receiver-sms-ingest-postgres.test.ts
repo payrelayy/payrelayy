@@ -3,6 +3,41 @@ import { describe, expect, it, vi } from 'vitest';
 import { createReceiverSmsIngestPostgresDatabase } from './receiver-sms-ingest-postgres.js';
 
 describe('receiver SMS narrow SQL adapter', () => {
+  it('keeps a source digest mismatch out of the private payment intake', async () => {
+    const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
+      rows: [{ status: 'recorded' }],
+    }));
+    const database = createReceiverSmsIngestPostgresDatabase({ query });
+    await expect(
+      database.recordPayment({
+        event: {
+          deviceId: 'receiver_device_001',
+          keyId: 'receiver_key_001',
+          sourceSubscriptionId: 0,
+          sourceMessageDigest: `sha256:${'a'.repeat(64)}`,
+          eventBodyDigest: `sha256:${'b'.repeat(64)}`,
+          receivedAt: '2026-10-20T14:47:01.000Z',
+          observedAt: '2026-10-20T14:47:02.000Z',
+        },
+        payment: {
+          paymentMethodCode: 'telebirr',
+          canonicalReference: 'SYNTHETIC1234',
+          amountMinor: 12_345,
+          currencyCode: 'ETB',
+          occurredAt: '2026-10-20T14:47:00.000Z',
+          evidenceSource: 'receiver_sms',
+          sourceDigest: `sha256:${'c'.repeat(64)}`,
+          bankAuthenticationPerformed: false,
+          receiverAccountBinding: { kind: 'not_attested' },
+        },
+        referenceDigest: `sha256:${'d'.repeat(64)}`,
+        referenceFingerprint: 'e'.repeat(64),
+        devicePublicKeySpkiSha256: `sha256:${'f'.repeat(64)}`,
+      }),
+    ).rejects.toThrow();
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it('uses the existing status function for older phones during the rollout', async () => {
     const query = vi.fn(async (_sql: string, _values: readonly unknown[]) => ({
       rows: [{ recorded: true }],

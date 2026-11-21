@@ -33,20 +33,20 @@ begin
       raise exception 'Dedicated deposit service role state changed; migration stopped.';
     end if;
 
-    select count(*) into v_member_count
-    from pg_catalog.pg_auth_members membership
-    join pg_catalog.pg_roles parent on parent.oid = membership.roleid
-    where membership.member = v_role.oid
-      and parent.rolname = v_role.group_role;
-    if v_member_count <> 1 or (
-      select count(*) from pg_catalog.pg_auth_members membership
-      where membership.member = v_role.oid
-    ) <> 1 then
-      raise exception 'Dedicated deposit service membership changed; migration stopped.';
-    end if;
-
     if v_role.rolcanlogin then
       v_active_count := v_active_count + 1;
+      select count(*) into v_member_count
+      from pg_catalog.pg_auth_members membership
+      join pg_catalog.pg_roles parent on parent.oid = membership.roleid
+      where membership.member = v_role.oid
+        and parent.rolname = v_role.group_role;
+      if v_member_count <> 1 or (
+        select count(*) from pg_catalog.pg_auth_members membership
+        where membership.member = v_role.oid
+      ) <> 1 then
+        raise exception 'Dedicated deposit service membership changed; migration stopped.';
+      end if;
+
       if v_role.rolvaliduntil is null or
         v_role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '1 day'
       then

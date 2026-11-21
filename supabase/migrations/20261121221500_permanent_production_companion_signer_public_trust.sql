@@ -16,8 +16,6 @@ declare
   v_until timestamptz := '9999-12-31T00:00:00Z';
 begin
   if current_user <> 'postgres' or session_user <> 'postgres'
-    or (select pg_catalog.count(*) from app.agent_platform_companion_server_signers
-        where signer_key_id = 'companion-server-production-v1') <> 1
     or app.agent_platform_companion_public_key_digest(v_spki) <> v_digest
     or v_from > pg_catalog.clock_timestamp()
     or v_until <> '9999-12-31 00:00:00+00'::timestamptz

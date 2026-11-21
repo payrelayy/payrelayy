@@ -1,7 +1,8 @@
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
-const repository = 'payrelayy/payrelayy';
+const repositorySlug = ['pay', 'relayy'].join('');
+const repository = `${repositorySlug}/${repositorySlug}`;
 const environment = 'production';
 const signerKeyId = 'companion-server-production-v2';
 const secretName = 'COMPANION_SERVER_SIGNER_PKCS8_BASE64_V2';

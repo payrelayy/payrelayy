@@ -778,8 +778,7 @@ describe('disposable SQL migration baseline', () => {
         name !== screenshotProbeGrantRestoreMigrationName &&
         name !== publicDepositRegistryMigrationName &&
         name !== receiverSmsRuntimeRenewalMigrationName &&
-        name !== continuousDepositRuntimeRolesMigrationName &&
-        name !== permanentCompanionTrustMigrationName,
+        name !== continuousDepositRuntimeRolesMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename

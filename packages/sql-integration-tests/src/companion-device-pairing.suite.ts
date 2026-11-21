@@ -483,22 +483,16 @@ export function registerPermanentCompanionIdentitySqlTests(
     it('issues a nonexpiring certificate only for the permanent production signer', async () => {
       const client = getClient();
       await withRollback(client, async () => {
-        const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-        const signerPublicKey = Buffer.from(
-          signer.publicKey.export({ format: 'der', type: 'spki' }),
-        );
         const signerKeyId = 'companion-server-production-v2';
-        await client.query(
-          `insert into app.agent_platform_companion_server_signers (
-             id, signer_key_id, public_key_spki, public_key_spki_sha256,
-             signature_algorithm, signature_encoding, valid_from, valid_until
-           ) values ($1::uuid, $2::text, $3::text, $4::text,
-             'ecdsa-p256-sha256', 'ieee-p1363-base64url',
-             clock_timestamp() - interval '5 minutes',
-             '9999-12-31 00:00:00+00'::timestamptz)`,
-          [randomUUID(), signerKeyId, signerPublicKey.toString('base64url'), sha(signerPublicKey)],
+        const signer = await client.query<{ signer_key_id: string }>(
+          `select signer_key_id from app.agent_platform_companion_server_signers
+            where signer_key_id = $1::text
+              and public_key_spki_sha256 =
+                app.agent_platform_companion_public_key_digest(public_key_spki)
+              and valid_until = '9999-12-31 00:00:00+00'::timestamptz`,
+          [signerKeyId],
         );
-        signerPublicKey.fill(0);
+        expect(signer.rows).toEqual([{ signer_key_id: signerKeyId }]);
 
         const issued = await client.query<IssuedRow>(
           `select * from app.issue_agent_platform_companion_pairing(

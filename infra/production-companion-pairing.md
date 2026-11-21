@@ -7,7 +7,9 @@ production Owner, customer, Telegram, and Android services. It does not deploy a
 - Container: `fetanagent-production-production-companion-device-bridge-1`.
 - The gateway explicitly uses `production-companion-device-bridge:8085`. The staging bridge keeps
   its distinct existing name; requests cannot be load-balanced between the two environments.
-- The Owner and runtime require signer ID `companion-server-production-v1`.
+- The Owner and runtime require the same signer ID recorded in their reviewed release. The
+  original release uses `companion-server-production-v1`; the permanent identity release uses
+  `companion-server-production-v2`.
 - The independent server signing key and function-only database password are encrypted GitHub
   `production` environment secrets. No staging key, database password, or session is copied.
 - The container receives only its runtime database URL, its P-256 private key, the public manifest,
@@ -44,3 +46,27 @@ private key material, browser credentials, cookies, or profile.
 Verify an active production enrollment and the live production service health after pairing.
 Pairing does not authorize player ownership, an exact-five lookup, deposit verification, transfers,
 settlement, or money movement. These remain separate authorization and readiness decisions.
+
+## Permanent revocable v2 identity
+
+The production v1 signer and its certificates are append-only history. A v2 signer uses a separate
+P-256 key and a `9999-12-31` database validity marker; Owner revocation and server-signer revocation
+still stop it immediately. `stage-permanent-production-companion-signer.mjs` stages its private key
+only as an encrypted production environment secret and stages its public manifest under `_V2`
+variables. It refuses to overwrite an existing v2 key. The live v1 selector remains unchanged.
+
+After the v2 public trust is inserted in the production database, the issuer migration permits only
+that exact signer to issue permanent no-money certificates. The release workflow selects v2 only
+when the production environment variable `PRODUCTION_COMPANION_SIGNER_VERSION` is set to `v2`;
+otherwise it uses v1. The v2 release pins Owner to the v2 signer and its prepared bridge manifest
+must carry the same ID. Do not deploy that release until v2 is selected and its immutable public
+trust is installed. Keep the existing v1 key, variables, and release for rollback.
+
+For the one-time host cutover, drain routine jobs and resolve all final-action or uncertain
+attempts before stopping the current Companion. Preserve its local key/enrollment files, Chrome
+profile, and crash ledger. Deploy the reviewed v2 bridge, pair a new Windows-protected device key
+through a fresh Owner package, verify the signed no-money certificate, and then reactivate the
+separate routine deposit broker against that exact new certificate. Short signed requests, incoming
+payment evidence freshness, one-use claims, and the one-shot external action fence keep their
+existing deadlines. If pairing fails, restore the v1 selector and release with its preserved key
+and host files; no pending payment is safe to retry merely because the bridge was rolled back.

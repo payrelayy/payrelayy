@@ -375,7 +375,7 @@ assert.match(
   owner,
   /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: \$\{FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:\?/u,
 );
-assert.match(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1/u);
+assert.match(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v2/u);
 assert.match(
   owner,
   /OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY_FILE: \/run\/secrets\/owner_routine_enrollment_signer_pkcs8/u,
@@ -3523,6 +3523,9 @@ for (const sql of [companionTrust, companionLogin]) {
 assert.match(companionTrust, /companion-server-production-v1/u);
 assert.match(companionTrust, /exact_safe_replay/u);
 assert.match(companionTrust, /server_signer_revocations/u);
+assert.match(workflow, /PRODUCTION_COMPANION_SIGNER_VERSION/u);
+assert.match(workflow, /COMPANION_SERVER_SIGNER_PKCS8_BASE64_V2/u);
+assert.match(workflow, /grep -Fq "OWNER_COMPANION_SERVER_SIGNER_KEY_ID: \$COMPANION_SERVER_SIGNER_KEY_ID" infra\/compose\.production\.yaml/u);
 assert.match(companionLogin, /rolconnlimit = 1/u);
 assert.match(companionLogin, /not role\.rolbypassrls/u);
 assert.match(companionLogin, /not membership\.set_option/u);

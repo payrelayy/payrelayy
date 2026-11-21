@@ -467,7 +467,9 @@ function runtimeManifestFrom(
     typeof record.serverSignerKeyId !== 'string' ||
     !KEY_ID_PATTERN.test(record.serverSignerKeyId) ||
     (deploymentTarget === 'production' &&
-      record.serverSignerKeyId !== 'companion-server-production-v1') ||
+      !['companion-server-production-v1', 'companion-server-production-v2'].includes(
+        record.serverSignerKeyId,
+      )) ||
     typeof record.serverSignerPublicKeySpkiSha256 !== 'string' ||
     !SHA256_PATTERN.test(record.serverSignerPublicKeySpkiSha256)
   ) {

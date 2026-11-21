@@ -487,7 +487,7 @@ export function registerPermanentCompanionIdentitySqlTests(
         const signerPublicKey = Buffer.from(
           signer.publicKey.export({ format: 'der', type: 'spki' }),
         );
-        const signerKeyId = 'companion-server-production-v1';
+        const signerKeyId = 'companion-server-production-v2';
         await client.query(
           `insert into app.agent_platform_companion_server_signers (
              id, signer_key_id, public_key_spki, public_key_spki_sha256,

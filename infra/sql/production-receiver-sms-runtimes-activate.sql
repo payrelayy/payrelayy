@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 -- Called only by the guarded inert production deployment. This grants the
--- reviewed SMS functions and short-lived dedicated logins; it does not turn
+-- reviewed SMS functions and continuous dedicated logins; it does not turn
 -- on the SMS route or any financial switch.
 begin;
 set local search_path = pg_catalog;
@@ -61,14 +61,12 @@ where routine.oid in (
   select 1 / 0 as rejected;
 \endif
 
-select :'valid_until'::timestamptz > pg_catalog.clock_timestamp() + interval '1 day'
-  and :'valid_until'::timestamptz <= pg_catalog.clock_timestamp() + interval '30 days'
-  and :'ingest_password' ~ '^[0-9a-f]{64}$'
+select :'ingest_password' ~ '^[0-9a-f]{64}$'
   and :'settlement_password' ~ '^[0-9a-f]{64}$'
   and :'ingest_password' <> :'settlement_password'
-  as bounded_distinct_credentials
+  as distinct_credentials
 \gset
-\if :bounded_distinct_credentials
+\if :distinct_credentials
 \else
   \warn 'The SMS runtime credentials are unavailable.'
   select 1 / 0 as rejected;
@@ -81,8 +79,8 @@ grant execute on function app.list_owner_receiver_sms_old_payments(uuid,integer)
   to fetanagent_owner_control;
 
 alter role fetanagent_receiver_sms_ingest_runtime
-  login password :'ingest_password' valid until :'valid_until';
+  login password :'ingest_password' valid until 'infinity';
 alter role fetanagent_receiver_sms_settlement_runtime
-  login password :'settlement_password' valid until :'valid_until';
+  login password :'settlement_password' valid until 'infinity';
 
 commit;

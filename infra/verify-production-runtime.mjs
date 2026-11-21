@@ -975,7 +975,7 @@ assert.ok(
 );
 assert.ok(
   workflow.indexOf('[[ "$host_state" == \'absent\' ]]') <
-    workflow.indexOf('Activate exact SMS grants and short-lived runtime logins'),
+    workflow.indexOf('Activate exact SMS grants and continuous runtime logins'),
 );
 assert.match(
   directSqlTunnel,
@@ -1341,7 +1341,10 @@ assert.ok(workflow.includes(`[[ "$state" == '${smsEnabledState}' ]]`));
 for (const role of ['ingest', 'settlement']) {
   assert.match(
     receiverSmsActivateSql,
-    new RegExp(`alter role fetanagent_receiver_sms_${role}_runtime\\s+login password :`, 'u'),
+    new RegExp(
+      `alter role fetanagent_receiver_sms_${role}_runtime\\s+login password :'${role}_password' valid until 'infinity'`,
+      'u',
+    ),
   );
   assert.match(
     receiverSmsDisableSql,

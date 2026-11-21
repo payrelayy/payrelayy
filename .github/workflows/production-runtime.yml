@@ -1080,7 +1080,7 @@ jobs:
             }
           fi
 
-      - name: Activate exact SMS grants and short-lived runtime logins
+      - name: Activate exact SMS grants and continuous runtime logins
         if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true' && inputs.confirm_financial_switch_profile == 'disabled'
         id: sms_activation
         shell: bash
@@ -1100,11 +1100,9 @@ jobs:
         run: |
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
-          valid_until="$(date -u -d '+29 days' '+%Y-%m-%dT%H:%M:%SZ')"
           psql -X \
             -v ingest_password="$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" \
             -v settlement_password="$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" \
-            -v valid_until="$valid_until" \
             --file=infra/sql/production-receiver-sms-runtimes-activate.sql >/dev/null
 
       - name: Build the exact active production TeleBirr assignment manifest

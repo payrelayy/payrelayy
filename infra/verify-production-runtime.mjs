@@ -827,14 +827,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'd2d3064395b205e8cf3792f3167e0924f839d68c'/gu)].length,
+  [...workflow.matchAll(/status '3a3dbb693853b2bf6cbed53590f3696b3ed50c70'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='d2d3064395b205e8cf3792f3167e0924f839d68c'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -2996,13 +2996,28 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='d2d3064395b205e8cf3792f3167e0924f839d68c'",
   "readonly PREDECESSOR_SHA256='a21c3838aef57cfa296a4fe3fb255bd288b90cb559ba100690644518bcac8b1a'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='745f6aba3a045dad41d3b1ccd83bce4c7518fa19a0553879072e04d71e534896'",
   'require_staged_successor',
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 REGISTRY PREDECESSOR HELPER V1',
 ]) {
   assert.ok(registryPredecessorRotation.includes(value));
+}
+const continuousSmsRotation = await read(
+  'infra/operations/fetanagent-production-v2-continuous-sms-helper-rotation-v1.sh',
+);
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'",
+  "readonly PREDECESSOR_SHA256='745f6aba3a045dad41d3b1ccd83bce4c7518fa19a0553879072e04d71e534896'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_staged_successor',
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 CONTINUOUS SMS HELPER V1',
+]) {
+  assert.ok(continuousSmsRotation.includes(value));
 }
 const registryRotate = registryPredecessorRotation.slice(
   registryPredecessorRotation.indexOf('rotate() {'),

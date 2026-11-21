@@ -555,5 +555,21 @@ export function registerPermanentCompanionIdentitySqlTests(
         ).rejects.toThrow(/shared financial and legacy switches to remain disabled/u);
       });
     });
+
+    it('keeps the v1 pairing rule closed while CBE stays live', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        await expect(
+          client.query(
+            `select * from app.issue_agent_platform_companion_pairing(
+              $1::uuid, $2::uuid, $3::text, $4::text
+            )`,
+            [getOwnerAdminId(), randomUUID(), 'companion-server-production-v1', '0.1.4'],
+          ),
+        ).rejects.toThrow(/shared financial and legacy switches to remain disabled/u);
+      });
+    });
   });
 }

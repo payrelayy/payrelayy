@@ -35,8 +35,6 @@ begin
       v_old
     ) <> 0
     or pg_catalog.strpos(v_definition, v_old_message) = 0
-    or pg_catalog.strpos(v_definition, '''paymentAllowed'', false') = 0
-    or pg_catalog.strpos(v_definition, '''moneyMovementAllowed'', false') = 0
   then
     raise exception 'Companion pairing issuer changed; migration stopped.';
   end if;

@@ -298,70 +298,6 @@ export function registerCompanionDevicePairingSqlTests(
       ]);
     });
 
-    it('issues a nonexpiring certificate only for the permanent production signer', async () => {
-      const client = getClient();
-      await withRollback(client, async () => {
-        const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-        const signerPublicKey = Buffer.from(
-          signer.publicKey.export({ format: 'der', type: 'spki' }),
-        );
-        const signerKeyId = 'companion-server-production-v1';
-        await client.query(
-          `insert into app.agent_platform_companion_server_signers (
-             id, signer_key_id, public_key_spki, public_key_spki_sha256,
-             signature_algorithm, signature_encoding, valid_from, valid_until
-           ) values ($1::uuid, $2::text, $3::text, $4::text,
-             'ecdsa-p256-sha256', 'ieee-p1363-base64url',
-             clock_timestamp() - interval '5 minutes',
-             '9999-12-31 00:00:00+00'::timestamptz)`,
-          [randomUUID(), signerKeyId, signerPublicKey.toString('base64url'), sha(signerPublicKey)],
-        );
-        signerPublicKey.fill(0);
-
-        const issued = await client.query<IssuedRow>(
-          `select * from app.issue_agent_platform_companion_pairing(
-             $1::uuid, $2::uuid, $3::text, $4::text
-           )`,
-          [getOwnerAdminId(), randomUUID(), signerKeyId, '0.1.4'],
-        );
-        expect(issued.rows).toHaveLength(1);
-        const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-        const devicePublicKey = Buffer.from(
-          device.publicKey.export({ format: 'der', type: 'spki' }),
-        );
-        const claimed = await client.query<ClaimRow>(
-          `select * from app.claim_agent_platform_companion_pairing(
-             $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
-             $7::text, $8::text, $9::timestamptz, $10::timestamptz,
-             $11::timestamptz, $12::text
-           )`,
-          [
-            issued.rows[0]!.pairing_id,
-            issued.rows[0]!.pairing_nonce_digest,
-            sha(`permanent-pairing-${randomUUID()}`),
-            `sql-companion-${randomUUID().replaceAll('-', '').slice(0, 20)}`,
-            `sql-companion-key-${randomUUID().replaceAll('-', '').slice(0, 16)}`,
-            devicePublicKey.toString('base64url'),
-            sha(devicePublicKey),
-            '0.1.4',
-            issued.rows[0]!.issued_at,
-            issued.rows[0]!.expires_at,
-            new Date(),
-            signerKeyId,
-          ],
-        );
-        devicePublicKey.fill(0);
-        expect(claimed.rows).toHaveLength(1);
-        expect(claimed.rows[0]!.claim_state).toBe('claimed');
-        expect(claimed.rows[0]!.certificate_body?.validUntil).toBe('9999-12-31T00:00:00.000Z');
-        expect(claimed.rows[0]!.certificate_body).toMatchObject({
-          paymentAllowed: false,
-          moneyMovementAllowed: false,
-          transferDisabled: true,
-        });
-      });
-    });
-
     it('issues once, permanently binds one device key, recovers a lost response, and revokes it', async () => {
       const client = getClient();
       await withRollback(client, async () => {
@@ -535,6 +471,77 @@ export function registerCompanionDevicePairingSqlTests(
       expect(failure instanceof Error ? failure.message : String(failure)).toMatch(
         /session is not currently authorized/iu,
       );
+    });
+  });
+}
+
+export function registerPermanentCompanionIdentitySqlTests(
+  getClient: () => Client,
+  getOwnerAdminId: () => string,
+): void {
+  describe('permanent production Companion identity', () => {
+    it('issues a nonexpiring certificate only for the permanent production signer', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+        const signerPublicKey = Buffer.from(
+          signer.publicKey.export({ format: 'der', type: 'spki' }),
+        );
+        const signerKeyId = 'companion-server-production-v1';
+        await client.query(
+          `insert into app.agent_platform_companion_server_signers (
+             id, signer_key_id, public_key_spki, public_key_spki_sha256,
+             signature_algorithm, signature_encoding, valid_from, valid_until
+           ) values ($1::uuid, $2::text, $3::text, $4::text,
+             'ecdsa-p256-sha256', 'ieee-p1363-base64url',
+             clock_timestamp() - interval '5 minutes',
+             '9999-12-31 00:00:00+00'::timestamptz)`,
+          [randomUUID(), signerKeyId, signerPublicKey.toString('base64url'), sha(signerPublicKey)],
+        );
+        signerPublicKey.fill(0);
+
+        const issued = await client.query<IssuedRow>(
+          `select * from app.issue_agent_platform_companion_pairing(
+             $1::uuid, $2::uuid, $3::text, $4::text
+           )`,
+          [getOwnerAdminId(), randomUUID(), signerKeyId, '0.1.4'],
+        );
+        expect(issued.rows).toHaveLength(1);
+        const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+        const devicePublicKey = Buffer.from(
+          device.publicKey.export({ format: 'der', type: 'spki' }),
+        );
+        const claimed = await client.query<ClaimRow>(
+          `select * from app.claim_agent_platform_companion_pairing(
+             $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
+             $7::text, $8::text, $9::timestamptz, $10::timestamptz,
+             $11::timestamptz, $12::text
+           )`,
+          [
+            issued.rows[0]!.pairing_id,
+            issued.rows[0]!.pairing_nonce_digest,
+            sha(`permanent-pairing-${randomUUID()}`),
+            `sql-companion-${randomUUID().replaceAll('-', '').slice(0, 20)}`,
+            `sql-companion-key-${randomUUID().replaceAll('-', '').slice(0, 16)}`,
+            devicePublicKey.toString('base64url'),
+            sha(devicePublicKey),
+            '0.1.4',
+            issued.rows[0]!.issued_at,
+            issued.rows[0]!.expires_at,
+            new Date(),
+            signerKeyId,
+          ],
+        );
+        devicePublicKey.fill(0);
+        expect(claimed.rows).toHaveLength(1);
+        expect(claimed.rows[0]!.claim_state).toBe('claimed');
+        expect(claimed.rows[0]!.certificate_body?.validUntil).toBe('9999-12-31T00:00:00.000Z');
+        expect(claimed.rows[0]!.certificate_body).toMatchObject({
+          paymentAllowed: false,
+          moneyMovementAllowed: false,
+          transferDisabled: true,
+        });
+      });
     });
   });
 }

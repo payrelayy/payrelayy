@@ -9,7 +9,10 @@ import {
   readSqlIntegrationEnvironment,
   type SqlIntegrationEnvironment,
 } from './environment.js';
-import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
+import {
+  registerCompanionDevicePairingSqlTests,
+  registerPermanentCompanionIdentitySqlTests,
+} from './companion-device-pairing.suite.js';
 import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerCompanionExecutionActivationRequestSqlTests } from './companion-execution-activation-request.suite.js';
 import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
@@ -778,7 +781,8 @@ describe('disposable SQL migration baseline', () => {
         name !== screenshotProbeGrantRestoreMigrationName &&
         name !== publicDepositRegistryMigrationName &&
         name !== receiverSmsRuntimeRenewalMigrationName &&
-        name !== continuousDepositRuntimeRolesMigrationName,
+        name !== continuousDepositRuntimeRolesMigrationName &&
+        name !== permanentCompanionTrustMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -11534,6 +11538,10 @@ describe('production deposit policy cutovers', () => {
     }
   });
 
+  registerPermanentCompanionIdentitySqlTests(
+    () => postCutoverClient,
+    () => postCutoverOwnerAdminId,
+  );
   registerPostCutoverReceiverSmsRangeSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,

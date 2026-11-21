@@ -64,7 +64,9 @@ trust is installed. Keep the existing v1 key, variables, and release for rollbac
 
 For the one-time host cutover, drain routine jobs and resolve all final-action or uncertain
 attempts before stopping the current Companion. Preserve its local key/enrollment files, Chrome
-profile, and crash ledger. Deploy the reviewed v2 bridge, pair a new Windows-protected device key
+profile, and crash ledger. The two enrollment files are `device/companion-primary.key.json` and
+`device/companion-primary.enrollment.json` under the configured data root. Back up both together;
+the old enrollment is needed if the v1 release is restored. Deploy the reviewed v2 bridge, pair a new Windows-protected device key
 through a fresh Owner package, verify the signed no-money certificate, and then reactivate the
 separate routine deposit broker against that exact new certificate. Short signed requests, incoming
 payment evidence freshness, one-use claims, and the one-shot external action fence keep their

@@ -254,6 +254,8 @@ const screenshotProbeGrantPauseMigrationName =
 const screenshotProbeGrantRestoreMigrationName =
   '20261113233924_restore_screenshot_probe_grant_after_api_handoff_20261114.sql';
 const publicDepositRegistryMigrationName = '20261114120000_public_deposit_registry_read_model.sql';
+const receiverSmsRuntimeRenewalMigrationName =
+  '20261121203755_renew_receiver_sms_runtime_roles_20261121.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -770,7 +772,8 @@ describe('disposable SQL migration baseline', () => {
         name !== screenshotReferenceProbeGrantMigrationName &&
         name !== screenshotProbeGrantPauseMigrationName &&
         name !== screenshotProbeGrantRestoreMigrationName &&
-        name !== publicDepositRegistryMigrationName,
+        name !== publicDepositRegistryMigrationName &&
+        name !== receiverSmsRuntimeRenewalMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10748,6 +10751,7 @@ describe('production deposit policy cutovers', () => {
       screenshotProbeGrantPauseMigrationName,
       screenshotProbeGrantRestoreMigrationName,
       publicDepositRegistryMigrationName,
+      receiverSmsRuntimeRenewalMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),

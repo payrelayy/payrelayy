@@ -36,8 +36,9 @@ export const RECEIVER_SMS_INGEST_PREFLIGHT_SQL = `
         and not role.rolsuper and not role.rolcreatedb and not role.rolcreaterole
         and not role.rolreplication and not role.rolbypassrls
         and role.rolconnlimit = 1 and role.rolvaliduntil is not null
-        and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
-        and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '30 days 5 minutes')
+        and (role.rolvaliduntil = 'infinity'::timestamptz
+          or (role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
+            and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '30 days 5 minutes')))
       as runtime_safe,
     exists (select 1 from pg_catalog.pg_roles role where role.rolname = '${GROUP}'
       and not role.rolcanlogin and not role.rolinherit and not role.rolsuper

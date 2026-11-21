@@ -58,9 +58,11 @@ variables. It refuses to overwrite an existing v2 key. The live v1 selector rema
 After the v2 public trust is inserted in the production database, the issuer migration permits only
 that exact signer to issue permanent no-money certificates. The release workflow selects v2 only
 when the production environment variable `PRODUCTION_COMPANION_SIGNER_VERSION` is set to `v2`;
-otherwise it uses v1. The v2 release pins Owner to the v2 signer and its prepared bridge manifest
-must carry the same ID. Do not deploy that release until v2 is selected and its immutable public
-trust is installed. Keep the existing v1 key, variables, and release for rollback.
+otherwise it uses v1. The protected release bundle pins Owner to the selected signer, and its
+prepared bridge manifest must carry the same ID. A v1-selected release can remain operational
+while the host pairing is pending. Do not select or deploy v2 until its immutable public trust is
+installed and the host is ready for the one-time re-pairing. Keep the existing v1 key, variables,
+and release for rollback.
 
 For the one-time host cutover, drain routine jobs and resolve all final-action or uncertain
 attempts before stopping the current Companion. Preserve its local key/enrollment files, Chrome

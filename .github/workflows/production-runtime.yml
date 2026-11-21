@@ -513,7 +513,12 @@ jobs:
           set -euo pipefail
           [[ "$COMPANION_SIGNER_VERSION" == 'v1' || "$COMPANION_SIGNER_VERSION" == 'v2' ]]
           [[ "$COMPANION_SERVER_SIGNER_KEY_ID" == "companion-server-production-$COMPANION_SIGNER_VERSION" ]]
-          grep -Fq "OWNER_COMPANION_SERVER_SIGNER_KEY_ID: $COMPANION_SERVER_SIGNER_KEY_ID" infra/compose.production.yaml
+          grep -Fxq '      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1' infra/compose.production.yaml
+          sed "s/OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1/OWNER_COMPANION_SERVER_SIGNER_KEY_ID: $COMPANION_SERVER_SIGNER_KEY_ID/" \
+            infra/compose.production.yaml >"$RUNNER_TEMP/release/compose.production.yaml"
+          [[ "$(grep -Fc 'OWNER_COMPANION_SERVER_SIGNER_KEY_ID:' "$RUNNER_TEMP/release/compose.production.yaml")" -eq 1 ]]
+          grep -Fxq "      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: $COMPANION_SERVER_SIGNER_KEY_ID" \
+            "$RUNNER_TEMP/release/compose.production.yaml"
           secret_dir="$RUNNER_TEMP/production-protected"
           install -d -m 0700 "$secret_dir"
           umask 077
@@ -1402,7 +1407,7 @@ jobs:
           transfer_files=(
             "$RUNNER_TEMP/release/fetanagent-production-images.tar" \
             "$RUNNER_TEMP/release/runtime-deployment-mode" \
-            infra/compose.production.yaml \
+            "$RUNNER_TEMP/release/compose.production.yaml" \
             infra/compose.production.companion-execution-v2.yaml \
             infra/compose.production.routine-deposits.yaml \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \

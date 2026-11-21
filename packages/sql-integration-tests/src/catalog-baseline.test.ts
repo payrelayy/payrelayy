@@ -265,6 +265,8 @@ const permanentCompanionTrustMigrationName =
   '20261121214000_permanent_production_companion_trust.sql';
 const permanentCompanionSignerProvisionMigrationName =
   '20261121221500_permanent_production_companion_signer_public_trust.sql';
+const permanentCompanionCbePairingMigrationName =
+  '20261121223000_permanent_companion_pairing_with_cbe_live.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -785,7 +787,8 @@ describe('disposable SQL migration baseline', () => {
         name !== receiverSmsRuntimeRenewalMigrationName &&
         name !== continuousDepositRuntimeRolesMigrationName &&
         name !== permanentCompanionTrustMigrationName &&
-        name !== permanentCompanionSignerProvisionMigrationName,
+        name !== permanentCompanionSignerProvisionMigrationName &&
+        name !== permanentCompanionCbePairingMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10767,6 +10770,7 @@ describe('production deposit policy cutovers', () => {
       continuousDepositRuntimeRolesMigrationName,
       permanentCompanionTrustMigrationName,
       permanentCompanionSignerProvisionMigrationName,
+      permanentCompanionCbePairingMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),

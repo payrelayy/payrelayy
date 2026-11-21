@@ -480,10 +480,12 @@ export function registerPermanentCompanionIdentitySqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('permanent production Companion identity', () => {
-    it('issues a nonexpiring certificate only for the permanent production signer', async () => {
+    it('issues a nonexpiring v2 certificate with CBE live and shared financial gates off', async () => {
       const client = getClient();
       await withRollback(client, async () => {
         const signerKeyId = 'companion-server-production-v2';
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
         const signer = await client.query<{ signer_key_id: string }>(
           `select signer_key_id from app.agent_platform_companion_server_signers
             where signer_key_id = $1::text
@@ -535,6 +537,22 @@ export function registerPermanentCompanionIdentitySqlTests(
           moneyMovementAllowed: false,
           transferDisabled: true,
         });
+      });
+    });
+
+    it('refuses v2 pairing when a shared financial gate is live', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('cbe_birr_authoritative_verification', 'payment_verification')`);
+        await expect(
+          client.query(
+            `select * from app.issue_agent_platform_companion_pairing(
+              $1::uuid, $2::uuid, $3::text, $4::text
+            )`,
+            [getOwnerAdminId(), randomUUID(), 'companion-server-production-v2', '0.1.4'],
+          ),
+        ).rejects.toThrow(/shared financial and legacy switches to remain disabled/u);
       });
     });
   });

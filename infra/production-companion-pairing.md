@@ -72,3 +72,8 @@ separate routine deposit broker against that exact new certificate. Short signed
 payment evidence freshness, one-use claims, and the one-shot external action fence keep their
 existing deadlines. If pairing fails, restore the v1 selector and release with its preserved key
 and host files; no pending payment is safe to retry merely because the bridge was rolled back.
+
+The v2 pairing package requires the two shared deposit gates and all legacy/withdrawal gates to be
+off. The independent CBE Birr verification switch may remain live; it cannot admit a credit while
+the shared gates are off. The v1 pairing rule remains stricter. Neither the pairing migration nor
+the package changes any financial switch.

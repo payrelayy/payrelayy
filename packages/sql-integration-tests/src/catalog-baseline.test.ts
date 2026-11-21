@@ -9,7 +9,10 @@ import {
   readSqlIntegrationEnvironment,
   type SqlIntegrationEnvironment,
 } from './environment.js';
-import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
+import {
+  registerCompanionDevicePairingSqlTests,
+  registerPermanentCompanionIdentitySqlTests,
+} from './companion-device-pairing.suite.js';
 import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerCompanionExecutionActivationRequestSqlTests } from './companion-execution-activation-request.suite.js';
 import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
@@ -258,6 +261,8 @@ const receiverSmsRuntimeRenewalMigrationName =
   '20261121203755_renew_receiver_sms_runtime_roles_20261121.sql';
 const continuousDepositRuntimeRolesMigrationName =
   '20261121211931_continuous_active_deposit_runtime_roles_20261121.sql';
+const permanentCompanionTrustMigrationName =
+  '20261121214000_permanent_production_companion_trust.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -776,7 +781,8 @@ describe('disposable SQL migration baseline', () => {
         name !== screenshotProbeGrantRestoreMigrationName &&
         name !== publicDepositRegistryMigrationName &&
         name !== receiverSmsRuntimeRenewalMigrationName &&
-        name !== continuousDepositRuntimeRolesMigrationName,
+        name !== continuousDepositRuntimeRolesMigrationName &&
+        name !== permanentCompanionTrustMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10756,6 +10762,7 @@ describe('production deposit policy cutovers', () => {
       publicDepositRegistryMigrationName,
       receiverSmsRuntimeRenewalMigrationName,
       continuousDepositRuntimeRolesMigrationName,
+      permanentCompanionTrustMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -11531,6 +11538,10 @@ describe('production deposit policy cutovers', () => {
     }
   });
 
+  registerPermanentCompanionIdentitySqlTests(
+    () => postCutoverClient,
+    () => postCutoverOwnerAdminId,
+  );
   registerPostCutoverReceiverSmsRangeSqlTests(
     () => postCutoverClient,
     () => ownerAuthUserId,

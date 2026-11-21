@@ -3525,7 +3525,10 @@ assert.match(companionTrust, /exact_safe_replay/u);
 assert.match(companionTrust, /server_signer_revocations/u);
 assert.match(workflow, /PRODUCTION_COMPANION_SIGNER_VERSION/u);
 assert.match(workflow, /COMPANION_SERVER_SIGNER_PKCS8_BASE64_V2/u);
-assert.match(workflow, /grep -Fq "OWNER_COMPANION_SERVER_SIGNER_KEY_ID: \$COMPANION_SERVER_SIGNER_KEY_ID" infra\/compose\.production\.yaml/u);
+assert.match(
+  workflow,
+  /grep -Fq "OWNER_COMPANION_SERVER_SIGNER_KEY_ID: \$COMPANION_SERVER_SIGNER_KEY_ID" infra\/compose\.production\.yaml/u,
+);
 assert.match(companionLogin, /rolconnlimit = 1/u);
 assert.match(companionLogin, /not role\.rolbypassrls/u);
 assert.match(companionLogin, /not membership\.set_option/u);

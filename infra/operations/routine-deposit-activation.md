@@ -7,12 +7,14 @@ operator hosts, after the non-financial verification and disposable SQL suite pa
 The non-pilot path is now implemented: Telegram captures a fresh paid candidate. The paired phone
 verifies a TeleBirr receipt over HTTPS or signs a CBE Birr receiving-phone SMS; the isolated
 settlement worker creates one payment claim and queued job, and the Windows worker credits only
-one verified job at a time. The disposable SQL suite tests the claim/job lineage and replays. A
-production no-money TeleBirr phone rehearsal must still show a recent signed V2
-`official_tls_origin` observation matching server policy before transport activation.
+one verified job at a time. The disposable SQL suite tests the claim/job lineage and replays.
+Before transport and financial activation, require either a recent signed V2 TeleBirr
+`official_tls_origin` no-money observation with its dedicated phone and settlement roles,
+or a fresh signed receiver-SMS phone check-in with its enabled route and dedicated ingest
+and settlement roles. The latter is the current production payment source.
 
-The activation SQL checks that observation, the dedicated phone/settlement logins and source
-guard, no active or unisolated routine execution attempt, and both shared deposit switches
+The activation SQL checks that source evidence, the routine broker role, no active or
+unisolated routine execution attempt, and both shared deposit switches
 **disabled**. A durably isolated Owner-review case retains its one-use payment claim.
 The independent CBE Birr switch must match the operator's explicit `disabled` or `live`
 confirmation; the four legacy/withdrawal switches must be disabled.
@@ -195,8 +197,8 @@ Confirm all of the following without creating a test payment:
 
 The migration `routine_telebirr_financial_activation_boundary` installs a dormant
 postgres-only operator procedure. Applying or deploying it changes **no** financial switch.
-After the exact release is deployed, the current phone has a fresh signed V2
-`official_tls_origin` no-money proof, the paid settlement and poll roles are healthy,
+After the exact release is deployed, the current phone has one of the signed source
+proofs above and its corresponding settlement roles are healthy,
 the Windows worker is connected and idle, and the stop operation is ready, dispatch
 `production-routine-financial-activate.yml` on `main`. Confirm the exact deployed SHA,
 production project ref, authorizing Owner auth-user UUID, and the independently observed CBE

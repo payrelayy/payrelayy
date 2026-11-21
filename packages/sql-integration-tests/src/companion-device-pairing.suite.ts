@@ -480,25 +480,21 @@ export function registerPermanentCompanionIdentitySqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('permanent production Companion identity', () => {
-    it('issues a nonexpiring certificate only for the permanent production signer', async () => {
+    it('issues a nonexpiring v2 certificate with CBE live and shared financial gates off', async () => {
       const client = getClient();
       await withRollback(client, async () => {
-        const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-        const signerPublicKey = Buffer.from(
-          signer.publicKey.export({ format: 'der', type: 'spki' }),
-        );
         const signerKeyId = 'companion-server-production-v2';
-        await client.query(
-          `insert into app.agent_platform_companion_server_signers (
-             id, signer_key_id, public_key_spki, public_key_spki_sha256,
-             signature_algorithm, signature_encoding, valid_from, valid_until
-           ) values ($1::uuid, $2::text, $3::text, $4::text,
-             'ecdsa-p256-sha256', 'ieee-p1363-base64url',
-             clock_timestamp() - interval '5 minutes',
-             '9999-12-31 00:00:00+00'::timestamptz)`,
-          [randomUUID(), signerKeyId, signerPublicKey.toString('base64url'), sha(signerPublicKey)],
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        const signer = await client.query<{ signer_key_id: string }>(
+          `select signer_key_id from app.agent_platform_companion_server_signers
+            where signer_key_id = $1::text
+              and public_key_spki_sha256 =
+                app.agent_platform_companion_public_key_digest(public_key_spki)
+              and valid_until = '9999-12-31 00:00:00+00'::timestamptz`,
+          [signerKeyId],
         );
-        signerPublicKey.fill(0);
+        expect(signer.rows).toEqual([{ signer_key_id: signerKeyId }]);
 
         const issued = await client.query<IssuedRow>(
           `select * from app.issue_agent_platform_companion_pairing(
@@ -541,6 +537,38 @@ export function registerPermanentCompanionIdentitySqlTests(
           moneyMovementAllowed: false,
           transferDisabled: true,
         });
+      });
+    });
+
+    it('refuses v2 pairing when a shared financial gate is live', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('cbe_birr_authoritative_verification', 'payment_verification')`);
+        await expect(
+          client.query(
+            `select * from app.issue_agent_platform_companion_pairing(
+              $1::uuid, $2::uuid, $3::text, $4::text
+            )`,
+            [getOwnerAdminId(), randomUUID(), 'companion-server-production-v2', '0.1.4'],
+          ),
+        ).rejects.toThrow(/shared financial and legacy switches to remain disabled/u);
+      });
+    });
+
+    it('keeps the v1 pairing rule closed while CBE stays live', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        await expect(
+          client.query(
+            `select * from app.issue_agent_platform_companion_pairing(
+              $1::uuid, $2::uuid, $3::text, $4::text
+            )`,
+            [getOwnerAdminId(), randomUUID(), 'companion-server-production-v1', '0.1.4'],
+          ),
+        ).rejects.toThrow(/shared financial and legacy switches to remain disabled/u);
       });
     });
   });

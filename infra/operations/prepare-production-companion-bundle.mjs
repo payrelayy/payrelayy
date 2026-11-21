@@ -72,7 +72,7 @@ export function prepareProductionCompanionBundle(environment, directory) {
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
         signerId ?? '',
       ) ||
-      keyId !== 'companion-server-production-v1'
+      !['companion-server-production-v1', 'companion-server-production-v2'].includes(keyId)
     )
       unavailable();
     const privateBytes = decode(environment.COMPANION_SERVER_SIGNER_PKCS8_BASE64);

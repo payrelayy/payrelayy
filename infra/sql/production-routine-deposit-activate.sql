@@ -33,9 +33,9 @@ set local lock_timeout = '3s';
 set local idle_in_transaction_session_timeout = '20s';
 
 -- Fail closed on the exact production path, not the retired pilot lineage. A recent
--- no-money signed V2 official-origin observation proves the paired-phone source route;
--- disposable SQL tests prove the one-use claim/job path. Keep both shared
--- financial gates disabled while provisioning this separate Windows transport
+-- no-money official-origin observation or a fresh signed receiver-SMS phone check-in
+-- proves the paired-phone source route; disposable SQL tests prove the one-use
+-- claim/job path. Keep both shared financial gates disabled while provisioning this separate Windows transport
 -- credential. The independently managed CBE switch must match the operator's
 -- explicit expected mode; this operation never changes it.
 select (
@@ -53,12 +53,13 @@ select (
      'telebirr_authoritative_verification', 'withdrawal_collection',
      'withdrawal_validation'
    )
-) and exists (
-  select 1 from app.routine_telebirr_signed_observation_payloads observation
-  join app.routine_telebirr_lookup_challenges challenge
-    on challenge.challenge_id = observation.challenge_id
-  join app.routine_telebirr_device_enrollments enrollment
-    on enrollment.id = challenge.device_enrollment_id
+) and (
+  (exists (
+    select 1 from app.routine_telebirr_signed_observation_payloads observation
+    join app.routine_telebirr_lookup_challenges challenge
+      on challenge.challenge_id = observation.challenge_id
+    join app.routine_telebirr_device_enrollments enrollment
+      on enrollment.id = challenge.device_enrollment_id
    where observation.recorded_at >= pg_catalog.clock_timestamp() - interval '24 hours'
      and observation.server_policy_result = 'signed_evidence_matches_policy'
      and observation.signed_observation ->> 'contractVersion' = '2'
@@ -70,28 +71,57 @@ select (
        select 1 from app.routine_telebirr_device_enrollment_revocations revocation
         where revocation.enrollment_id = enrollment.id
      )
-) and (
-  select pg_catalog.count(*) = 3
-    and pg_catalog.bool_and(runtime.rolcanlogin
-      and runtime.rolvaliduntil > pg_catalog.clock_timestamp() + interval '1 hour')
-    from pg_catalog.pg_roles runtime
-   where runtime.rolname in (
-     'fetanagent_routine_telebirr_no_money_runtime',
-     'fetanagent_routine_telebirr_paid_poll_runtime',
-     'fetanagent_routine_telebirr_paid_settlement_runtime'
-   )
-) and exists (
-  select 1 from pg_catalog.pg_proc routine
-   where routine.oid = pg_catalog.to_regprocedure(
-     'app.finalize_routine_telebirr_paid_observation(uuid)')
-     and routine.proowner = 'postgres'::pg_catalog.regrole
-     and routine.prosecdef
-     and pg_catalog.strpos(routine.prosrc, 'sourceOriginAttestation') > 0
-     and pg_catalog.strpos(routine.prosrc,
-       'routine_telebirr_paid_settlement_session_allowed') > 0
-) and pg_catalog.to_regprocedure(
-  'app.list_routine_telebirr_paid_settlement_candidates(timestamptz,uuid,integer)'
-) is not null and not exists (
+  ) and (
+    select pg_catalog.count(*) = 3
+      and pg_catalog.bool_and(runtime.rolcanlogin
+        and runtime.rolvaliduntil > pg_catalog.clock_timestamp() + interval '1 hour')
+      from pg_catalog.pg_roles runtime
+     where runtime.rolname in (
+       'fetanagent_routine_telebirr_no_money_runtime',
+       'fetanagent_routine_telebirr_paid_poll_runtime',
+       'fetanagent_routine_telebirr_paid_settlement_runtime'
+     )
+  ) and exists (
+    select 1 from pg_catalog.pg_proc routine
+     where routine.oid = pg_catalog.to_regprocedure(
+       'app.finalize_routine_telebirr_paid_observation(uuid)')
+       and routine.proowner = 'postgres'::pg_catalog.regrole
+       and routine.prosecdef
+       and pg_catalog.strpos(routine.prosrc, 'sourceOriginAttestation') > 0
+       and pg_catalog.strpos(routine.prosrc,
+         'routine_telebirr_paid_settlement_session_allowed') > 0
+  ) and pg_catalog.to_regprocedure(
+    'app.list_routine_telebirr_paid_settlement_candidates(timestamptz,uuid,integer)'
+  ) is not null)
+  or (exists (
+    select 1 from app.receiver_sms_device_status status
+    join app.routine_telebirr_device_enrollments enrollment
+      on enrollment.id = status.enrollment_id
+   where status.state = 'ready'
+     and status.received_at between pg_catalog.clock_timestamp() - interval '2 minutes'
+       and pg_catalog.clock_timestamp() + interval '1 minute'
+     and status.observed_at between pg_catalog.clock_timestamp() - interval '2 minutes'
+       and pg_catalog.clock_timestamp() + interval '1 minute'
+     and enrollment.valid_from <= pg_catalog.clock_timestamp()
+     and enrollment.valid_until > pg_catalog.clock_timestamp() + interval '1 hour'
+     and not exists (
+       select 1 from app.routine_telebirr_device_enrollment_revocations revocation
+        where revocation.enrollment_id = enrollment.id
+     )
+  ) and exists (
+    select 1 from app.receiver_sms_route_control control
+     where control.singleton and control.enabled
+  ) and (
+    select pg_catalog.count(*) = 2
+      and pg_catalog.bool_and(runtime.rolcanlogin
+        and runtime.rolvaliduntil > pg_catalog.clock_timestamp() + interval '1 hour')
+      from pg_catalog.pg_roles runtime
+     where runtime.rolname in (
+       'fetanagent_receiver_sms_ingest_runtime',
+       'fetanagent_receiver_sms_settlement_runtime'
+     )
+  ))
+) and not exists (
   select 1 from app.routine_telebirr_execution_bindings binding
   join app.deposit_execution_attempts attempt
     on attempt.deposit_job_id = binding.execution_job_id

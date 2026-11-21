@@ -534,6 +534,25 @@ describe('companion device bridge configuration', () => {
     },
   );
 
+  it('loads a separately trusted production v2 signer without financial authority', () => {
+    const runtimeManifest = productionManifest.replace(
+      'companion-server-production-v1',
+      'companion-server-production-v2',
+    );
+    const config = loadCompanionDeviceBridgeConfig(
+      productionEnvironment,
+      guardedDependencies(productionFiles(productionDatabaseUrl, runtimeManifest)),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      signer: { keyId: 'companion-server-production-v2' },
+    });
+    expect(redactedCompanionDeviceBridgeConfigForLog(config)).toMatchObject({
+      financialActionAllowed: false,
+      moneyMovementAllowed: false,
+    });
+  });
+
   it.each([
     ['staging session route', databaseUrl, productionManifest],
     ['staging direct route', directDatabaseUrl, productionManifest],

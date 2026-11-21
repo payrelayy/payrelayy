@@ -318,6 +318,26 @@ function successfulFetch(
 }
 
 describe('Windows companion device enrollment', () => {
+  it('accepts and persists a revocable year-9999 no-money certificate', async () => {
+    const dataRoot = await root();
+    const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const publicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+    const validUntil = '9999-12-31T00:00:00.000Z';
+    await expect(
+      ensureCompanionDeviceEnrollment({
+        dataRoot,
+        releaseSha,
+        pairingPackage: pairingPackage(publicKey),
+        fetch: successfulFetch(server.privateKey, { validUntil }) as unknown as typeof fetch,
+        now: () => now,
+        protector: protector(),
+      }),
+    ).resolves.toMatchObject({ devicePaired: true });
+    await expect(
+      readFile(join(dataRoot, 'device', 'companion-primary.enrollment.json'), 'utf8'),
+    ).resolves.toContain(validUntil);
+  });
+
   it('assesses a newly issued certificate after reading the response, not before pairing started', async () => {
     const dataRoot = await root();
     const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });

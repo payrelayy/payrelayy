@@ -98,6 +98,23 @@ test('uses the exact production direct endpoint for stopped SMS recovery', (t) =
   assert.equal(url.search, '?sslmode=verify-full');
 });
 
+test('prepares the independently provisioned permanent v2 signer', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'fetanagent-companion-v2-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { environment, manifest } = fixture();
+  manifest.serverSignerKeyId = 'companion-server-production-v2';
+  environment.COMPANION_SERVER_SIGNER_KEY_ID = manifest.serverSignerKeyId;
+  environment.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64 = Buffer.from(
+    JSON.stringify(manifest),
+  ).toString('base64');
+  prepareProductionCompanionBundle(environment, directory);
+  assert.equal(
+    JSON.parse(readFileSync(join(directory, 'companion-bridge-runtime-manifest.v3.json'), 'utf8'))
+      .serverSignerKeyId,
+    'companion-server-production-v2',
+  );
+});
+
 test('rejects any unreviewed production database route', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'fetanagent-companion-route-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

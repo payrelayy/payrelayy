@@ -3027,7 +3027,8 @@ const continuousSmsRotation = await read(
   'infra/operations/fetanagent-production-v2-continuous-sms-helper-rotation-v1.sh',
 );
 // Historical rotation artifacts remain pinned to the helper digest they installed.
-const continuousSmsHistoricalHelperDigest = 'fe4f776cfcfecd21de8487279d77907ab194362b4f61ca2c853e922ccc884b4a';
+const continuousSmsHistoricalHelperDigest =
+  'fe4f776cfcfecd21de8487279d77907ab194362b4f61ca2c853e922ccc884b4a';
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'",

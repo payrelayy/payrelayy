@@ -75,7 +75,63 @@ describe('Telegram deposit outcome notifier', () => {
       },
       controller.signal,
     );
-    expect(waits).toEqual([2_000]);
+    expect(waits.length).toBeGreaterThan(0);
+    expect(waits.every((milliseconds) => milliseconds === 2_000)).toBe(true);
+  });
+
+  it('delivers a confirmed credit while notification housekeeping is waiting', async () => {
+    const controller = new AbortController();
+    let releaseHousekeeping!: () => void;
+    const housekeeping = new Promise<void>((resolve) => {
+      releaseHousekeeping = resolve;
+    });
+    let markSent!: () => void;
+    const sent = new Promise<void>((resolve) => {
+      markSent = resolve;
+    });
+    let outcomeClaims = 0;
+    const work = runTelegramDepositOutcomeNotifier(
+      {
+        request: async (action) => {
+          if (action.kind === 'deposit_outcome_claim') {
+            outcomeClaims += 1;
+            return outcomeClaims === 1 ? { version: 1, outcome: 'deposit_outcome_none' } : delivery;
+          }
+          if (action.kind === 'deposit_outcome_complete')
+            return { version: 1, outcome: 'deposit_outcome_completed', accepted: true };
+          if (action.kind === 'player_validation_outcome_claim') {
+            await housekeeping;
+            return { version: 1, outcome: 'player_validation_outcome_none' };
+          }
+          if (action.kind === 'deposit_temporary_cleanup_claim')
+            return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
+          if (action.kind === 'payment_instruction_expiry_claim')
+            return { version: 1, outcome: 'payment_instruction_expiry_none' };
+          throw new Error('Unexpected action.');
+        },
+        send: async () => {
+          markSent();
+          controller.abort();
+          return { message_id: 42 };
+        },
+        delete: async () => true,
+        sleep: async () => {},
+      },
+      controller.signal,
+    );
+    try {
+      expect(
+        await Promise.race([
+          sent.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+        ]),
+      ).toBe(true);
+    } finally {
+      controller.abort();
+      releaseHousekeeping();
+      await work;
+    }
+    expect(outcomeClaims).toBe(2);
   });
 
   it('retires an expired payment card in the background without sending a new chat message', async () => {

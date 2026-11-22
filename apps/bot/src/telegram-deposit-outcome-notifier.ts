@@ -120,11 +120,13 @@ async function complete(
 export async function processOneTelegramDepositOutcome(
   dependencies: TelegramDepositOutcomeNotifierDependencies,
 ): Promise<'none' | 'processed'> {
+  const claimStartedAt = performance.now();
   const claimed = await dependencies.request({ version: 1, kind: 'deposit_outcome_claim' });
   if (claimed.outcome === 'deposit_outcome_none') return 'none';
   if (claimed.outcome !== 'deposit_outcome_delivery') {
     throw new Error('Unexpected Telegram deposit outcome response.');
   }
+  const claimMs = Math.round(performance.now() - claimStartedAt);
   const message = presentTelegramDepositOutcome(claimed);
   if (message === null) {
     await complete(dependencies, claimed, 'unavailable', null);
@@ -132,6 +134,7 @@ export async function processOneTelegramDepositOutcome(
   }
   let result: 'sent' | 'retry' | 'unavailable' = 'retry';
   let messageId: number | null = null;
+  const sendStartedAt = performance.now();
   try {
     const sent = await dependencies.send(
       Number(claimed.privateChatId),
@@ -147,7 +150,19 @@ export async function processOneTelegramDepositOutcome(
     // A customer blocking the bot cannot be retried; transient Telegram/network failures can.
     result = telegramErrorCode(error) === 403 ? 'unavailable' : 'retry';
   }
+  const sendMs = Math.round(performance.now() - sendStartedAt);
+  const acknowledgeStartedAt = performance.now();
   await complete(dependencies, claimed, result, messageId);
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_bot',
+      event: 'deposit_outcome_delivery_timing',
+      claimMs,
+      sendMs,
+      acknowledgeMs: Math.round(performance.now() - acknowledgeStartedAt),
+      result,
+    }),
+  );
   return 'processed';
 }
 
@@ -200,33 +215,49 @@ export async function runTelegramDepositOutcomeNotifier(
     (async (milliseconds, waitSignal) => {
       await delay(milliseconds, undefined, { signal: waitSignal });
     });
-  while (!signal.aborted) {
-    let pause = 0;
+  const pauseUnlessStopped = async (milliseconds: number): Promise<void> => {
+    if (milliseconds <= 0 || signal.aborted) return;
     try {
-      const outcome = await processOneTelegramDepositOutcome(dependencies);
-      const playerValidation = await processOneTelegramPlayerValidationOutcome(dependencies);
-      const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
-      const instruction = await processOneTelegramPaymentInstructionExpiry({
-        request: dependencies.request,
-        delete: dependencies.delete,
-      });
-      pause =
-        outcome === 'none' &&
-        playerValidation === 'none' &&
-        cleanup === 'none' &&
-        instruction === 'none'
-          ? IDLE_OUTCOME_POLL_MS
-          : 0;
+      await sleep(milliseconds, signal);
     } catch {
-      console.warn('Telegram deposit outcome delivery is temporarily unavailable.');
-      pause = 5_000;
+      /* shutdown */
     }
-    if (pause > 0 && !signal.aborted) {
+  };
+  const deliverOutcomes = async (): Promise<void> => {
+    while (!signal.aborted) {
+      let pause = 0;
       try {
-        await sleep(pause, signal);
+        pause =
+          (await processOneTelegramDepositOutcome(dependencies)) === 'none'
+            ? IDLE_OUTCOME_POLL_MS
+            : 0;
       } catch {
-        /* shutdown */
+        console.warn('Telegram deposit outcome delivery is temporarily unavailable.');
+        pause = 5_000;
       }
+      await pauseUnlessStopped(pause);
     }
-  }
+  };
+  const processHousekeeping = async (): Promise<void> => {
+    while (!signal.aborted) {
+      let pause = 0;
+      try {
+        const playerValidation = await processOneTelegramPlayerValidationOutcome(dependencies);
+        const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
+        const instruction = await processOneTelegramPaymentInstructionExpiry({
+          request: dependencies.request,
+          delete: dependencies.delete,
+        });
+        pause =
+          playerValidation === 'none' && cleanup === 'none' && instruction === 'none'
+            ? IDLE_OUTCOME_POLL_MS
+            : 0;
+      } catch {
+        console.warn('Telegram notification housekeeping is temporarily unavailable.');
+        pause = 5_000;
+      }
+      await pauseUnlessStopped(pause);
+    }
+  };
+  await Promise.all([deliverOutcomes(), processHousekeeping()]);
 }

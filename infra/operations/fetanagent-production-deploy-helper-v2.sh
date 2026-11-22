@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_GUARDED_PREDECESSOR_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'
+readonly HISTORICAL_THREE_SECOND_API_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -247,8 +247,7 @@ handoff_routine_marker() {
   local sha="$1" previous="$2" release="$3" previous_sha receipt
   previous_sha="${previous##*/}"
   receipt="$STATE_ROOT/pending-$sha.routine-marker"
-  [[ "$previous_sha" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
-    "$previous" == "$(require_release "$CBE_GUARDED_PREDECESSOR_SHA")" &&
+  [[ "$previous" == "$(require_release "$previous_sha")" &&
     "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] ||
     die 'the routine-deposit handoff is outside the reviewed release'
   [[ ! -e "$COMPANION_EXECUTION_V2_MARKER" && ! -L "$COMPANION_EXECUTION_V2_MARKER" ]] ||
@@ -269,8 +268,7 @@ restore_routine_marker_for_rollback() {
   local sha="$1" previous="$2" receipt="$STATE_ROOT/pending-$1.routine-marker" previous_sha marker_sha
   [[ -e "$receipt" || -L "$receipt" ]] || return 0
   previous_sha="${previous##*/}"
-  [[ "$previous_sha" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
-    "$previous" == "$(require_release "$CBE_GUARDED_PREDECESSOR_SHA")" &&
+  [[ "$previous" == "$(require_release "$previous_sha")" &&
     ! -L "$receipt" && -f "$receipt" &&
     "$(stat --format='%u:%g:%a:%h' "$receipt")" == '0:0:600:1' &&
     "$(<"$receipt")" == "$previous_sha" ]] ||
@@ -771,7 +769,7 @@ negative_companion_public_smoke() {
 # with a fresh bounded HTTP 200; other services still need Docker's healthy state.
 predecessor_api_timeout_only() {
   local sha="$1" id="$2" inspection probe
-  [[ "$sha" == "$CBE_GUARDED_PREDECESSOR_SHA" ]] || return 1
+  [[ "$sha" == "$HISTORICAL_THREE_SECOND_API_SHA" ]] || return 1
   inspection="$(docker inspect "$id")" || return 1
   probe="fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
   jq -e --arg sha "$sha" --arg probe "$probe" '
@@ -856,6 +854,15 @@ case "${1:-}" in
       done
       printf 'absent\n'
     fi
+    ;;
+
+  current-sha)
+    [[ $# -eq 1 && -L "$CURRENT_LINK" ]] || die 'current-sha requires a running production release'
+    release="$(readlink -f -- "$CURRENT_LINK")" || die 'the current release link is unsafe'
+    sha="${release##*/}"
+    [[ "$release" == "$(require_release "$sha")" ]] ||
+      die 'the current release link is outside the sealed production release'
+    printf '%s\n' "$sha"
     ;;
 
   check-release-mode)
@@ -1241,9 +1248,16 @@ case "${1:-}" in
       die 'only the current production release can be finalized'
     routine_receipt="$STATE_ROOT/pending-$sha.routine-marker"
     if [[ -e "$routine_receipt" || -L "$routine_receipt" ]]; then
-      [[ ! -L "$routine_receipt" && -f "$routine_receipt" &&
+      previous_file="$STATE_ROOT/pending-$sha.previous"
+      [[ ! -L "$previous_file" && -f "$previous_file" &&
+        "$(stat --format='%u:%g:%a' "$previous_file")" == '0:0:600' ]] ||
+        die 'the pending predecessor receipt is unsafe'
+      previous="$(<"$previous_file")"
+      previous_sha="${previous##*/}"
+      [[ "$previous" == "$(require_release "$previous_sha")" &&
+        ! -L "$routine_receipt" && -f "$routine_receipt" &&
         "$(stat --format='%u:%g:%a:%h' "$routine_receipt")" == '0:0:600:1' &&
-        "$(<"$routine_receipt")" == "$CBE_GUARDED_PREDECESSOR_SHA" ]] ||
+        "$(<"$routine_receipt")" == "$previous_sha" ]] ||
         die 'the routine-deposit handoff receipt is unsafe'
       routine_deposits_enabled_for_release "$release" ||
         die 'the signed routine transport was not retained'
@@ -1310,6 +1324,6 @@ case "${1:-}" in
     ;;
 
   *)
-    die 'expected verify, preflight, current-state, check-release-mode, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, check-rollback, or stop'
+    die 'expected verify, preflight, current-state, current-sha, check-release-mode, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, check-rollback, or stop'
     ;;
 esac

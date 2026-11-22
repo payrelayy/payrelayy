@@ -54,6 +54,7 @@ on:
           - disabled
           - cbe-live-v1
           - cbe-stopped-v1
+          - cbe-stopped-sms-v1
       confirm_database_route:
         description: Pooler normally; direct over pinned SSH only for stopped SMS recovery
         required: true
@@ -114,13 +115,15 @@ jobs:
             "$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled' ]]
           [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'disabled' ||
             "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
-            "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]
+            "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ||
+            "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]
           if [[ "$REQUESTED_MODE" != 'deploy-inert' ]]; then
             [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ]]
             [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'disabled' ]]
           fi
           if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
-                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ||
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
             [[ "$REQUESTED_MODE" == 'deploy-inert' ]]
             [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled' ]]
             [[ "$CONFIRMED_DATABASE_ROUTE" == 'pooler' ]]
@@ -138,6 +141,11 @@ jobs:
           elif [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
             [[ "$CONFIRMED_OPERATION" == 'DEPLOY CBE STOPPED PHONE PROOF' ]] || {
               echo '::error::The CBE-stopped phone-proof confirmation is not exact.'
+              exit 1
+            }
+          elif [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
+            [[ "$CONFIRMED_OPERATION" == 'DEPLOY CBE STOPPED SIGNED SMS' ]] || {
+              echo '::error::The CBE-stopped signed-SMS confirmation is not exact.'
               exit 1
             }
           else
@@ -918,6 +926,7 @@ jobs:
             disabled) preflight=infra/sql/production-inert-runtime-preflight.sql ;;
             cbe-live-v1) preflight=infra/sql/production-cbe-live-runtime-preflight.sql ;;
             cbe-stopped-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
+            cbe-stopped-sms-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
             *) exit 1 ;;
           esac
           psql -X --file="$preflight" >/dev/null
@@ -1083,7 +1092,8 @@ jobs:
             *) echo '::error::The SMS grants and logins are in a mixed state.'; exit 1 ;;
           esac
           if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
-                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ||
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
             [[ "$state" == 'true,true,true,true' ]] || {
               echo '::error::The guarded CBE release requires existing SMS grants and logins.'
               exit 1
@@ -1255,13 +1265,18 @@ jobs:
             "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' check-release-mode '$GITHUB_SHA' '$runtime_deployment_mode' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
           if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
-                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ||
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
             [[ "$current_state" == 'present' ]] || {
               echo '::error::The guarded CBE release requires the reviewed running predecessor.'
               exit 1
             }
+            predecessor_sha="$(ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' current-sha")"
+            [[ "$predecessor_sha" =~ ^[0-9a-f]{40}$ && "$predecessor_sha" != "$GITHUB_SHA" ]]
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '3a3dbb693853b2bf6cbed53590f3696b3ed50c70'"
+              "sudo -n '$helper' status '$predecessor_sha'"
+            echo "predecessor_sha=$predecessor_sha" >>"$GITHUB_OUTPUT"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1460,7 +1475,7 @@ jobs:
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
       - name: Recheck guarded CBE payment state before activation
-        if: inputs.mode == 'deploy-inert' && (inputs.confirm_financial_switch_profile == 'cbe-live-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-v1')
+        if: inputs.mode == 'deploy-inert' && (inputs.confirm_financial_switch_profile == 'cbe-live-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-sms-v1')
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -1482,6 +1497,7 @@ jobs:
           case "$CONFIRMED_FINANCIAL_PROFILE" in
             cbe-live-v1) preflight=infra/sql/production-cbe-live-runtime-preflight.sql ;;
             cbe-stopped-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
+            cbe-stopped-sms-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
             *) exit 1 ;;
           esac
           psql -X --file="$preflight" >/dev/null
@@ -1491,12 +1507,17 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          predecessor_sha='${{ steps.boundary.outputs.predecessor_sha }}'
+          [[ "$predecessor_sha" =~ ^[0-9a-f]{40}$ && "$predecessor_sha" != "$GITHUB_SHA" ]]
+          current_sha="$(ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 current-sha")"
+          [[ "$current_sha" == "$predecessor_sha" ]]
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '3a3dbb693853b2bf6cbed53590f3696b3ed50c70'"
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '$predecessor_sha'"
 
       - name: Drain routine credit leases before activation
         id: routine_drain
-        if: inputs.mode == 'deploy-inert' && (inputs.confirm_financial_switch_profile == 'cbe-live-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-v1')
+        if: inputs.mode == 'deploy-inert' && (inputs.confirm_financial_switch_profile == 'cbe-live-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-v1' || inputs.confirm_financial_switch_profile == 'cbe-stopped-sms-v1')
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -1542,7 +1563,8 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
-                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ||
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
             ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
               "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 activate '$GITHUB_SHA' carry-routine-marker"
           else
@@ -1616,6 +1638,7 @@ jobs:
             disabled) preflight=infra/sql/production-inert-runtime-preflight.sql ;;
             cbe-live-v1) preflight=infra/sql/production-cbe-live-runtime-preflight.sql ;;
             cbe-stopped-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
+            cbe-stopped-sms-v1) preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql ;;
             *) exit 1 ;;
           esac
           psql -X --file="$preflight" >/dev/null
@@ -1644,6 +1667,8 @@ jobs:
             echo 'Production screenshot reference reading is deployed with the existing CBE Birr payment switches and signed receiver SMS route preserved. TeleBirr authority remains disabled. No test payment was made.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' && "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
             echo 'Production CBE-stopped phone transport is deployed with receiver SMS and TeleBirr no-money proof, independent CBE verification configured live, and both shared payment gates disabled. No paid receipt poll, payment, or Player credit was attempted.' >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUESTED_MODE" == 'deploy-inert' && "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-sms-v1' ]]; then
+            echo 'Production CBE-stopped signed-SMS transport is deployed with the existing receiver SMS path, independent CBE verification configured live, and both shared payment gates disabled. The expired separate TeleBirr no-money lookup is inactive. No paid receipt poll, payment, or Player credit was attempted.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
             echo 'Production web, Telegram, and receiving-phone SMS transport are deployed. The SMS database route and all seven financial switches remain disabled; no SMS claim, job, or Player credit can start.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then

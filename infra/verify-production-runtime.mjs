@@ -773,6 +773,14 @@ assert.equal(
   3,
   'the stopped CBE profile must be checked before, immediately before, and after cutover',
 );
+assert.equal(
+  count(
+    workflow,
+    /cbe-stopped-sms-v1\) preflight=infra\/sql\/production-cbe-stopped-runtime-preflight\.sql/gu,
+  ),
+  3,
+  'the signed-SMS CBE profile must retain the same three payment checks',
+);
 assert.match(workflow, /production-routine-release-drain-arm\.sql/u);
 assert.match(workflow, /production-routine-release-drain-idle\.sql/u);
 assert.match(workflow, /production-routine-release-drain-disarm\.sql/u);
@@ -787,10 +795,18 @@ assert.ok(
 assert.match(workflow, /production-financial-switch-fingerprint\.sql/u);
 assert.match(
   workflow,
-  /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1\s+- cbe-stopped-v1/u,
+  /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1\s+- cbe-stopped-v1\s+- cbe-stopped-sms-v1/u,
 );
 assert.match(workflow, /DEPLOY SCREENSHOT READER WITH CBE LIVE/u);
 assert.match(workflow, /DEPLOY CBE STOPPED PHONE PROOF/u);
+assert.match(workflow, /DEPLOY CBE STOPPED SIGNED SMS/u);
+assert.match(workflow, /predecessor_sha="\$\(ssh[\s\S]*?current-sha/u);
+assert.match(workflow, /current_sha="\$\(ssh[\s\S]*?current-sha/u);
+assert.match(workflow, /"\$current_sha" == "\$predecessor_sha"/u);
+assert.match(
+  workflow,
+  /routine_proof_mode=false\s+inert_overlay_source='infra\/compose\.production\.inert-maintenance\.yaml'\s+if \[\[ "\$REQUESTED_MODE" == 'deploy-inert' &&\s+"\$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' \]\]; then\s+routine_proof_mode=true/u,
+);
 assert.match(
   workflow,
   /"\$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled'/u,
@@ -827,15 +843,18 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '3a3dbb693853b2bf6cbed53590f3696b3ed50c70'/gu)].length,
+  [...workflow.matchAll(/status '\$predecessor_sha'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
+assert.match(helper, /current-sha\)\s+\[\[ \$# -eq 1 && -L "\$CURRENT_LINK" \]\]/u);
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'/u,
+  /readonly HISTORICAL_THREE_SECOND_API_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'/u,
 );
+assert.match(helper, /"\$previous" == "\$\(require_release "\$previous_sha"\)"/u);
+assert.match(helper, /"\$\(<"\$routine_receipt"\)" == "\$previous_sha"/u);
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
 assert.match(helper, /pending-\$sha\.routine-marker/u);
@@ -3007,11 +3026,13 @@ for (const value of [
 const continuousSmsRotation = await read(
   'infra/operations/fetanagent-production-v2-continuous-sms-helper-rotation-v1.sh',
 );
+// Historical rotation artifacts remain pinned to the helper digest they installed.
+const continuousSmsHistoricalHelperDigest = 'fe4f776cfcfecd21de8487279d77907ab194362b4f61ca2c853e922ccc884b4a';
 for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='3a3dbb693853b2bf6cbed53590f3696b3ed50c70'",
   "readonly PREDECESSOR_SHA256='745f6aba3a045dad41d3b1ccd83bce4c7518fa19a0553879072e04d71e534896'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  `readonly SUCCESSOR_SHA256='${continuousSmsHistoricalHelperDigest}'`,
   'require_staged_successor',
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',

@@ -262,13 +262,13 @@ const receiverSmsRuntimeRenewalMigrationName =
 const continuousDepositRuntimeRolesMigrationName =
   '20261121211931_continuous_active_deposit_runtime_roles_20261121.sql';
 const permanentCompanionTrustMigrationName =
-  '20261121214000_permanent_production_companion_trust.sql';
+  '20261121221515_permanent_production_companion_trust.sql';
 const permanentCompanionSignerProvisionMigrationName =
-  '20261121221500_permanent_production_companion_signer_public_trust.sql';
+  '20261121222433_permanent_production_companion_signer_public_trust.sql';
 const permanentCompanionCbePairingMigrationName =
-  '20261121223000_permanent_companion_pairing_with_cbe_live.sql';
+  '20261121224315_permanent_companion_pairing_with_cbe_live.sql';
 const signedReceiverSmsRoutineActivationMigrationName =
-  '20261121224500_routine_activation_accept_signed_receiver_sms.sql';
+  '20261121224322_routine_activation_accept_signed_receiver_sms.sql';
 const completedWatchdogRunActivationMigrationName =
   '20261122063332_routine_watchdog_completed_run_activation.sql';
 const receiverSmsFastSettlementMigrationName =

@@ -1605,6 +1605,78 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
       },
     );
 
+    it('settles a fresh matched payment after holding an old first submission and skipping its repeats', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const oldFingerprint = hexDigest();
+        const oldFirst = await fixtureCandidate(
+          client,
+          oldFingerprint,
+          new Date(Date.now() - 62 * 60_000).toISOString(),
+        );
+        const oldRepeat = await fixtureCandidate(
+          client,
+          oldFingerprint,
+          new Date(Date.now() - 61 * 60_000).toISOString(),
+        );
+        const freshFingerprint = hexDigest();
+        const freshCandidate = await fixtureCandidate(
+          client,
+          freshFingerprint,
+          new Date().toISOString(),
+        );
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [freshCandidate],
+        );
+        await fixturePaymentEvent(client, freshFingerprint, new Date().toISOString());
+
+        const outcomes = [];
+        for (let index = 0; index < 3; index += 1) {
+          const result = await client.query<{ outcome: string }>(
+            `select app.settle_next_receiver_sms_match() as outcome`,
+          );
+          outcomes.push(result.rows[0]?.outcome);
+        }
+        expect(outcomes).toEqual(['held_review', 'queued', 'empty']);
+
+        const rows = await client.query<{ candidate_id: string; held: boolean; queued: boolean }>(
+          `select candidate.id as candidate_id,
+              exists(select 1 from app.receiver_sms_settlement_holds held
+                where held.candidate_id = candidate.id) as held,
+              exists(select 1 from app.receiver_sms_settlement_lineages lineage
+                where lineage.candidate_id = candidate.id) as queued
+            from app.receiver_sms_deposit_candidates candidate
+            where candidate.id in ($1::uuid,$2::uuid,$3::uuid)
+            order by candidate.id`,
+          [oldFirst, oldRepeat, freshCandidate],
+        );
+        expect(rows.rows).toEqual(
+          [
+            { candidate_id: oldFirst, held: true, queued: false },
+            { candidate_id: oldRepeat, held: false, queued: false },
+            { candidate_id: freshCandidate, held: false, queued: true },
+          ].sort((left, right) => left.candidate_id.localeCompare(right.candidate_id)),
+        );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('preserves an earlier five-minute review hold without queuing a credit', async () => {
       const client = getClient();
       await client.query('begin');

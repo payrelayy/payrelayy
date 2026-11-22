@@ -271,6 +271,8 @@ const signedReceiverSmsRoutineActivationMigrationName =
   '20261121224500_routine_activation_accept_signed_receiver_sms.sql';
 const completedWatchdogRunActivationMigrationName =
   '20261122063332_routine_watchdog_completed_run_activation.sql';
+const receiverSmsFastSettlementMigrationName =
+  '20261122075200_receiver_sms_settlement_fast_old_duplicate_scan.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -794,7 +796,8 @@ describe('disposable SQL migration baseline', () => {
         name !== permanentCompanionSignerProvisionMigrationName &&
         name !== permanentCompanionCbePairingMigrationName &&
         name !== signedReceiverSmsRoutineActivationMigrationName &&
-        name !== completedWatchdogRunActivationMigrationName,
+        name !== completedWatchdogRunActivationMigrationName &&
+        name !== receiverSmsFastSettlementMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10779,6 +10782,7 @@ describe('production deposit policy cutovers', () => {
       permanentCompanionCbePairingMigrationName,
       signedReceiverSmsRoutineActivationMigrationName,
       completedWatchdogRunActivationMigrationName,
+      receiverSmsFastSettlementMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),

@@ -695,6 +695,9 @@ describe('Owner platform Play destination', () => {
     await browser.signIn();
     expect(browser.element('#platform-play-saved').textContent).toContain('https://kemer.co/');
     expect(browser.element('#platform-play-link').href).toBe('https://kemer.co/');
+    browser.element('#platform-play-url').value = 'https://owner.fetanagent.com/owner';
+    await browser.element('#platform-play-url').listeners.get('input')?.({ preventDefault() {} });
+    expect(browser.element('#platform-play-save').disabled).toBe(true);
     browser.element('#platform-play-url').value = 'https://new.example/play';
     await browser.element('#platform-play-url').listeners.get('input')?.({ preventDefault() {} });
     await browser.call('savePlatformPlay');

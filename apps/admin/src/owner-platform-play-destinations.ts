@@ -39,7 +39,8 @@ export function normalizePlatformPlayUrl(value: unknown): string | null | undefi
       /^\d+(?:\.\d+){3}$/u.test(url.hostname) ||
       url.hostname === 'localhost' ||
       url.hostname.endsWith('.localhost') ||
-      (url.hostname === 'owner.fetanagent.com' && url.pathname.startsWith('/v1/public/play/')) ||
+      url.hostname === 'fetanagent.com' ||
+      url.hostname.endsWith('.fetanagent.com') ||
       url.href.length > 2048
     )
       return undefined;

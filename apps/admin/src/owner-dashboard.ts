@@ -501,7 +501,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="platform-play-title">Play destination · KemerBet</h2>
             <button class="secondary" id="platform-play-refresh" type="button">Refresh saved link</button>
           </div>
-          <p class="receipt-label">The Play button appears for a verified KemerBet Player ID. It opens this website through a stable FetanAgent link, so edits also affect older Play buttons. The link does not transfer money.</p>
+          <p class="receipt-label">The Play button appears for a verified KemerBet Player ID. New buttons open this website directly; buttons already sent keep their previous website. The link does not transfer money.</p>
           <p class="request-meta" id="platform-play-saved">Sign in to load the saved link.</p>
           <form id="platform-play-form" autocomplete="off" novalidate>
             <label for="platform-play-url">KemerBet Play website (full HTTPS URL)</label>
@@ -2625,7 +2625,7 @@ function normalizedPlatformPlayUrl(value) {
     const url = new URL(value);
     if (url.protocol !== 'https:' || !url.hostname.includes('.') || url.username ||
         url.password || url.hash || url.port || url.href.length > 2048 ||
-        (url.hostname === 'owner.fetanagent.com' && url.pathname.startsWith('/v1/public/play/')))
+        url.hostname === 'fetanagent.com' || url.hostname.endsWith('.fetanagent.com'))
       return undefined;
     return url.href;
   } catch {

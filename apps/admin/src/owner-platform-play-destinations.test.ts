@@ -27,6 +27,8 @@ describe('platform Play destination storage', () => {
       'https://localhost/',
       'https://127.0.0.1/',
       'https://owner.fetanagent.com/v1/public/play/kemerbet',
+      'https://owner.fetanagent.com/owner',
+      'https://fetanagent.com/',
       'https://kemer.co\\@evil.example/',
       ' https://kemer.co/',
     ])

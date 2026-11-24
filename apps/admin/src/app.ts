@@ -20,6 +20,7 @@ import {
   OwnerKemerbetSigninRejectedError,
 } from './owner-kemerbet-signin.js';
 import { registerWithdrawalContactRoutes } from './withdrawal-contact-routes.js';
+import { registerPlatformPlayRoutes } from './platform-play-routes.js';
 import {
   OwnerPaymentMethodsConflictError,
   OwnerPaymentMethodsRejectedError,
@@ -632,6 +633,11 @@ export function buildOwnerControlApp(
   );
   registerWithdrawalContactRoutes(app, {
     withdrawalContact: dependencies.runtime.withdrawalContact,
+    ownerSubject,
+    mutationOrigins: privatePilotMutationOrigins,
+  });
+  registerPlatformPlayRoutes(app, {
+    destinations: dependencies.runtime.platformPlayDestinations,
     ownerSubject,
     mutationOrigins: privatePilotMutationOrigins,
   });

@@ -1624,7 +1624,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     };
     await import('./index.js');
 
-    const replies: Array<{ rows?: Array<Array<{ text: string; url?: string }>> }> = [];
+    const replies: Array<{ rows: Array<Array<{ text: string; url?: string }>> | undefined }> = [];
     const reply = async (
       _text: string,
       options?: { reply_markup?: { rows: (typeof replies)[number]['rows'] } },

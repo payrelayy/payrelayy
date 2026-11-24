@@ -273,6 +273,7 @@ const completedWatchdogRunActivationMigrationName =
   '20261122063332_routine_watchdog_completed_run_activation.sql';
 const receiverSmsFastSettlementMigrationName =
   '20261122075200_receiver_sms_settlement_fast_old_duplicate_scan.sql';
+const platformPlayDestinationsMigrationName = '20261124133235_platform_play_destinations.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -797,7 +798,8 @@ describe('disposable SQL migration baseline', () => {
         name !== permanentCompanionCbePairingMigrationName &&
         name !== signedReceiverSmsRoutineActivationMigrationName &&
         name !== completedWatchdogRunActivationMigrationName &&
-        name !== receiverSmsFastSettlementMigrationName,
+        name !== receiverSmsFastSettlementMigrationName &&
+        name !== platformPlayDestinationsMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10783,6 +10785,7 @@ describe('production deposit policy cutovers', () => {
       signedReceiverSmsRoutineActivationMigrationName,
       completedWatchdogRunActivationMigrationName,
       receiverSmsFastSettlementMigrationName,
+      platformPlayDestinationsMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -11011,6 +11014,109 @@ describe('production deposit policy cutovers', () => {
     } finally {
       await postCutoverClient.query('rollback');
     }
+  });
+
+  it('keeps each platform Play destination Owner-controlled, audited, and outside payment switches', async () => {
+    const switchesBefore = (
+      await postCutoverClient.query(
+        'select feature_key,mode from app.feature_switches order by feature_key',
+      )
+    ).rows;
+    const privileges = await postCutoverClient.query(`select
+      has_function_privilege('fetanagent_owner_control', 'app.get_owner_platform_play_destination(uuid,text)', 'execute') as owner_read,
+      has_function_privilege('fetanagent_owner_control', 'app.set_owner_platform_play_destination(uuid,text,text,integer)', 'execute') as owner_write,
+      has_function_privilege('fetanagent_owner_control', 'app.get_public_platform_play_destination(text)', 'execute') as public_read,
+      has_function_privilege('anon', 'app.get_public_platform_play_destination(text)', 'execute') as anon_read,
+      has_table_privilege('anon', 'app.private_platform_play_destinations', 'select') as anon_table`);
+    expect(privileges.rows).toEqual([
+      {
+        owner_read: true,
+        owner_write: true,
+        public_read: true,
+        anon_read: false,
+        anon_table: false,
+      },
+    ]);
+
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      expect(
+        (
+          await postCutoverClient.query(
+            'select * from app.get_owner_platform_play_destination($1::uuid,$2::text)',
+            [ownerAuthUserId, 'kemerbet'],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          platform_code: 'kemerbet',
+          destination_url: 'https://kemer.co/',
+          revision: 0,
+          updated_at: null,
+        },
+      ]);
+      expect(
+        (
+          await postCutoverClient.query(
+            'select * from app.set_owner_platform_play_destination($1::uuid,$2::text,$3::text,$4::integer)',
+            [ownerAuthUserId, 'kemerbet', 'https://new.example/play', 0],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          platform_code: 'kemerbet',
+          destination_url: 'https://new.example/play',
+          revision: 1,
+          updated_at: expect.any(Date),
+        },
+      ]);
+      await postCutoverClient.query('reset role');
+      expect(
+        (
+          await postCutoverClient.query(`select revision,previous_url,destination_url,changed_by_admin_id
+        from app.private_platform_play_destination_revisions`)
+        ).rows,
+      ).toEqual([
+        {
+          revision: 1,
+          previous_url: 'https://kemer.co/',
+          destination_url: 'https://new.example/play',
+          changed_by_admin_id: postCutoverOwnerAdminId,
+        },
+      ]);
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      await expect(
+        postCutoverClient.query(
+          'select * from app.set_owner_platform_play_destination($1::uuid,$2::text,$3::text,$4::integer)',
+          [ownerAuthUserId, 'kemerbet', 'https://stale.example/', 0],
+        ),
+      ).rejects.toMatchObject({ code: '40001' });
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
+
+    await postCutoverClient.query('begin');
+    try {
+      await postCutoverClient.query('set local role fetanagent_owner_control');
+      expect(
+        (
+          await postCutoverClient.query(
+            'select * from app.get_public_platform_play_destination($1::text)',
+            ['kemerbet'],
+          )
+        ).rows,
+      ).toEqual([{ destination_url: 'https://kemer.co/' }]);
+    } finally {
+      await postCutoverClient.query('rollback');
+    }
+    expect(
+      (
+        await postCutoverClient.query(
+          'select feature_key,mode from app.feature_switches order by feature_key',
+        )
+      ).rows,
+    ).toEqual(switchesBefore);
   });
 
   it('records the new active Owner policy while preserving the complete migration order', async () => {

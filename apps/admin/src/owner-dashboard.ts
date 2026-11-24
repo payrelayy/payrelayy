@@ -114,6 +114,13 @@ export const OWNER_CONTROL_GROUPS = [
         view: 'system',
         section: 'withdrawal-contact-title',
       },
+      {
+        label: 'Play destination',
+        description: 'Set the website opened by Play for a verified KemerBet Player ID.',
+        effect: 'Changes customer link',
+        view: 'system',
+        section: 'platform-play-title',
+      },
     ],
   },
   {
@@ -488,6 +495,31 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
           </form>
           <p class="request-meta" id="withdrawal-contact-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+        </section>
+        <section class="review-section" aria-labelledby="platform-play-title">
+          <div class="panel-heading">
+            <h2 id="platform-play-title">Play destination · KemerBet</h2>
+            <button class="secondary" id="platform-play-refresh" type="button">Refresh saved link</button>
+          </div>
+          <p class="receipt-label">The Play button appears for a verified KemerBet Player ID. It opens this website through a stable FetanAgent link, so edits also affect older Play buttons. The link does not transfer money.</p>
+          <p class="request-meta" id="platform-play-saved">Sign in to load the saved link.</p>
+          <form id="platform-play-form" autocomplete="off" novalidate>
+            <label for="platform-play-url">KemerBet Play website (full HTTPS URL)</label>
+            <input id="platform-play-url" name="destinationUrl" type="url" maxlength="2048"
+              autocomplete="off" spellcheck="false" autocapitalize="none" />
+            <p class="receipt-label">Leave blank to disable Play. Check the destination carefully before saving.</p>
+            <p class="request-meta" id="platform-play-preview">No Play destination will be published.</p>
+            <a id="platform-play-link" target="_blank" rel="noopener noreferrer" hidden>Check website preview</a>
+            <label class="confirmation-row" for="platform-play-confirmation">
+              <input id="platform-play-confirmation" name="confirmation" type="checkbox" />
+              I checked this destination and approve opening it for KemerBet Players; if blank, I approve disabling Play.
+            </label>
+            <div class="actions">
+              <button id="platform-play-save" type="submit" disabled>Save Play destination</button>
+              <button class="secondary" id="platform-play-clear" type="button">Clear draft / disable Play</button>
+            </div>
+          </form>
+          <p class="request-meta" id="platform-play-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
         </section>
 
         <section class="review-section" aria-labelledby="player-review-title">
@@ -1165,6 +1197,7 @@ section[aria-labelledby="kemerbet-companion-title"],
 section[aria-labelledby="kemerbet-readiness-cohort-title"] { order: 4; }
 section[aria-labelledby="support-contact-title"],
 section[aria-labelledby="withdrawal-contact-title"],
+section[aria-labelledby="platform-play-title"],
 section[aria-labelledby="deposit-intake-title"] { order: 5; }
 .owner-control-directory { order: 3; }
 .owner-control-directory > .receipt-label { margin-top: -8px; }
@@ -1308,7 +1341,7 @@ const ownerViews = {
   system: {
     title: 'System',
     description: 'Check TeleBirr policy and customer contact settings.',
-    sections: ['routine-processing-title', 'kemerbet-signin-title', 'support-contact-title', 'withdrawal-contact-title'],
+    sections: ['routine-processing-title', 'kemerbet-signin-title', 'support-contact-title', 'withdrawal-contact-title', 'platform-play-title'],
   },
   advanced: {
     title: 'Advanced tools',
@@ -1431,6 +1464,16 @@ const withdrawalContactSaved = document.querySelector('#withdrawal-contact-saved
 const withdrawalContactPreview = document.querySelector('#withdrawal-contact-preview');
 const withdrawalContactLink = document.querySelector('#withdrawal-contact-link');
 const withdrawalContactFeedback = document.querySelector('#withdrawal-contact-feedback');
+const platformPlayForm = document.querySelector('#platform-play-form');
+const platformPlayUrl = document.querySelector('#platform-play-url');
+const platformPlayConfirmation = document.querySelector('#platform-play-confirmation');
+const platformPlaySave = document.querySelector('#platform-play-save');
+const platformPlayClear = document.querySelector('#platform-play-clear');
+const platformPlayRefresh = document.querySelector('#platform-play-refresh');
+const platformPlaySaved = document.querySelector('#platform-play-saved');
+const platformPlayPreview = document.querySelector('#platform-play-preview');
+const platformPlayLink = document.querySelector('#platform-play-link');
+const platformPlayFeedback = document.querySelector('#platform-play-feedback');
 const notice = document.querySelector('#notice');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
@@ -1597,6 +1640,12 @@ let withdrawalContactRequest = 0;
 let withdrawalContactLoading = false;
 let withdrawalContactSaving = false;
 let withdrawalContactDirty = false;
+let platformPlayRevision;
+let platformPlaySavedUrl;
+let platformPlayRequest = 0;
+let platformPlayLoading = false;
+let platformPlaySaving = false;
+let platformPlayDirty = false;
 let eligibleCbeUpgradeReceiver;
 let loadedReceiverHistory = [];
 let loadedReceiverHistoryReady = false;
@@ -2563,6 +2612,213 @@ async function saveWithdrawalContact() {
     if (current()) {
       withdrawalContactSaving = false;
       renderWithdrawalContactPreview();
+    }
+  }
+}
+
+function normalizedPlatformPlayUrl(value) {
+  if (value === '') return null;
+  if (typeof value !== 'string' || value !== value.trim() ||
+      [...value].some((character) => character <= ' ' ||
+        character === String.fromCharCode(92) || character === String.fromCharCode(127))) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || !url.hostname.includes('.') || url.username ||
+        url.password || url.hash || url.port || url.href.length > 2048 ||
+        (url.hostname === 'owner.fetanagent.com' && url.pathname.startsWith('/v1/public/play/')))
+      return undefined;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function setPlatformPlayFeedback(message) {
+  platformPlayFeedback.textContent = message;
+  platformPlayFeedback.hidden = !message;
+}
+
+function updatePlatformPlayControls() {
+  setBusy(platformPlayForm, platformPlaySaving);
+  platformPlayRefresh.disabled = !accessToken || platformPlayLoading || platformPlaySaving;
+  platformPlaySave.disabled = !accessToken || platformPlayLoading || platformPlaySaving ||
+    platformPlayRevision === undefined || !platformPlayConfirmation.checked ||
+    normalizedPlatformPlayUrl(platformPlayUrl.value) === undefined;
+}
+
+function renderPlatformPlayPreview() {
+  const destination = normalizedPlatformPlayUrl(platformPlayUrl.value);
+  platformPlayLink.hidden = !destination;
+  platformPlayLink.removeAttribute('href');
+  platformPlayLink.textContent = '';
+  platformPlayPreview.textContent = destination === undefined
+    ? 'Enter a valid public HTTPS website without a login, port, fragment, or spaces.'
+    : destination === null ? 'Play will be disabled.' : 'Website preview:';
+  if (destination) {
+    platformPlayLink.href = destination;
+    platformPlayLink.textContent = destination;
+  }
+  updatePlatformPlayControls();
+}
+
+function clearPlatformPlay() {
+  platformPlayRequest += 1;
+  platformPlayRevision = undefined;
+  platformPlaySavedUrl = undefined;
+  platformPlayLoading = false;
+  platformPlaySaving = false;
+  platformPlayDirty = false;
+  platformPlayUrl.value = '';
+  platformPlayConfirmation.checked = false;
+  platformPlaySaved.textContent = 'Sign in to load the saved link.';
+  setPlatformPlayFeedback('');
+  renderPlatformPlayPreview();
+}
+
+function validPlatformPlay(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).join(',') !== 'playDestination') return false;
+  const value = payload.playDestination;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'destinationUrl,platformCode,revision,updatedAt' ||
+      value.platformCode !== 'kemerbet' ||
+      !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+      normalizedPlatformPlayUrl(value.destinationUrl) !== value.destinationUrl) return false;
+  if (value.revision === 0) return value.updatedAt === null;
+  return typeof value.updatedAt === 'string' &&
+    Number.isFinite(Date.parse(value.updatedAt)) &&
+    new Date(value.updatedAt).toISOString() === value.updatedAt;
+}
+
+function renderSavedPlatformPlay(value) {
+  platformPlayRevision = value.revision;
+  platformPlaySavedUrl = value.destinationUrl;
+  platformPlaySaved.textContent = 'Last confirmed KemerBet Play website: ' +
+    (value.destinationUrl === null ? 'disabled' : value.destinationUrl) +
+    '. Revision ' + value.revision +
+    (value.updatedAt === null ? ' (launch setting).' : '. Updated ' + new Date(value.updatedAt).toLocaleString() + '.');
+}
+
+async function platformPlayRequestForSession(generation, init) {
+  await ensureFreshOwnerAccessToken();
+  if (generation !== ownerAuthGeneration || !accessToken) throw new Error('signed_out');
+  const request = await beginDeadlineFetch('/v1/owner/platforms/kemerbet/play', {
+    ...init,
+    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + accessToken },
+  }, OWNER_API_REQUEST_TIMEOUT_MS);
+  if (generation !== ownerAuthGeneration || !accessToken) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    throw new Error('signed_out');
+  }
+  if (request.response.status !== 200) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    if (request.response.status === 401 || request.response.status === 403) {
+      signOut('Your session is unavailable or is not an active Owner.');
+      throw new Error('signed_out');
+    }
+    return { status: request.response.status };
+  }
+  const payload = await deadlineBoundResponse(request.response, request.deadline).json();
+  return { status: 200, payload };
+}
+
+async function loadPlatformPlay() {
+  if (!accessToken || platformPlayLoading || platformPlaySaving) return;
+  const generation = ownerAuthGeneration;
+  const requestId = ++platformPlayRequest;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === platformPlayRequest && !!accessToken;
+  platformPlayLoading = true;
+  platformPlayRevision = undefined;
+  platformPlayConfirmation.checked = false;
+  setPlatformPlayFeedback('Loading saved Play website…');
+  updatePlatformPlayControls();
+  try {
+    const result = await platformPlayRequestForSession(generation, { method: 'GET' });
+    if (!current()) return;
+    if (result.status !== 200 || !validPlatformPlay(result.payload)) throw new Error('unavailable');
+    renderSavedPlatformPlay(result.payload.playDestination);
+    if (!platformPlayDirty) {
+      platformPlayUrl.value = result.payload.playDestination.destinationUrl ?? '';
+      platformPlayConfirmation.checked = false;
+    }
+    setPlatformPlayFeedback(platformPlayDirty
+      ? 'Saved link refreshed. Your unsaved draft has been kept; review it before saving.'
+      : 'Saved Play website loaded.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error))
+      setPlatformPlayFeedback('Play destination is temporarily unavailable. Refresh before saving.');
+  } finally {
+    if (current()) {
+      platformPlayLoading = false;
+      renderPlatformPlayPreview();
+    }
+  }
+}
+
+async function savePlatformPlay() {
+  if (!accessToken || platformPlayLoading || platformPlaySaving) return;
+  const destinationUrl = normalizedPlatformPlayUrl(platformPlayUrl.value);
+  if (destinationUrl === undefined) {
+    setPlatformPlayFeedback('Enter a valid public HTTPS website, or leave blank to disable Play.');
+    return;
+  }
+  if (!platformPlayConfirmation.checked) {
+    setPlatformPlayFeedback('Check the preview and confirm the website or disabling Play.');
+    return;
+  }
+  if (platformPlayRevision === undefined) {
+    setPlatformPlayFeedback('Refresh the saved link before saving.');
+    return;
+  }
+  const generation = ownerAuthGeneration;
+  const requestId = ++platformPlayRequest;
+  const expectedRevision = platformPlayRevision;
+  const previousUrl = platformPlaySavedUrl;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === platformPlayRequest && !!accessToken;
+  platformPlaySaving = true;
+  setPlatformPlayFeedback('Saving Play website…');
+  updatePlatformPlayControls();
+  try {
+    const result = await platformPlayRequestForSession(generation, {
+      method: 'POST', body: JSON.stringify({ destinationUrl, expectedRevision }),
+    });
+    if (!current()) return;
+    if (result.status === 400) {
+      setPlatformPlayFeedback('The website was not accepted. Check the full HTTPS URL and try again.');
+      return;
+    }
+    if (result.status === 409) {
+      platformPlayRevision = undefined;
+      platformPlayConfirmation.checked = false;
+      setPlatformPlayFeedback('The saved link changed elsewhere. Refresh, review your draft, and save again.');
+      return;
+    }
+    if (result.status !== 200 || !validPlatformPlay(result.payload) ||
+        result.payload.playDestination.destinationUrl !== destinationUrl ||
+        result.payload.playDestination.revision < expectedRevision ||
+        (result.payload.playDestination.revision === expectedRevision && destinationUrl !== previousUrl))
+      throw new Error('unconfirmed');
+    renderSavedPlatformPlay(result.payload.playDestination);
+    platformPlayDirty = false;
+    platformPlayUrl.value = destinationUrl ?? '';
+    platformPlayConfirmation.checked = false;
+    setPlatformPlayFeedback(destinationUrl === null
+      ? 'Saved. Play is disabled.' : 'Saved. Play now opens ' + destinationUrl + '.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      platformPlayRevision = undefined;
+      platformPlayConfirmation.checked = false;
+      setPlatformPlayFeedback('Saving could not be confirmed. Refresh before retrying; your draft has been kept.');
+    }
+  } finally {
+    if (current()) {
+      platformPlaySaving = false;
+      renderPlatformPlayPreview();
     }
   }
 }
@@ -3881,6 +4137,7 @@ function signOut(message = 'Signed out.') {
   clearSupportContact();
   clearKemerbetSignin();
   clearWithdrawalContact();
+  clearPlatformPlay();
   clearKemerbetAgentProfiles();
   clearCompanionDevicePairingPackage();
   companionDevicePairingConfirmation.checked = false;
@@ -8423,7 +8680,7 @@ async function loadOwnerDashboardAfterAuthentication(successNotice) {
   updateRoutineReceiptAvailability();
   setNotice(successNotice);
   try {
-    await Promise.all([loadOwnerPlayerQueues(), loadSupportContact(), loadWithdrawalContact()]);
+    await Promise.all([loadOwnerPlayerQueues(), loadSupportContact(), loadWithdrawalContact(), loadPlatformPlay()]);
   } catch (error) {
     // Authentication and dashboard hydration are separate boundaries. A transient read failure
     // must not discard a valid, rotating Owner session or misreport it as a password failure.
@@ -8611,6 +8868,27 @@ withdrawalContactClear.addEventListener('click', () => {
 withdrawalContactForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveWithdrawalContact();
+});
+platformPlayRefresh.addEventListener('click', loadPlatformPlay);
+platformPlayUrl.addEventListener('input', () => {
+  platformPlayDirty = true;
+  platformPlayConfirmation.checked = false;
+  setPlatformPlayFeedback('');
+  renderPlatformPlayPreview();
+});
+platformPlayConfirmation.addEventListener('change', updatePlatformPlayControls);
+platformPlayClear.addEventListener('click', () => {
+  if (platformPlaySaving) return;
+  platformPlayUrl.value = '';
+  platformPlayDirty = true;
+  platformPlayConfirmation.checked = false;
+  setPlatformPlayFeedback('Draft cleared. Confirm and save to disable Play. Nothing has been saved yet.');
+  renderPlatformPlayPreview();
+  platformPlayConfirmation.focus();
+});
+platformPlayForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await savePlatformPlay();
 });
 kemerbetReadinessCohortConfirmation.addEventListener(
   'change',

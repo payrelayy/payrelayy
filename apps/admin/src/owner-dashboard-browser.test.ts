@@ -667,6 +667,79 @@ describe('Owner manual withdrawal contact', () => {
   });
 });
 
+describe('Owner platform Play destination', () => {
+  const launch = {
+    playDestination: {
+      platformCode: 'kemerbet',
+      destinationUrl: 'https://kemer.co/',
+      revision: 0,
+      updatedAt: null,
+    },
+  };
+  const changed = {
+    playDestination: {
+      platformCode: 'kemerbet',
+      destinationUrl: 'https://new.example/play',
+      revision: 1,
+      updatedAt: '2026-11-24T12:00:00.000Z',
+    },
+  };
+
+  it('loads the saved link and requires an explicit confirmation before editing it', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/platforms/kemerbet/play'
+          ? response(200, init.method === 'POST' ? changed : launch)
+          : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#platform-play-saved').textContent).toContain('https://kemer.co/');
+    expect(browser.element('#platform-play-link').href).toBe('https://kemer.co/');
+    browser.element('#platform-play-url').value = 'https://new.example/play';
+    await browser.element('#platform-play-url').listeners.get('input')?.({ preventDefault() {} });
+    await browser.call('savePlatformPlay');
+    expect(browser.element('#platform-play-feedback').textContent).toContain('confirm');
+    browser.element('#platform-play-confirmation').checked = true;
+    await browser.element('#platform-play-confirmation').listeners.get('change')?.({
+      preventDefault() {},
+    });
+    await browser.element('#platform-play-form').listeners.get('submit')?.({ preventDefault() {} });
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/platforms/kemerbet/play' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      destinationUrl: 'https://new.example/play',
+      expectedRevision: 0,
+    });
+    expect(browser.element('#platform-play-saved').textContent).toContain(
+      'https://new.example/play',
+    );
+  });
+
+  it('preserves a cleared draft when another Owner edit wins the revision race', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/platforms/kemerbet/play'
+          ? response(init.method === 'POST' ? 409 : 200, launch)
+          : undefined,
+    });
+    await browser.signIn();
+    await browser.element('#platform-play-clear').listeners.get('click')?.({ preventDefault() {} });
+    expect(browser.element('#platform-play-saved').textContent).toContain('https://kemer.co/');
+    browser.element('#platform-play-confirmation').checked = true;
+    await browser.element('#platform-play-form').listeners.get('submit')?.({ preventDefault() {} });
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/platforms/kemerbet/play' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      destinationUrl: null,
+      expectedRevision: 0,
+    });
+    expect(browser.element('#platform-play-feedback').textContent).toContain('changed elsewhere');
+    expect(browser.element('#platform-play-save').disabled).toBe(true);
+  });
+});
+
 describe('Owner workspace navigation', () => {
   it('shows a bounded live status snapshot with distinct TeleBirr lookup state', async () => {
     const browser = ownerBrowserHarness(503, {
@@ -890,7 +963,12 @@ describe('Owner workspace navigation', () => {
       submitted: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
       methods: ['payment-methods-title', 'receiver-title'],
       players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
-      system: ['routine-processing-title', 'support-contact-title', 'withdrawal-contact-title'],
+      system: [
+        'routine-processing-title',
+        'support-contact-title',
+        'withdrawal-contact-title',
+        'platform-play-title',
+      ],
       advanced: [
         'kemerbet-companion-title',
         'execution-readiness-title',

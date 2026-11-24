@@ -1599,6 +1599,68 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('offers Owner-managed Play between Deposit and Withdraw only for a verified saved Player', async () => {
+    const fetchPublic = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/v1/public/deposit-catalog'))
+        return Response.json({
+          version: 1,
+          platforms: [{ code: 'kemerbet', displayName: 'KemerBet', available: true }],
+          methods: [
+            { code: 'telebirr', displayName: 'TeleBirr', implemented: true, accepting: true },
+            { code: 'cbe_birr', displayName: 'CBE Birr', implemented: true, accepting: false },
+          ],
+        });
+      if (url.endsWith('/v1/public/play/kemerbet'))
+        return Response.redirect('https://kemer.co/', 302);
+      if (url.endsWith('/v1/public/withdrawal-chat'))
+        return Response.redirect('https://t.me/balem18', 302);
+      throw new Error(`Unexpected public URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchPublic);
+    runtime.config = {
+      ...botConfig(false, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+
+    const replies: Array<{ rows: Array<Array<{ text: string; url?: string }>> | undefined }> = [];
+    const reply = async (
+      _text: string,
+      options?: { reply_markup?: { rows: (typeof replies)[number]['rows'] } },
+    ) => {
+      replies.push({ rows: options?.reply_markup?.rows });
+    };
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: null,
+    };
+    await runtime.messageHandler!({ ...messageContext('/menu'), reply });
+    expect(replies[0]?.rows?.flat().some((button) => button.text === '▶️ Play')).toBe(false);
+    expect(fetchPublic.mock.calls.some(([url]) => String(url).includes('/public/play/'))).toBe(
+      false,
+    );
+
+    replies.length = 0;
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: '29208245',
+    };
+    await runtime.messageHandler!({ ...messageContext('/menu'), reply });
+    expect(replies[0]?.rows?.[0]?.map((button) => button.text)).toEqual([
+      '💰 Deposit',
+      '▶️ Play',
+      '💸 Withdraw',
+    ]);
+    expect(replies[0]?.rows?.[0]?.[1]?.url).toBe(
+      'https://owner.fetanagent.com/v1/public/play/kemerbet',
+    );
+  });
+
   it('queues a guided Player ID for signed Find only with the explicit opt-in', async () => {
     await loadComposition(false, true, true);
     runtime.actionResult = { version: 1, outcome: 'player_validation_queued' };

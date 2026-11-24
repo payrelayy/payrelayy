@@ -39,6 +39,13 @@ import {
 } from './telegram-customer-copy.js';
 import { loadTelegramPaymentMethods } from './telegram-payment-methods.js';
 import { loadTelegramWithdrawalContact } from './telegram-withdrawal-contact.js';
+import { loadTelegramKemerbetPlayLink } from './telegram-play-link.js';
+import {
+  inlineMenu,
+  isDepositMenuButton,
+  PLAY_BUTTON_TEXT,
+  WITHDRAW_BUTTON_TEXT,
+} from './telegram-action-menu.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
@@ -118,7 +125,6 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const outcomeActions = renderTelegramOutcomeActions();
-const WITHDRAW_BUTTON_TEXT = '💸 Withdraw';
 let lastSupportFailureLogAt = 0;
 let lastSupportFailureReason = '';
 const supportContact = createTelegramSupportContactResolver(config.supportContactUrl, {
@@ -169,19 +175,35 @@ async function availableMenuButtons(
       (button.callbackData !== TELEGRAM_GUIDED_CBE_CALLBACK_DATA || methods.cbe_birr),
   );
 }
-async function availableButtonsWithWithdrawal(
+async function availableButtonsWithPlayAndWithdrawal(
   buttons: readonly PrivateTelegramMenuButton[],
   hasSavedPlayer: boolean,
+  hasVerifiedPlayerForPlay: boolean,
 ): Promise<PrivateTelegramMenuButton[]> {
-  const [availableButtons, withdrawalUrl] = await Promise.all([
+  const [availableButtons, playUrl, withdrawalUrl] = await Promise.all([
     availableMenuButtons(buttons),
+    hasVerifiedPlayerForPlay
+      ? loadTelegramKemerbetPlayLink(config.supportContactUrl)
+      : Promise.resolve(null),
     hasSavedPlayer
       ? loadTelegramWithdrawalContact(config.supportContactUrl)
       : Promise.resolve(null),
   ]);
-  return withdrawalUrl
-    ? [...availableButtons, { text: WITHDRAW_BUTTON_TEXT, url: withdrawalUrl }]
-    : [...availableButtons];
+  return [
+    ...availableButtons,
+    ...(playUrl ? [{ text: PLAY_BUTTON_TEXT, url: playUrl }] : []),
+    ...(withdrawalUrl ? [{ text: WITHDRAW_BUTTON_TEXT, url: withdrawalUrl }] : []),
+  ];
+}
+function hasVerifiedPlayerForPlay(
+  action: TelegramPrivateActionEnvelope,
+  result: TelegramPrivateActionResult,
+): boolean {
+  return (
+    (result.outcome === 'menu' && result.selectedPlayerId !== null) ||
+    result.outcome === 'player_selection_saved' ||
+    action.kind.startsWith('saved_')
+  );
 }
 function hasSavedPlayerForResult(
   action: TelegramPrivateActionEnvelope,
@@ -194,13 +216,6 @@ function hasSavedPlayerForResult(
     result.outcome === 'deposit_status' ||
     result.outcome === 'deposit_proof_status' ||
     result.outcome === 'telebirr_live_deposit_status'
-  );
-}
-function isDepositMenuButton(button: PrivateTelegramMenuButton): boolean {
-  return (
-    button.callbackData === TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA ||
-    button.callbackData === TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA ||
-    button.callbackData === TELEGRAM_GUIDED_CBE_CALLBACK_DATA
   );
 }
 const screenshotModelAccessKey = config.screenshotReferenceReader.enabled
@@ -231,20 +246,6 @@ const screenshotRecognition = screenshotModelAccessKey
   : undefined;
 const unreadableReferenceText =
   'I couldn’t read the reference. Send a clearer receipt or type the reference.';
-
-function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
-  const keyboard = new InlineKeyboard();
-  for (const [index, button] of buttons.entries()) {
-    if (
-      index > 0 &&
-      !(button.text === WITHDRAW_BUTTON_TEXT && isDepositMenuButton(buttons[index - 1]!))
-    )
-      keyboard.row();
-    if (button.url === undefined) keyboard.text(button.text, button.callbackData);
-    else keyboard.url(button.text, button.url);
-  }
-  return keyboard;
-}
 
 function replyOptions(keyboard?: InlineKeyboard, text?: string) {
   if (keyboard) return { reply_markup: keyboard };
@@ -358,9 +359,10 @@ async function deliverPlayerAction(
       }
       return;
     }
-    const menuButtons = await availableButtonsWithWithdrawal(
+    const menuButtons = await availableButtonsWithPlayAndWithdrawal(
       presentation.menu.buttons,
       hasSavedPlayerForResult(action, result),
+      hasVerifiedPlayerForPlay(action, result),
     );
     let keyboard = menuButtons.length > 0 ? inlineMenu(menuButtons) : undefined;
     if (
@@ -910,7 +912,7 @@ await runTelegramPolling(
                 showDepositButton
                   ? {
                       reply_markup: inlineMenu(
-                        await availableButtonsWithWithdrawal(outcomeActions, true),
+                        await availableButtonsWithPlayAndWithdrawal(outcomeActions, true, true),
                       ),
                     }
                   : undefined,

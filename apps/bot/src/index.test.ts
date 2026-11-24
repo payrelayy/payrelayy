@@ -1656,9 +1656,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       '▶️ Play',
       '💸 Withdraw',
     ]);
-    expect(replies[0]?.rows?.[0]?.[1]?.url).toBe(
-      'https://owner.fetanagent.com/v1/public/play/kemerbet',
-    );
+    expect(replies[0]?.rows?.[0]?.[1]?.url).toBe('https://kemer.co/');
   });
 
   it('queues a guided Player ID for signed Find only with the explicit opt-in', async () => {

@@ -169,7 +169,7 @@ export const OWNER_CONTROL_GROUPS = [
     ],
   },
   {
-    title: 'Advanced and test controls',
+    title: 'Pilot and diagnostic controls',
     controls: [
       {
         label: 'Execution readiness',
@@ -300,8 +300,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         <div class="panel-heading owner-heading">
           <div>
             <p class="status-ok">${deploymentLabel} · Owner access</p>
-            <h2 id="owner-title">Owner control panel</h2>
-            <p class="receipt-label">See current status, review work, and open every available Owner control.</p>
+            <h2 id="owner-title">Owner workspace</h2>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
@@ -312,25 +311,26 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         </div>
         <div class="owner-workspace">
           <nav class="owner-navigation" aria-label="Owner workspace">
-            <p class="owner-navigation-label">WORKSPACE</p>
+            <p class="owner-navigation-label">DAILY WORK</p>
             <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
-            <button id="owner-nav-controls" type="button">All controls</button>
-            <button id="owner-nav-sms" type="button" data-owner-view="sms">SMS</button>
             <button id="owner-nav-submitted" type="button" data-owner-view="submitted">Submitted payments</button>
-            <button id="owner-nav-methods" type="button" data-owner-view="methods">Payment methods</button>
+            <button id="owner-nav-sms" type="button" data-owner-view="sms">Received SMS</button>
             <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
-            <button id="owner-nav-system" type="button" data-owner-view="system">System</button>
+            <p class="owner-navigation-label">SETTINGS &amp; RECOVERY</p>
+            <button id="owner-nav-methods" type="button" data-owner-view="methods">Payment methods</button>
+            <button id="owner-nav-system" type="button" data-owner-view="system">Settings</button>
             <button id="owner-nav-advanced" type="button" data-owner-view="advanced">Advanced tools</button>
+            <button id="owner-nav-controls" type="button" data-owner-view="controls">All controls</button>
           </nav>
           <div class="owner-workspace-content">
             <div class="owner-view-intro">
               <p class="eyebrow" id="owner-view-eyebrow">HOME</p>
-              <h3 id="owner-view-title" tabindex="-1">Control panel</h3>
+              <h3 id="owner-view-title" tabindex="-1">Overview</h3>
               <p id="owner-view-description">See what needs attention and choose the exact control you need.</p>
             </div>
         <section class="review-section owner-control-directory" id="owner-control-directory" aria-labelledby="owner-controls-title">
           <h2 id="owner-controls-title">All Owner controls</h2>
-          <p class="receipt-label">Opening a control does not run it. Read its current status and the confirmation before changing payments, receivers, or Player eligibility.</p>
+          <p class="receipt-label">Find a specific control. Opening it does not run an action.</p>
           ${controlDirectory}
         </section>
         <section class="review-section" aria-labelledby="system-overview-title">
@@ -562,10 +562,14 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
           <p class="receipt-label">
             Approve only an active, validated, Owner-associated Player ID after financial review.
-            Revocation blocks future deposit intents. A decision does not open a deposit, verify a
-            payment, credit KemerBet, or move money; all staging financial switches remain off.
+            Revocation blocks future deposit requests. This decision does not open a deposit,
+            verify a payment, credit KemerBet, or move money.
           </p>
           <div class="request-list" id="player-eligibility-list"></div>
+          <details class="owner-eligible-players" id="player-eligibility-current" hidden>
+            <summary id="player-eligibility-current-summary">Already eligible</summary>
+            <div class="request-list" id="player-eligibility-current-list"></div>
+          </details>
         </section>
 
         <section class="review-section" aria-labelledby="kemerbet-readiness-cohort-title">
@@ -906,8 +910,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             25–25,000 ETB per automatic deposit, any active deposit-eligible Player, no daily or deposit-count
             quota. Process one at a time; uncertain results pause the queue. This policy has no
             expiry. Saving it does not turn payment switches live, but reauthorizing a paused policy
-            can resume processing if those switches are already live. The pilot controls below are
-            another mode.
+            can resume processing if those switches are already live.
           </p>
           <p class="request-meta" id="routine-processing-status" role="status">Sign in to load the saved policy.</p>
           <div class="review-actions">
@@ -1174,6 +1177,7 @@ h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
 .owner-workspace { display: grid; grid-template-columns: 218px minmax(0, 1fr); align-items: start; gap: 24px; margin-top: 24px; }
 .owner-navigation { position: sticky; top: 20px; display: grid; gap: 5px; padding: 14px; border: 1px solid #dbe5e8; border-radius: 16px; background: #f8fbfb; }
 .owner-navigation-label { margin: 4px 12px 8px; color: #6b8087; font-size: .68rem; font-weight: 800; letter-spacing: .14em; }
+.owner-navigation-label:not(:first-child) { margin-top: 14px; padding-top: 14px; border-top: 1px solid #dbe5e8; }
 .owner-navigation button { width: 100%; min-height: 44px; padding: 11px 13px; border-radius: 10px; color: #29444b; background: transparent; text-align: left; font-weight: 720; }
 .owner-navigation button:hover { background: #e9f2f0; }
 .owner-navigation button[data-active="true"] { color: #075f55; background: #d9efea; }
@@ -1183,23 +1187,30 @@ h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
 .owner-view-intro h3 { margin: 0 0 5px; font-size: clamp(1.55rem, 3vw, 2rem); letter-spacing: -.035em; }
 .owner-view-intro p:last-child { margin: 0; color: #51656d; }
 .owner-view-intro { order: -1; }
-section[aria-labelledby="system-overview-title"] { order: 0; }
+section[aria-labelledby="system-overview-title"],
+section[aria-labelledby="routine-processing-title"] { order: 0; }
 section[aria-labelledby="receiver-sms-old-title"],
 section[aria-labelledby="receiver-sms-inbox-title"],
-section[aria-labelledby="execution-readiness-title"] { order: 1; }
+section[aria-labelledby="execution-readiness-title"],
+section[aria-labelledby="support-contact-title"] { order: 1; }
 section[aria-labelledby="telebirr-fast-alert-title"],
 section[aria-labelledby="execution-approvals-title"],
-section[aria-labelledby="receiver-title"] { order: 2; }
+section[aria-labelledby="receiver-title"],
+section[aria-labelledby="withdrawal-contact-title"] { order: 2; }
 section[aria-labelledby="receiver-change-review-title"],
 section[aria-labelledby="pilot-title"],
-section[aria-labelledby="routine-processing-title"] { order: 3; }
+section[aria-labelledby="platform-play-title"] { order: 3; }
 section[aria-labelledby="kemerbet-companion-title"],
-section[aria-labelledby="kemerbet-readiness-cohort-title"] { order: 4; }
-section[aria-labelledby="support-contact-title"],
-section[aria-labelledby="withdrawal-contact-title"],
-section[aria-labelledby="platform-play-title"],
+section[aria-labelledby="kemerbet-readiness-cohort-title"],
+section[aria-labelledby="kemerbet-signin-title"] { order: 4; }
 section[aria-labelledby="deposit-intake-title"] { order: 5; }
 .owner-control-directory { order: 3; }
+.owner-advanced-group { order: 1; border: 1px solid #dbe5e8; border-radius: 16px; background: #f8fbfb; padding: 18px; }
+.owner-advanced-group > summary { cursor: pointer; color: #173039; font-size: 1.06rem; font-weight: 800; }
+.owner-advanced-group > .receipt-label { margin: 12px 0; }
+.owner-advanced-group > .review-section { margin-top: 12px; }
+.owner-eligible-players { margin-top: 18px; border-top: 1px solid #dbe5e8; padding-top: 16px; }
+.owner-eligible-players > summary { cursor: pointer; color: #29444b; font-weight: 800; }
 .owner-control-directory > .receipt-label { margin-top: -8px; }
 .owner-control-group { margin-top: 24px; }
 .owner-control-group h3 { margin: 0 0 12px; font-size: 1rem; }
@@ -1245,6 +1256,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .transactions-more { margin-top: 16px; width: 100%; }
 .request-meta { margin: 0; color: #60757e; font-size: 0.82rem; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
+.review-actions.single-action { grid-template-columns: 1fr; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
 .submitted-payment-actions { display: grid; gap: 10px; margin-top: 14px; }
 .submitted-payment-actions .manual-completion-form { margin-top: 0; }
@@ -1314,9 +1326,9 @@ const ownerViewTitle = document.querySelector('#owner-view-title');
 const ownerViewDescription = document.querySelector('#owner-view-description');
 const ownerViews = {
   home: {
-    title: 'Control panel',
-    description: 'See what needs attention and choose the exact control you need.',
-    sections: ['owner-controls-title', 'system-overview-title'],
+    title: 'Overview',
+    description: 'See service health and work that needs attention.',
+    sections: ['system-overview-title'],
   },
   sms: {
     title: 'SMS',
@@ -1339,16 +1351,52 @@ const ownerViews = {
     sections: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
   },
   system: {
-    title: 'System',
-    description: 'Check TeleBirr policy and customer contact settings.',
+    title: 'Settings',
+    description: 'Manage automatic processing, customer links, and Companion sign-in.',
     sections: ['routine-processing-title', 'kemerbet-signin-title', 'support-contact-title', 'withdrawal-contact-title', 'platform-play-title'],
   },
   advanced: {
     title: 'Advanced tools',
-    description: 'Specialized Companion setup, pilot, and dry-run controls remain available to the Owner.',
+    description: 'Open setup, recovery, or pilot controls only when you need them.',
     sections: ['kemerbet-companion-title', 'execution-readiness-title', 'execution-approvals-title', 'pilot-title', 'kemerbet-readiness-cohort-title', 'deposit-intake-title'],
   },
+  controls: {
+    title: 'All controls',
+    description: 'Find a specific Owner control by task.',
+    sections: ['owner-controls-title'],
+  },
 };
+const advancedGroupBySection = new Map();
+const advancedGroupElements = [];
+const advancedContainer = document.querySelector('.owner-workspace-content');
+for (const group of [
+  {
+    title: 'Windows Companion setup',
+    description: 'Connection, pairing, and signed read-only KemerBet lookup.',
+    sections: ['kemerbet-companion-title'],
+  },
+  {
+    title: 'Pilot and diagnostic tools',
+    description: 'Older fixed-cohort and one-deposit controls, plus read-only diagnostics.',
+    sections: ['execution-readiness-title', 'execution-approvals-title', 'pilot-title', 'kemerbet-readiness-cohort-title', 'deposit-intake-title'],
+  },
+]) {
+  const disclosure = document.createElement('details');
+  disclosure.className = 'owner-advanced-group';
+  const summary = document.createElement('summary');
+  summary.textContent = group.title;
+  const description = document.createElement('p');
+  description.className = 'receipt-label';
+  description.textContent = group.description;
+  disclosure.append(summary, description);
+  for (const label of group.sections) {
+    const section = document.querySelector('section[aria-labelledby="' + label + '"]');
+    disclosure.append(section);
+    advancedGroupBySection.set(label, disclosure);
+  }
+  advancedContainer.append(disclosure);
+  advancedGroupElements.push(disclosure);
+}
 function showOwnerView(view, focusHeading = false) {
   const selectedView = Object.hasOwn(ownerViews, view) ? view : 'home';
   for (const [name, details] of Object.entries(ownerViews)) {
@@ -1360,6 +1408,7 @@ function showOwnerView(view, focusHeading = false) {
       document.querySelector('section[aria-labelledby="' + label + '"]').hidden = !selected;
     }
   }
+  for (const group of advancedGroupElements) group.hidden = selectedView !== 'advanced';
   const details = ownerViews[selectedView];
   ownerViewEyebrow.textContent = selectedView === 'home' ? 'HOME' : 'OWNER WORKSPACE';
   ownerViewTitle.textContent = details.title;
@@ -1374,6 +1423,8 @@ for (const view of Object.keys(ownerViews)) {
 function openOwnerControl(view, sectionId, focusId = sectionId) {
   if (!Object.hasOwn(ownerViews, view) || !ownerViews[view].sections.includes(sectionId)) return;
   showOwnerView(view);
+  const advancedGroup = advancedGroupBySection.get(sectionId);
+  if (advancedGroup) advancedGroup.open = true;
   const target = document.querySelector('#' + focusId);
   if (!target) return;
   const disclosure = target.closest?.('details');
@@ -1388,8 +1439,6 @@ document.querySelector('#owner-control-directory').addEventListener('click', (ev
   openOwnerControl(button.dataset.ownerControlView, button.dataset.ownerControlSection,
     button.dataset.ownerControlFocus || button.dataset.ownerControlSection);
 });
-document.querySelector('#owner-nav-controls').addEventListener('click', () =>
-  openOwnerControl('home', 'owner-controls-title'));
 showOwnerView('home');
 const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
@@ -1479,6 +1528,9 @@ const refreshRequestsButton = document.querySelector('#refresh-requests-button')
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
 const playerEligibilityList = document.querySelector('#player-eligibility-list');
+const playerEligibilityCurrent = document.querySelector('#player-eligibility-current');
+const playerEligibilityCurrentSummary = document.querySelector('#player-eligibility-current-summary');
+const playerEligibilityCurrentList = document.querySelector('#player-eligibility-current-list');
 const kemerbetReadinessCohortForm = document.querySelector('#kemerbet-readiness-cohort-form');
 const kemerbetReadinessCohortConfirmation = document.querySelector('#kemerbet-readiness-cohort-confirmation');
 const kemerbetReadinessCohortButton = document.querySelector('#kemerbet-readiness-cohort-button');
@@ -2833,6 +2885,8 @@ function clearAssociationCandidates() {
 
 function clearPlayerEligibility() {
   playerEligibilityList.replaceChildren();
+  playerEligibilityCurrentList.replaceChildren();
+  playerEligibilityCurrent.hidden = true;
 }
 
 function clearKemerbetReadinessCohort() {
@@ -8062,6 +8116,17 @@ function renderPlayerEligibility(players) {
     playerEligibilityList.append(empty);
     return;
   }
+  const eligibleCount = players.filter((player) => player.decision === 'eligible').length;
+  if (eligibleCount > 0) {
+    playerEligibilityCurrent.hidden = false;
+    playerEligibilityCurrentSummary.textContent = 'Already eligible (' + eligibleCount + ')';
+  }
+  if (eligibleCount === players.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No Player IDs need an eligibility decision.';
+    playerEligibilityList.append(empty);
+  }
   for (const player of players) {
     const card = document.createElement('article');
     card.className = 'request-card';
@@ -8075,24 +8140,30 @@ function renderPlayerEligibility(players) {
       (player.decidedAt ? ' \u00b7 ' + new Date(player.decidedAt).toLocaleString() : '');
     const actions = document.createElement('div');
     actions.className = 'review-actions';
-    const approve = document.createElement('button');
-    approve.type = 'button';
-    approve.dataset.kemerbetStateMutation = 'ordinary';
-    approve.textContent = 'Approve deposit eligibility';
-    approve.disabled = !ordinaryKemerbetMutationAllowed() ||
-      player.playerStatus !== 'active' || player.validationStatus !== 'valid' ||
-      player.decision === 'eligible';
-    approve.addEventListener('click', () => decidePlayerEligibility(player, 'eligible'));
-    const revoke = document.createElement('button');
-    revoke.type = 'button';
-    revoke.dataset.kemerbetStateMutation = 'ordinary';
-    revoke.className = 'danger';
-    revoke.textContent = 'Revoke deposit eligibility';
-    revoke.disabled = !ordinaryKemerbetMutationAllowed() || player.decision === 'revoked';
-    revoke.addEventListener('click', () => decidePlayerEligibility(player, 'revoked'));
-    actions.append(approve, revoke);
-    card.append(title, metadata, actions);
-    playerEligibilityList.append(card);
+    if (player.decision !== 'eligible' && player.playerStatus === 'active' &&
+        player.validationStatus === 'valid') {
+      const approve = document.createElement('button');
+      approve.type = 'button';
+      approve.dataset.kemerbetStateMutation = 'ordinary';
+      approve.textContent = 'Approve deposit eligibility';
+      approve.disabled = !ordinaryKemerbetMutationAllowed();
+      approve.addEventListener('click', () => decidePlayerEligibility(player, 'eligible'));
+      actions.append(approve);
+    }
+    if (player.decision !== 'revoked') {
+      const revoke = document.createElement('button');
+      revoke.type = 'button';
+      revoke.dataset.kemerbetStateMutation = 'ordinary';
+      revoke.className = 'danger';
+      revoke.textContent = 'Revoke deposit eligibility';
+      revoke.disabled = !ordinaryKemerbetMutationAllowed();
+      revoke.addEventListener('click', () => decidePlayerEligibility(player, 'revoked'));
+      actions.append(revoke);
+    }
+    if (actions.children.length === 1) actions.className = 'review-actions single-action';
+    card.append(title, metadata);
+    if (actions.children.length > 0) card.append(actions);
+    (player.decision === 'eligible' ? playerEligibilityCurrentList : playerEligibilityList).append(card);
   }
 }
 

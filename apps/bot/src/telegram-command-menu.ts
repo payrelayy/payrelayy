@@ -3,7 +3,7 @@ export const TELEGRAM_PRIVATE_HOME_COMMANDS = [
   { command: 'start', description: 'Home' },
   { command: 'deposit', description: 'Deposit' },
   { command: 'support', description: 'Support' },
-  { command: 'help', description: 'Help' },
+  { command: 'channel', description: 'Updates channel' },
 ] as const;
 
 export const TELEGRAM_PRIVATE_SAVED_PLAYER_COMMANDS = [

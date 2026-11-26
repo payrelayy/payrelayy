@@ -961,7 +961,8 @@ describe('Owner workspace navigation', () => {
   it('keeps daily work first and every active control reachable', async () => {
     const browser = ownerBrowserHarness(503);
     const areas = {
-      home: ['owner-controls-title', 'system-overview-title'],
+      home: ['system-overview-title'],
+      controls: ['owner-controls-title'],
       sms: ['receiver-sms-inbox-title', 'receiver-change-review-title'],
       submitted: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
       methods: ['payment-methods-title', 'receiver-title'],
@@ -995,6 +996,11 @@ describe('Owner workspace navigation', () => {
         ),
       ).toEqual(visible);
       expect(browser.element(`#owner-nav-${area}`).dataset.active).toBe('true');
+      expect(
+        Object.keys(areas).filter(
+          (name) => browser.element(`#owner-nav-${name}`).dataset.active === 'true',
+        ),
+      ).toEqual([area]);
     }
     expect(browser.element('#owner-view-title').textContent).toBe('Advanced tools');
     expect(browser.element('#owner-view-title').focused).toBe(true);
@@ -1055,8 +1061,9 @@ describe('Owner workspace navigation', () => {
     expect(browser.fetchCalls.length).toBe(requestsBeforeClick);
 
     await browser.element('#owner-nav-controls').listeners.get('click')?.({ preventDefault() {} });
-    expect(browser.element('#owner-nav-home').dataset.active).toBe('true');
-    expect(browser.element('#owner-controls-title').focused).toBe(true);
+    expect(browser.element('#owner-nav-controls').dataset.active).toBe('true');
+    expect(browser.element('section[aria-labelledby="owner-controls-title"]').hidden).toBe(false);
+    expect(browser.element('#owner-view-title').textContent).toBe('All controls');
 
     await browser.call(
       'openOwnerControl',
@@ -1066,6 +1073,48 @@ describe('Owner workspace navigation', () => {
     );
     expect(browser.element('#owner-nav-advanced').dataset.active).toBe('true');
     expect(browser.element('#companion-connection-title').focused).toBe(true);
+    expect(browser.evaluate('advancedGroupBySection.get("kemerbet-companion-title").open')).toBe(
+      true,
+    );
+    expect(browser.evaluate('advancedGroupBySection.get("pilot-title").open')).toBeFalsy();
+  });
+
+  it('puts already eligible Players behind a review disclosure and shows only applicable actions', () => {
+    const browser = ownerBrowserHarness(503);
+    browser.call('renderPlayerEligibility', [
+      {
+        playerId: '28379330',
+        playerAccountId: '22222222-2222-4222-8222-222222222222',
+        playerStatus: 'active',
+        validationStatus: 'valid',
+        decision: 'eligible',
+        decisionVersion: 1,
+      },
+      {
+        playerId: '33279923',
+        playerAccountId: '33333333-3333-4333-8333-333333333333',
+        playerStatus: 'active',
+        validationStatus: 'valid',
+        decision: 'revoked',
+        decisionVersion: 2,
+      },
+    ]);
+    const current = browser.element('#player-eligibility-current');
+    expect(current.hidden).toBe(false);
+    expect(browser.element('#player-eligibility-current-summary').textContent).toBe(
+      'Already eligible (1)',
+    );
+    const eligibleCard = browser.element('#player-eligibility-current-list')
+      .children[0] as FakeElement;
+    const eligibleActions = eligibleCard.children[2] as FakeElement;
+    expect(eligibleActions.children.map((child) => (child as FakeElement).textContent)).toEqual([
+      'Revoke deposit eligibility',
+    ]);
+    const revokedCard = browser.element('#player-eligibility-list').children[0] as FakeElement;
+    const revokedActions = revokedCard.children[2] as FakeElement;
+    expect(revokedActions.children.map((child) => (child as FakeElement).textContent)).toEqual([
+      'Approve deposit eligibility',
+    ]);
   });
 });
 

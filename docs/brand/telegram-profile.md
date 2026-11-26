@@ -12,7 +12,7 @@ FetanAgent is the product name. “Fetan” (ፈጣን) means “fast.” The pu
 
   > Welcome to FetanAgent. Save your Player ID, tap Deposit, and pay using the details shown. Send your receipt or transaction reference here; we’ll update you in this chat. Need help? Send /support.
 
-Keep deposit actions in the private bot chat. The Telegram command menu is published by the bot at startup and must be changed in code, not only in BotFather. The private menu lists Home, Deposit, Support, and Updates channel; a saved Player ID also adds Change Player ID. The `/channel` command opens the channel through a Telegram URL button. `/help` still works when typed but is not listed in the menu. The Home message is unchanged.
+Keep deposit actions in the private bot chat. The Telegram command menu is published by the bot at startup and must be changed in code, not only in BotFather. The private menu lists Home, Deposit, Support, and Telegram Channel; a saved Player ID also adds Change Player ID. The `/channel` command opens the channel through a Telegram URL button. `/help` still works when typed but is not listed in the menu. The Home message is unchanged.
 
 ## Announcement channel
 

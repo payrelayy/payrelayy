@@ -34,6 +34,10 @@ import {
   handleTelegramSupportMessage,
 } from './telegram-support.js';
 import {
+  FETANAGENT_UPDATES_CHANNEL_URL,
+  isTelegramPrivateChannelCommand,
+} from './telegram-channel.js';
+import {
   TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
   TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
 } from './telegram-customer-copy.js';
@@ -430,6 +434,22 @@ bot.on('message', async (context) => {
     },
   );
   if (supportOutcome === 'handled') return;
+
+  if (
+    isTelegramPrivateChannelCommand(
+      {
+        text: 'text' in context.message ? context.message.text : undefined,
+        chat: context.chat ? { id: context.chat.id, type: context.chat.type } : undefined,
+        from: context.from ? { id: context.from.id, isBot: context.from.is_bot } : undefined,
+      },
+      context.me.username,
+    )
+  ) {
+    await context.reply('FetanAgent Updates', {
+      reply_markup: new InlineKeyboard().url('Open channel', FETANAGENT_UPDATES_CHANNEL_URL),
+    });
+    return;
+  }
 
   if (playerActions.enabled) {
     const metadata = {

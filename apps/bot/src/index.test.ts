@@ -314,11 +314,37 @@ describe('Telegram admission, private action, and ingress composition', () => {
           { command: 'start', description: 'Home' },
           { command: 'deposit', description: 'Deposit' },
           { command: 'support', description: 'Support' },
-          { command: 'help', description: 'Help' },
+          { command: 'channel', description: 'Updates channel' },
         ],
         scope: { type: 'all_private_chats' },
       },
     ]);
+  });
+
+  it('opens the official updates channel without entering a deposit pipeline', async () => {
+    await loadComposition(false, true);
+    const replies: Array<{
+      text: string;
+      buttons: Array<{ text: string; url?: string }> | undefined;
+    }> = [];
+    const context = messageContext('/channel');
+    await runtime.messageHandler!({
+      ...context,
+      reply: async (
+        text: string,
+        options?: { reply_markup?: { buttons: Array<{ text: string; url?: string }> } },
+      ) => {
+        replies.push({ text, buttons: options?.reply_markup?.buttons });
+      },
+    });
+    expect(replies).toEqual([
+      {
+        text: 'FetanAgent Updates',
+        buttons: [{ text: 'Open channel', url: 'https://t.me/FetanAgentUpdates' }],
+      },
+    ]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
   it('acknowledges a receipt without exposing the extracted reference', async () => {
@@ -994,7 +1020,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
           { command: 'deposit', description: 'Deposit' },
           { command: 'change_player_id', description: 'Change Player ID' },
           { command: 'support', description: 'Support' },
-          { command: 'help', description: 'Help' },
+          { command: 'channel', description: 'Updates channel' },
         ],
         scope: { type: 'chat', chat_id: 123456789 },
       },

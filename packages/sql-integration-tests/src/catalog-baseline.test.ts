@@ -275,6 +275,8 @@ const receiverSmsFastSettlementMigrationName =
   '20261122075200_receiver_sms_settlement_fast_old_duplicate_scan.sql';
 const platformPlayDestinationsMigrationName = '20261124133235_platform_play_destinations.sql';
 const ownerBusinessAnalyticsMigrationName = '20261127000041_owner_business_analytics.sql';
+const ownerUserDirectoryAttributionMigrationName =
+  '20261127005036_owner_user_directory_attribution.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -801,7 +803,8 @@ describe('disposable SQL migration baseline', () => {
         name !== completedWatchdogRunActivationMigrationName &&
         name !== receiverSmsFastSettlementMigrationName &&
         name !== platformPlayDestinationsMigrationName &&
-        name !== ownerBusinessAnalyticsMigrationName,
+        name !== ownerBusinessAnalyticsMigrationName &&
+        name !== ownerUserDirectoryAttributionMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10789,6 +10792,7 @@ describe('production deposit policy cutovers', () => {
       receiverSmsFastSettlementMigrationName,
       platformPlayDestinationsMigrationName,
       ownerBusinessAnalyticsMigrationName,
+      ownerUserDirectoryAttributionMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -10858,6 +10862,8 @@ describe('production deposit policy cutovers', () => {
 
     await postCutoverClient.query('begin');
     try {
+      const telegramIdentityIds: string[] = [];
+      const telegramCustomerIds: string[] = [];
       for (const [telegramId, joinedAt] of [
         ['900000000001', 'now()'],
         ['900000000002', "now() - interval '40 days'"],
@@ -10870,11 +10876,43 @@ describe('production deposit policy cutovers', () => {
              values ($1::uuid,'telegram',$2::text) returning id`,
           [customer.rows[0]!.id, telegramId],
         );
+        telegramIdentityIds.push(identity.rows[0]!.id);
+        telegramCustomerIds.push(customer.rows[0]!.id);
         await postCutoverClient.query(
           `insert into app.telegram_identities
             (customer_identity_id,telegram_user_id,private_chat_id,username,created_at)
             values ($1::uuid,$2::bigint,$2::bigint,'legacy-name',${joinedAt})`,
           [identity.rows[0]!.id, telegramId],
+        );
+      }
+      const beneficiary = await postCutoverClient.query<{ id: string }>(
+        'insert into app.customers default values returning id',
+      );
+      const selectedPlayer = await postCutoverClient.query<{ id: string }>(
+        `insert into app.customer_platform_players (customer_id,platform_id,player_id)
+         select $1::uuid,platform.id,'SHARED-PLAYER'
+           from app.platforms platform where platform.code='kemerbet'
+         returning id`,
+        [beneficiary.rows[0]!.id],
+      );
+      await postCutoverClient.query(
+        `insert into app.customer_platform_players (customer_id,platform_id,player_id)
+         select $1::uuid,platform.id,'OWNED-BUT-NOT-SAVED'
+           from app.platforms platform where platform.code='kemerbet'`,
+        [telegramCustomerIds[0]!],
+      );
+      for (const [index, identityId] of telegramIdentityIds.entries()) {
+        const event = await postCutoverClient.query<{ id: string }>(
+          `insert into app.inbound_events
+             (channel,external_event_id,customer_identity_id,payload_digest)
+           values ('telegram',$1::text,$2::uuid,$3::text) returning id`,
+          [`update:${900000000101 + index}`, identityId, `hmac-sha256-v1:${'a'.repeat(64)}`],
+        );
+        await postCutoverClient.query(
+          `insert into app.telegram_player_selections
+             (telegram_identity_id,player_account_id,origin_inbound_event_id,selected_at)
+           values ($1::uuid,$2::uuid,$3::uuid,clock_timestamp())`,
+          [identityId, selectedPlayer.rows[0]!.id, event.rows[0]!.id],
         );
       }
       await postCutoverClient.query("set session authorization 'fetanagent_owner_control_runtime'");
@@ -10899,10 +10937,18 @@ describe('production deposit policy cutovers', () => {
       expect(users.rows).toMatchObject([
         {
           telegram_user_id: '900000000001',
-          player_count: '0',
+          player_count: '1',
+          player_ids: ['SHARED-PLAYER'],
           automatic_credits: '0',
           automatic_amount_minor: '0',
         },
+      ]);
+      const otherUser = await postCutoverClient.query(
+        'select * from app.list_owner_telegram_users($1::uuid,$2::text,25,0)',
+        [ownerAuthUserId, '900000000002'],
+      );
+      expect(otherUser.rows).toMatchObject([
+        { player_count: '1', player_ids: ['SHARED-PLAYER'], automatic_credits: '0' },
       ]);
       expect(JSON.stringify(users.rows)).not.toContain('legacy-name');
     } finally {

@@ -1073,6 +1073,7 @@ describe('Owner workspace navigation', () => {
     );
     const shown = JSON.stringify(browser.element('#owner-users-list'));
     expect(shown).toContain(telegramId);
+    expect(shown).toContain('Saved Player ID');
     expect(shown).toContain('32584710');
     expect(shown).toContain('129.00 ETB');
     expect(shown).not.toContain('username');

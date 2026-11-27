@@ -70,7 +70,7 @@ export const OWNER_CONTROL_GROUPS = [
       {
         label: 'Bot users',
         description:
-          'Find a customer by Telegram ID and see their Player IDs and confirmed automatic credits.',
+          'Find a customer by Telegram ID and see their saved Player ID and confirmed automatic credits.',
         effect: 'Read only',
         view: 'users',
         section: 'owner-users-title',
@@ -389,7 +389,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="owner-users-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Search by exact Telegram ID. Usernames are not required or shown. Player IDs and credit totals are for Owner review only.</p>
+          <p class="receipt-label">Search by exact Telegram ID. The saved Player ID and credits from this user's submitted payments are for Owner review only.</p>
           <form id="owner-users-search-form" class="owner-users-search">
             <label for="owner-users-search">Telegram ID</label>
             <input id="owner-users-search" type="text" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="All users" />
@@ -1388,7 +1388,7 @@ const ownerViews = {
   },
   users: {
     title: 'Users',
-    description: 'Find bot users by Telegram ID and review their Player IDs and confirmed credits.',
+    description: 'Find bot users by Telegram ID and review their saved Player ID and confirmed credits.',
     sections: ['owner-users-title'],
   },
   sms: {
@@ -7893,7 +7893,7 @@ function renderOwnerUser(value) {
   transactionFact(facts, 'Joined', transactionDate(value.joinedAt));
   transactionFact(facts, 'Last bot activity', value.lastActiveAt ?
     transactionDate(value.lastActiveAt) : 'No activity recorded');
-  transactionFact(facts, 'Player IDs', value.playerIds.length ?
+  transactionFact(facts, 'Saved Player ID', value.playerIds.length ?
     value.playerIds.join(', ') + (value.playerCount > value.playerIds.length
       ? ' · ' + (value.playerCount - value.playerIds.length) + ' more' : '') : 'None saved');
   transactionFact(facts, 'Confirmed automatic credits',

@@ -33,9 +33,11 @@ import { PostgresOwnerReceiverSmsSimplePairing } from './owner-receiver-sms-simp
 import { PostgresOwnerRoutineTelebirrReceipt } from './owner-routine-telebirr-receipt.js';
 import { PostgresOwnerTelebirrShadowVerificationStatus } from './owner-telebirr-shadow-verification-status.js';
 import { PostgresOwnerBrowserSessions } from './owner-browser-session.js';
+import { PostgresOwnerBusinessAnalytics } from './owner-business-analytics.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly browserSessions: Pick<PostgresOwnerBrowserSessions, 'run'>;
+  readonly businessAnalytics?: Pick<PostgresOwnerBusinessAnalytics, 'metrics' | 'listUsers'>;
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
@@ -297,6 +299,12 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       to_regprocedure('app.get_owner_system_overview(uuid)')::oid,
       'execute'), true) as system_overview_read_allowed,
     coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.get_owner_business_metrics(uuid)')::oid,
+      'execute'), true) as business_metrics_read_allowed,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.list_owner_telegram_users(uuid,text,integer,integer)')::oid,
+      'execute'), true) as telegram_users_read_allowed,
+    coalesce(has_function_privilege(current_user,
       to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid,
       'execute'), true) as manual_payment_decide_allowed,
     coalesce(has_function_privilege(current_user,
@@ -467,6 +475,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)') is not null)::integer
         + (to_regprocedure('app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)') is not null)::integer
         + (to_regprocedure('app.get_owner_system_overview(uuid)') is not null)::integer
+        + (to_regprocedure('app.get_owner_business_metrics(uuid)') is not null)::integer
+        + (to_regprocedure('app.list_owner_telegram_users(uuid,text,integer,integer)') is not null)::integer
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)') is not null)::integer
@@ -574,6 +584,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_system_overview(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_business_metrics(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_telegram_users(uuid,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid, 0::oid)
@@ -709,6 +721,9 @@ export async function createOwnerControlPostgresRuntime(
 
   let closed = false;
   return {
+    businessAnalytics: new PostgresOwnerBusinessAnalytics({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
     browserSessions: new PostgresOwnerBrowserSessions({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),

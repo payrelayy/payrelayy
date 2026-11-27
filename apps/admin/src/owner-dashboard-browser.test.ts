@@ -961,7 +961,8 @@ describe('Owner workspace navigation', () => {
   it('keeps daily work first and every active control reachable', async () => {
     const browser = ownerBrowserHarness(503);
     const areas = {
-      home: ['system-overview-title'],
+      home: ['business-metrics-title', 'system-overview-title'],
+      users: ['owner-users-title'],
       controls: ['owner-controls-title'],
       sms: ['receiver-sms-inbox-title', 'receiver-change-review-title'],
       submitted: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
@@ -1006,6 +1007,85 @@ describe('Owner workspace navigation', () => {
     expect(browser.element('#owner-view-title').focused).toBe(true);
   });
 
+  it('shows confirmed automatic totals by Ethiopia period and keeps manual records separate', async () => {
+    const period = (newUsers: number, automaticCredits: number, automaticAmountMinor: string) => ({
+      newUsers,
+      automaticCredits,
+      automaticAmountMinor,
+      manualRecords: 1,
+      manualRecordedAmountMinor: '60000',
+    });
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/business-metrics'
+          ? response(200, {
+              checkedAt: '2026-11-27T09:00:00.000Z',
+              timeZone: 'Africa/Addis_Ababa',
+              registeredUsers: 340,
+              today: period(1, 2, '12900'),
+              week: period(28, 519, '16541600'),
+              month: period(258, 2717, '100673358'),
+            })
+          : undefined,
+    });
+    await browser.signIn();
+    const today = JSON.stringify(browser.element('#business-metrics-facts'));
+    expect(today).toContain('340');
+    expect(today).toContain('129.00 ETB');
+    expect(browser.element('#business-metrics-manual').textContent).toContain('600.00 ETB');
+    await browser.element('[data-business-period="month"]').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    expect(JSON.stringify(browser.element('#business-metrics-facts'))).toContain(
+      '1,006,733.58 ETB',
+    );
+    expect(browser.element('[data-business-period="month"]').dataset.active).toBe('true');
+    expect(browser.element('#business-metrics-status').textContent).toContain('Ethiopia time');
+  });
+
+  it('finds bot users by exact Telegram ID without displaying usernames or private chat IDs', async () => {
+    const telegramId = '123456789';
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/users?')
+          ? response(200, {
+              users: [
+                {
+                  telegramId,
+                  status: 'active',
+                  joinedAt: '2026-11-20T10:00:00.000Z',
+                  lastActiveAt: '2026-11-27T08:00:00.000Z',
+                  playerCount: 1,
+                  playerIds: ['32584710'],
+                  automaticCredits: 2,
+                  automaticAmountMinor: '12900',
+                },
+              ],
+              hasMore: false,
+            })
+          : undefined,
+    });
+    await browser.signIn();
+    browser.element('#owner-users-search').value = telegramId;
+    await browser.call('loadOwnerUsers', true);
+    expect(browser.fetchCalls.some(({ url }) => url.includes('telegramId=' + telegramId))).toBe(
+      true,
+    );
+    const shown = JSON.stringify(browser.element('#owner-users-list'));
+    expect(shown).toContain(telegramId);
+    expect(shown).toContain('32584710');
+    expect(shown).toContain('129.00 ETB');
+    expect(shown).not.toContain('username');
+    expect(shown).not.toContain('privateChatId');
+    const requestsBeforeInvalid = browser.fetchCalls.length;
+    browser.element('#owner-users-search').value = '123 wrong';
+    await browser.call('loadOwnerUsers', true);
+    expect(browser.fetchCalls).toHaveLength(requestsBeforeInvalid);
+    expect(browser.element('#owner-users-status').textContent).toContain(
+      'exact numeric Telegram ID',
+    );
+  });
+
   it('removes the duplicate masked transaction list from Submitted payments', async () => {
     const html = ownerDashboardHtml({
       deploymentTarget: 'production',
@@ -1026,7 +1106,12 @@ describe('Owner workspace navigation', () => {
     const listedSections = new Set(controls.map((control) => control.section));
     const availableSections = Object.values(views)
       .flatMap((view) => view.sections)
-      .filter((section) => !['owner-controls-title', 'system-overview-title'].includes(section));
+      .filter(
+        (section) =>
+          !['owner-controls-title', 'business-metrics-title', 'system-overview-title'].includes(
+            section,
+          ),
+      );
     expect(listedSections).toEqual(new Set(availableSections));
     const html = ownerDashboardHtml({
       deploymentTarget: 'production',

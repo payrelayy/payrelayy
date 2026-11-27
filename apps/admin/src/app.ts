@@ -12,6 +12,7 @@ import {
   OwnerManualPaymentConflictError,
   OwnerManualPaymentRejectedError,
 } from './owner-manual-payments.js';
+import { OwnerBusinessAnalyticsRejectedError } from './owner-business-analytics.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import {
@@ -2973,6 +2974,73 @@ export function buildOwnerControlApp(
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });
+
+  app.get('/v1/owner/business-metrics', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as Record<string, unknown>).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const actor = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.businessAnalytics)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const metrics = await dependencies.runtime.businessAnalytics.metrics(actor);
+      return reply.header('Cache-Control', 'no-store').code(200).send(metrics);
+    } catch (error) {
+      if (error instanceof OwnerBusinessAnalyticsRejectedError)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      request.log.warn('Owner business metrics are unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.get<{ Querystring: { telegramId?: string; limit?: string; offset?: string } }>(
+    '/v1/owner/users',
+    async (request, reply) => {
+      try {
+        if (
+          Object.keys(request.query).some((key) => !['telegramId', 'limit', 'offset'].includes(key))
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const telegramId = request.query.telegramId ?? null;
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
+        if (
+          (telegramId !== null && !/^[1-9][0-9]{0,19}$/u.test(telegramId)) ||
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset > 10000
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.businessAnalytics)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const rows = await dependencies.runtime.businessAnalytics.listUsers(
+          actor,
+          telegramId,
+          limit + 1,
+          offset,
+        );
+        return reply
+          .header('Cache-Control', 'no-store')
+          .code(200)
+          .send({
+            users: rows.slice(0, limit),
+            hasMore: rows.length > limit,
+          });
+      } catch (error) {
+        if (error instanceof OwnerBusinessAnalyticsRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        request.log.warn('Owner user directory is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
 
   app.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
     '/v1/owner/manual-payment-cases',

@@ -1455,6 +1455,82 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('serves read-only business metrics and a bounded Telegram ID directory to the Owner', async () => {
+    const calls: unknown[] = [];
+    const user = {
+      telegramId: '123456789',
+      status: 'active' as const,
+      joinedAt: '2026-11-20T10:00:00.000Z',
+      lastActiveAt: null,
+      playerCount: 1,
+      playerIds: ['32584710'],
+      automaticCredits: 2,
+      automaticAmountMinor: '12900',
+    };
+    const app = buildOwnerControlApp(config(false, false, 'production'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        businessAnalytics: {
+          metrics: async (actor) => {
+            calls.push(['metrics', actor]);
+            const period = {
+              newUsers: 1,
+              automaticCredits: 2,
+              automaticAmountMinor: '12900',
+              manualRecords: 0,
+              manualRecordedAmountMinor: '0',
+            };
+            return {
+              checkedAt: '2026-11-27T09:00:00.000Z',
+              timeZone: 'Africa/Addis_Ababa',
+              registeredUsers: 340,
+              today: period,
+              week: period,
+              month: period,
+            };
+          },
+          listUsers: async (actor, telegramId, limit, offset) => {
+            calls.push(['users', actor, telegramId, limit, offset]);
+            return [user, user];
+          },
+        },
+      }),
+    });
+    try {
+      const metricsUrl = '/v1/owner/business-metrics';
+      expect((await app.inject({ method: 'GET', url: metricsUrl })).statusCode).toBe(403);
+      const metrics = await app.inject({
+        method: 'GET',
+        url: metricsUrl,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(metrics.statusCode).toBe(200);
+      expect(metrics.headers['cache-control']).toContain('no-store');
+      expect(metrics.json().registeredUsers).toBe(340);
+      const users = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/users?telegramId=123456789&limit=1&offset=5',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(users.statusCode).toBe(200);
+      expect(users.headers['cache-control']).toContain('no-store');
+      expect(users.json()).toEqual({ users: [user], hasMore: true });
+      expect(calls).toEqual([
+        ['metrics', authUserId],
+        ['users', authUserId, '123456789', 2, 5],
+      ]);
+      const bad = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/users?telegramId=abc',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(bad.statusCode).toBe(400);
+      expect(calls).toHaveLength(2);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

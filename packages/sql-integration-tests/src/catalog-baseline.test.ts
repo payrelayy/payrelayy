@@ -274,6 +274,7 @@ const completedWatchdogRunActivationMigrationName =
 const receiverSmsFastSettlementMigrationName =
   '20261122075200_receiver_sms_settlement_fast_old_duplicate_scan.sql';
 const platformPlayDestinationsMigrationName = '20261124133235_platform_play_destinations.sql';
+const ownerBusinessAnalyticsMigrationName = '20261127000041_owner_business_analytics.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -799,7 +800,8 @@ describe('disposable SQL migration baseline', () => {
         name !== signedReceiverSmsRoutineActivationMigrationName &&
         name !== completedWatchdogRunActivationMigrationName &&
         name !== receiverSmsFastSettlementMigrationName &&
-        name !== platformPlayDestinationsMigrationName,
+        name !== platformPlayDestinationsMigrationName &&
+        name !== ownerBusinessAnalyticsMigrationName,
     );
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
@@ -10786,6 +10788,7 @@ describe('production deposit policy cutovers', () => {
       completedWatchdogRunActivationMigrationName,
       receiverSmsFastSettlementMigrationName,
       platformPlayDestinationsMigrationName,
+      ownerBusinessAnalyticsMigrationName,
     ]) {
       await postCutoverClient.query(
         await readFile(join(environment.migrationsDirectory, migrationName), 'utf8'),
@@ -10833,6 +10836,79 @@ describe('production deposit policy cutovers', () => {
 
   afterAll(async () => {
     await postCutoverClient?.end();
+  });
+
+  it('limits business metrics and Telegram ID directory to the active Owner runtime', async () => {
+    const grants = await postCutoverClient.query<{
+      metrics_allowed: boolean;
+      users_allowed: boolean;
+      anon_denied: boolean;
+    }>(`select
+      pg_catalog.has_function_privilege('fetanagent_owner_control',
+        'app.get_owner_business_metrics(uuid)', 'execute') as metrics_allowed,
+      pg_catalog.has_function_privilege('fetanagent_owner_control',
+        'app.list_owner_telegram_users(uuid,text,integer,integer)', 'execute') as users_allowed,
+      not pg_catalog.has_function_privilege('anon',
+        'app.get_owner_business_metrics(uuid)', 'execute') and
+      not pg_catalog.has_function_privilege('anon',
+        'app.list_owner_telegram_users(uuid,text,integer,integer)', 'execute') as anon_denied`);
+    expect(grants.rows).toEqual([
+      { metrics_allowed: true, users_allowed: true, anon_denied: true },
+    ]);
+
+    await postCutoverClient.query('begin');
+    try {
+      for (const [telegramId, joinedAt] of [
+        ['900000000001', 'now()'],
+        ['900000000002', "now() - interval '40 days'"],
+      ]) {
+        const customer = await postCutoverClient.query<{ id: string }>(
+          'insert into app.customers default values returning id',
+        );
+        const identity = await postCutoverClient.query<{ id: string }>(
+          `insert into app.customer_identities(customer_id,identity_kind,external_subject)
+             values ($1::uuid,'telegram',$2::text) returning id`,
+          [customer.rows[0]!.id, telegramId],
+        );
+        await postCutoverClient.query(
+          `insert into app.telegram_identities
+            (customer_identity_id,telegram_user_id,private_chat_id,username,created_at)
+            values ($1::uuid,$2::bigint,$2::bigint,'legacy-name',${joinedAt})`,
+          [identity.rows[0]!.id, telegramId],
+        );
+      }
+      await postCutoverClient.query("set session authorization 'fetanagent_owner_control_runtime'");
+      const result = await postCutoverClient.query<{
+        metrics: {
+          timeZone: string;
+          registeredUsers: number;
+          today: { newUsers: number; automaticCredits: number; automaticAmountMinor: string };
+          month: { newUsers: number };
+        };
+      }>('select app.get_owner_business_metrics($1::uuid) as metrics', [ownerAuthUserId]);
+      expect(result.rows[0]!.metrics).toMatchObject({
+        timeZone: 'Africa/Addis_Ababa',
+        registeredUsers: 2,
+        today: { newUsers: 1, automaticCredits: 0, automaticAmountMinor: '0' },
+        month: { newUsers: 1 },
+      });
+      const users = await postCutoverClient.query(
+        'select * from app.list_owner_telegram_users($1::uuid,$2::text,25,0)',
+        [ownerAuthUserId, '900000000001'],
+      );
+      expect(users.rows).toMatchObject([
+        {
+          telegram_user_id: '900000000001',
+          player_count: '0',
+          automatic_credits: '0',
+          automatic_amount_minor: '0',
+        },
+      ]);
+      expect(JSON.stringify(users.rows)).not.toContain('legacy-name');
+    } finally {
+      await postCutoverClient.query('rollback');
+      await postCutoverClient.query('reset session authorization');
+    }
   });
 
   it('exposes only registry facts through the Owner read model', async () => {

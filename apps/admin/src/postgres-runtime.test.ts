@@ -80,6 +80,20 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     );
   });
 
+  it('includes Owner analytics in the optional rollout grant boundary', () => {
+    for (const signature of [
+      'app.get_owner_business_metrics(uuid)',
+      'app.list_owner_telegram_users(uuid,text,integer,integer)',
+    ]) {
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(`to_regprocedure('${signature}')::oid,`);
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+        `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
+      );
+    }
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as business_metrics_read_allowed');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as telegram_users_read_allowed');
+  });
+
   it('allows only three optional policy procedures, never routine admission or execution', () => {
     for (const signature of [
       'app.get_owner_routine_telebirr_processing(uuid)',

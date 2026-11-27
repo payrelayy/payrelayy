@@ -67,6 +67,14 @@ export const OWNER_CONTROL_GROUPS = [
         view: 'players',
         section: 'player-eligibility-title',
       },
+      {
+        label: 'Bot users',
+        description:
+          'Find a customer by Telegram ID and see their Player IDs and confirmed automatic credits.',
+        effect: 'Read only',
+        view: 'users',
+        section: 'owner-users-title',
+      },
     ],
   },
   {
@@ -313,6 +321,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <nav class="owner-navigation" aria-label="Owner workspace">
             <p class="owner-navigation-label">DAILY WORK</p>
             <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
+            <button id="owner-nav-users" type="button" data-owner-view="users">Users</button>
             <button id="owner-nav-submitted" type="button" data-owner-view="submitted">Submitted payments</button>
             <button id="owner-nav-sms" type="button" data-owner-view="sms">Received SMS</button>
             <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
@@ -332,6 +341,24 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <h2 id="owner-controls-title">All Owner controls</h2>
           <p class="receipt-label">Find a specific control. Opening it does not run an action.</p>
           ${controlDirectory}
+        </section>
+        <section class="review-section" aria-labelledby="business-metrics-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Business snapshot</p>
+              <h2 id="business-metrics-title">FetanAgent activity</h2>
+            </div>
+            <button class="secondary" id="business-metrics-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">Registered bot users are unique Telegram IDs. Credits count confirmed automatic deposits only. Times follow Ethiopia.</p>
+          <div class="business-periods" role="group" aria-label="Reporting period">
+            <button class="secondary" type="button" data-business-period="today" aria-pressed="true">Today</button>
+            <button class="secondary" type="button" data-business-period="week" aria-pressed="false">This week</button>
+            <button class="secondary" type="button" data-business-period="month" aria-pressed="false">This month</button>
+          </div>
+          <dl class="overview-grid" id="business-metrics-facts"></dl>
+          <p class="request-meta" id="business-metrics-manual"></p>
+          <p class="request-meta" id="business-metrics-status" role="status" aria-live="polite">Sign in to load activity.</p>
         </section>
         <section class="review-section" aria-labelledby="system-overview-title">
           <div class="panel-heading">
@@ -353,6 +380,25 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <p class="request-meta">Queued payment SMS waiting to upload: <strong id="system-overview-queued-sms">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
+        </section>
+        <section class="review-section" aria-labelledby="owner-users-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Customer directory</p>
+              <h2 id="owner-users-title">Bot users</h2>
+            </div>
+            <button class="secondary" id="owner-users-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">Search by exact Telegram ID. Usernames are not required or shown. Player IDs and credit totals are for Owner review only.</p>
+          <form id="owner-users-search-form" class="owner-users-search">
+            <label for="owner-users-search">Telegram ID</label>
+            <input id="owner-users-search" type="text" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="All users" />
+            <button type="submit">Search</button>
+            <button class="secondary" id="owner-users-clear" type="button">Clear</button>
+          </form>
+          <p class="request-meta" id="owner-users-status" role="status" aria-live="polite">Open Users to load the directory.</p>
+          <div id="owner-users-list" class="owner-users-list"></div>
+          <button class="secondary" id="owner-users-more" type="button" hidden>Load more</button>
         </section>
         <section class="review-section" aria-labelledby="receiver-sms-old-title">
           <div class="panel-heading">
@@ -1188,6 +1234,7 @@ h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
 .owner-view-intro p:last-child { margin: 0; color: #51656d; }
 .owner-view-intro { order: -1; }
 section[aria-labelledby="system-overview-title"],
+section[aria-labelledby="business-metrics-title"],
 section[aria-labelledby="routine-processing-title"] { order: 0; }
 section[aria-labelledby="receiver-sms-old-title"],
 section[aria-labelledby="receiver-sms-inbox-title"],
@@ -1246,6 +1293,15 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .overview-grid > div { min-width: 0; border: 1px solid #dbe5e8; border-radius: 10px; background: #fbfdfd; padding: 12px; }
 .overview-grid dt { color: #60757e; font-size: .76rem; line-height: 1.35; }
 .overview-grid dd { margin: 6px 0 0; color: #173039; font-weight: 800; overflow-wrap: anywhere; }
+.business-periods { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.business-periods button { width: auto; min-width: 100px; }
+.business-periods button[aria-pressed="true"] { color: #075f55; background: #d9efea; }
+.owner-users-search { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 16px 0; }
+.owner-users-search label { flex-basis: 100%; }
+.owner-users-search input { flex: 1 1 220px; min-width: 0; }
+.owner-users-search button { width: auto; }
+.owner-users-list { display: grid; gap: 10px; }
+.owner-users-list .transaction-facts { margin-bottom: 0; }
 .waiting-badge { display: inline-block; margin-left: 8px; border-radius: 99px; background: #fcd34d; color: #211b0e; padding: 3px 9px; font-size: .72rem; vertical-align: middle; letter-spacing: 0; }
 .sms-inbox-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 10px; margin-top: 14px; }
 .sms-inbox-filters > div { display: grid; gap: 6px; min-width: 0; }
@@ -1327,8 +1383,13 @@ const ownerViewDescription = document.querySelector('#owner-view-description');
 const ownerViews = {
   home: {
     title: 'Overview',
-    description: 'See service health and work that needs attention.',
-    sections: ['system-overview-title'],
+    description: 'See customer activity, confirmed credits, and service health.',
+    sections: ['business-metrics-title', 'system-overview-title'],
+  },
+  users: {
+    title: 'Users',
+    description: 'Find bot users by Telegram ID and review their Player IDs and confirmed credits.',
+    sections: ['owner-users-title'],
   },
   sms: {
     title: 'SMS',
@@ -1415,6 +1476,8 @@ function showOwnerView(view, focusHeading = false) {
   ownerViewDescription.textContent = details.description;
   if (focusHeading) ownerViewTitle.focus();
   if (selectedView === 'sms' && accessToken) void loadReceiverSmsInbox(true);
+  if (selectedView === 'home' && focusHeading && accessToken) void loadBusinessMetrics();
+  if (selectedView === 'users' && accessToken) void loadOwnerUsers(true);
   if (selectedView === 'system' && accessToken) void loadKemerbetSignin();
 }
 for (const view of Object.keys(ownerViews)) {
@@ -1459,6 +1522,25 @@ const systemOverviewTelebirrPhone = document.querySelector('#system-overview-tel
 const systemOverviewCbePhone = document.querySelector('#system-overview-cbe-phone');
 const systemOverviewQueuedSms = document.querySelector('#system-overview-queued-sms');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
+const businessMetricsRefresh = document.querySelector('#business-metrics-refresh');
+const businessMetricsFacts = document.querySelector('#business-metrics-facts');
+const businessMetricsManual = document.querySelector('#business-metrics-manual');
+const businessMetricsStatus = document.querySelector('#business-metrics-status');
+const businessPeriodButtons = ['today', 'week', 'month'].map((period) =>
+  document.querySelector('[data-business-period="' + period + '"]'));
+const ownerUsersRefresh = document.querySelector('#owner-users-refresh');
+const ownerUsersSearchForm = document.querySelector('#owner-users-search-form');
+const ownerUsersSearch = document.querySelector('#owner-users-search');
+const ownerUsersClear = document.querySelector('#owner-users-clear');
+const ownerUsersStatus = document.querySelector('#owner-users-status');
+const ownerUsersList = document.querySelector('#owner-users-list');
+const ownerUsersMore = document.querySelector('#owner-users-more');
+let latestBusinessMetrics;
+let selectedBusinessPeriod = 'today';
+let businessMetricsLoadGeneration = 0;
+let ownerUsersLoadGeneration = 0;
+let ownerUsersOffset = 0;
+let ownerUsersAppliedSearch = null;
 let systemOverviewLoadGeneration = 0;
 let systemOverviewPollTimer;
 let latestDeviceHealth = null;
@@ -4233,6 +4315,19 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxList.replaceChildren();
   receiverSmsInboxStatus.textContent = 'Sign in to load received payments.';
   receiverSmsInboxMore.hidden = true;
+  businessMetricsLoadGeneration += 1;
+  latestBusinessMetrics = undefined;
+  selectedBusinessPeriod = 'today';
+  businessMetricsFacts.replaceChildren();
+  businessMetricsManual.textContent = '';
+  businessMetricsStatus.textContent = 'Sign in to load activity.';
+  ownerUsersLoadGeneration += 1;
+  ownerUsersOffset = 0;
+  ownerUsersAppliedSearch = null;
+  ownerUsersSearch.value = '';
+  ownerUsersList.replaceChildren();
+  ownerUsersMore.hidden = true;
+  ownerUsersStatus.textContent = 'Open Users to load the directory.';
   systemOverviewLoadGeneration += 1;
   latestSystemOverview = undefined;
   systemOverviewCompanion.textContent = 'Sign in to check.';
@@ -7686,6 +7781,194 @@ function renderOwnerAlerts() {
     : 'No issues detected in monitored work.';
 }
 
+function validReportCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validReportMinor(value) {
+  return typeof value === 'string' && /^(0|[1-9][0-9]{0,23})$/u.test(value);
+}
+
+function validBusinessPeriod(value) {
+  return value && typeof value === 'object' &&
+    validReportCount(value.newUsers) &&
+    validReportCount(value.automaticCredits) &&
+    validReportMinor(value.automaticAmountMinor) &&
+    validReportCount(value.manualRecords) &&
+    validReportMinor(value.manualRecordedAmountMinor);
+}
+
+function validBusinessMetrics(value) {
+  return value && typeof value === 'object' &&
+    value.timeZone === 'Africa/Addis_Ababa' &&
+    typeof value.checkedAt === 'string' && Number.isFinite(Date.parse(value.checkedAt)) &&
+    validReportCount(value.registeredUsers) &&
+    ['today', 'week', 'month'].every((period) => validBusinessPeriod(value[period])) &&
+    value.today.newUsers <= value.week.newUsers &&
+    value.today.newUsers <= value.month.newUsers &&
+    value.month.newUsers <= value.registeredUsers;
+}
+
+function reportEtb(minor) {
+  const amount = BigInt(minor);
+  const whole = (amount / 100n).toLocaleString('en-US');
+  const cents = String(amount % 100n).padStart(2, '0');
+  return whole + '.' + cents + ' ETB';
+}
+
+function businessFact(label, value) {
+  const item = document.createElement('div');
+  transactionFact(item, label, value);
+  businessMetricsFacts.append(item);
+}
+
+function renderBusinessMetrics() {
+  businessPeriodButtons.forEach((button, index) => {
+    const selected = ['today', 'week', 'month'][index] === selectedBusinessPeriod;
+    button.setAttribute?.('aria-pressed', selected ? 'true' : 'false');
+    button.dataset.active = selected ? 'true' : 'false';
+  });
+  if (!latestBusinessMetrics) return;
+  const value = latestBusinessMetrics[selectedBusinessPeriod];
+  businessMetricsFacts.replaceChildren();
+  businessFact('Registered bot users', latestBusinessMetrics.registeredUsers.toLocaleString('en-US'));
+  businessFact('New users', value.newUsers.toLocaleString('en-US'));
+  businessFact('Confirmed automatic credits', value.automaticCredits.toLocaleString('en-US'));
+  businessFact('Automatically credited', reportEtb(value.automaticAmountMinor));
+  businessMetricsManual.textContent = 'Owner-recorded manual-credit cases: ' +
+    value.manualRecords.toLocaleString('en-US') + ' records · ' +
+    reportEtb(value.manualRecordedAmountMinor) +
+    '. These recorded outcomes can include outside resolutions and are excluded from confirmed automatic totals.';
+  businessMetricsStatus.textContent = 'Checked ' + transactionDate(latestBusinessMetrics.checkedAt) +
+    ' · Ethiopia time. Week starts Monday.';
+}
+
+async function loadBusinessMetrics() {
+  if (!accessToken) return;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++businessMetricsLoadGeneration;
+  businessMetricsRefresh.disabled = true;
+  businessMetricsStatus.textContent = 'Loading activity…';
+  try {
+    const response = await ownerRequest('/v1/owner/business-metrics', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('business_metrics');
+    const value = await response.json();
+    if (!validBusinessMetrics(value)) throw new Error('business_metrics');
+    if (generation !== ownerAuthGeneration || loadGeneration !== businessMetricsLoadGeneration ||
+        !accessToken) return;
+    latestBusinessMetrics = value;
+    renderBusinessMetrics();
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === businessMetricsLoadGeneration &&
+        !isSignedOutError(error))
+      businessMetricsStatus.textContent = 'Activity is unavailable. Refresh to try again.';
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === businessMetricsLoadGeneration)
+      businessMetricsRefresh.disabled = false;
+  }
+}
+
+function validOwnerUser(value) {
+  return value && typeof value === 'object' &&
+    typeof value.telegramId === 'string' && /^[1-9][0-9]{0,19}$/u.test(value.telegramId) &&
+    ['active', 'inactive', 'blocked', 'archived'].includes(value.status) &&
+    typeof value.joinedAt === 'string' && Number.isFinite(Date.parse(value.joinedAt)) &&
+    (value.lastActiveAt === null ||
+      (typeof value.lastActiveAt === 'string' && Number.isFinite(Date.parse(value.lastActiveAt)))) &&
+    validReportCount(value.playerCount) && Array.isArray(value.playerIds) &&
+    value.playerIds.length <= 5 && value.playerIds.length <= value.playerCount &&
+    value.playerIds.every((id) => typeof id === 'string' &&
+      /^[^\s\u0000-\u001f\u007f]{1,64}$/u.test(id)) &&
+    validReportCount(value.automaticCredits) && validReportMinor(value.automaticAmountMinor);
+}
+
+function renderOwnerUser(value) {
+  const card = document.createElement('article');
+  card.className = 'request-card';
+  const title = document.createElement('h3');
+  title.textContent = 'Telegram ID ' + value.telegramId;
+  const facts = document.createElement('dl');
+  facts.className = 'transaction-facts';
+  transactionFact(facts, 'Account status', value.status);
+  transactionFact(facts, 'Joined', transactionDate(value.joinedAt));
+  transactionFact(facts, 'Last bot activity', value.lastActiveAt ?
+    transactionDate(value.lastActiveAt) : 'No activity recorded');
+  transactionFact(facts, 'Player IDs', value.playerIds.length ?
+    value.playerIds.join(', ') + (value.playerCount > value.playerIds.length
+      ? ' · ' + (value.playerCount - value.playerIds.length) + ' more' : '') : 'None saved');
+  transactionFact(facts, 'Confirmed automatic credits',
+    value.automaticCredits.toLocaleString('en-US') + ' · ' +
+    reportEtb(value.automaticAmountMinor));
+  card.append(title, facts);
+  return card;
+}
+
+async function loadOwnerUsers(reset) {
+  if (!accessToken) return;
+  const input = ownerUsersSearch.value.trim();
+  if (reset && input && !/^[1-9][0-9]{0,19}$/u.test(input)) {
+    ownerUsersStatus.textContent = 'Enter an exact numeric Telegram ID, or clear the field.';
+    return;
+  }
+  const search = reset ? (input || null) : ownerUsersAppliedSearch;
+  const offset = reset ? 0 : ownerUsersOffset;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++ownerUsersLoadGeneration;
+  ownerUsersRefresh.disabled = true;
+  ownerUsersMore.disabled = true;
+  ownerUsersStatus.textContent = 'Loading users…';
+  try {
+    const query = 'limit=25&offset=' + offset +
+      (search ? '&telegramId=' + encodeURIComponent(search) : '');
+    const response = await ownerRequest('/v1/owner/users?' + query,
+      { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('owner_users');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.users) || payload.users.length > 25 ||
+        typeof payload.hasMore !== 'boolean' ||
+        !payload.users.every(validOwnerUser) || (payload.hasMore && payload.users.length !== 25))
+      throw new Error('owner_users');
+    if (generation !== ownerAuthGeneration || loadGeneration !== ownerUsersLoadGeneration ||
+        !accessToken) return;
+    if (reset) {
+      ownerUsersList.replaceChildren();
+      ownerUsersAppliedSearch = search;
+    }
+    for (const value of payload.users) ownerUsersList.append(renderOwnerUser(value));
+    ownerUsersOffset = offset + payload.users.length;
+    ownerUsersMore.hidden = !payload.hasMore || ownerUsersOffset > 10000;
+    ownerUsersStatus.textContent = ownerUsersOffset === 0
+      ? (search ? 'No user found for this Telegram ID.' : 'No bot users yet.')
+      : 'Showing ' + ownerUsersOffset + (search ? ' matching user.' :
+          ' bot users, newest first.');
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === ownerUsersLoadGeneration &&
+        !isSignedOutError(error))
+      ownerUsersStatus.textContent = 'Users are unavailable. Refresh to try again.';
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === ownerUsersLoadGeneration) {
+      ownerUsersRefresh.disabled = false;
+      ownerUsersMore.disabled = false;
+    }
+  }
+}
+
+businessMetricsRefresh.addEventListener('click', () => void loadBusinessMetrics());
+businessPeriodButtons.forEach((button, index) => button.addEventListener('click', () => {
+  selectedBusinessPeriod = ['today', 'week', 'month'][index];
+  renderBusinessMetrics();
+}));
+ownerUsersRefresh.addEventListener('click', () => void loadOwnerUsers(true));
+ownerUsersMore.addEventListener('click', () => void loadOwnerUsers(false));
+ownerUsersSearchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void loadOwnerUsers(true);
+});
+ownerUsersClear.addEventListener('click', () => {
+  ownerUsersSearch.value = '';
+  void loadOwnerUsers(true);
+});
+
 async function loadSystemOverview() {
   if (!accessToken) return;
   const generation = ownerAuthGeneration;
@@ -8720,6 +9003,7 @@ async function loadOwnerPlayerQueues() {
     // change Player, receiver, readiness, or pilot state.
     await loadKemerbetAgentProfiles();
     await Promise.all([
+      loadBusinessMetrics(),
       loadSystemOverview(),
       loadPlayerRequests(),
       loadAssociationCandidates(),
